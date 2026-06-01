@@ -14,6 +14,9 @@ if (!secretKey) {
   );
 }
 
-export const admin: SupabaseClient = createClient(url, secretKey, {
+const cleanUrl = url.trim().replace(/^﻿/, "");
+const cleanKey = secretKey.trim().replace(/^﻿/, "");
+
+export const admin: SupabaseClient = createClient(cleanUrl, cleanKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
