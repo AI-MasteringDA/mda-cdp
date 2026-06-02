@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   Flame,
+  Thermometer,
   Snowflake,
   Users,
   Settings,
@@ -32,6 +33,7 @@ type NavItem = { href: string; label: string; icon: React.ComponentType<{ classN
 const COCKPIT: NavItem[] = [
   { href: "/dashboard", label: "Tổng quan", icon: LayoutDashboard },
   { href: "/hot-leads", label: "Lead nóng", icon: Flame },
+  { href: "/warm-leads", label: "Lead ấm", icon: Thermometer },
   { href: "/cold-leads", label: "Lead nguội", icon: Snowflake },
   { href: "/leads", label: "Tất cả lead", icon: Users },
 ];

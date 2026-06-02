@@ -63,6 +63,35 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
   };
 }
 
+export async function getWarmLeads(limit = 200): Promise<Lead[]> {
+  const supabase = await createClient();
+
+  const { data: scores } = await supabase
+    .from("fact_lead_score")
+    .select("*")
+    .eq("scored_at", new Date().toISOString().slice(0, 10))
+    .gte("hot_score", 40)
+    .lt("hot_score", 70)
+    .order("hot_score", { ascending: false })
+    .limit(limit);
+  if (!scores || scores.length === 0) return [];
+
+  const leadIds = scores.map((s) => s.lead_id);
+  const { data: leads } = await supabase
+    .from("dim_lead")
+    .select("*")
+    .in("lead_id", leadIds);
+  if (!leads) return [];
+
+  const leadMap = new Map(leads.map((l) => [l.lead_id, l]));
+  return scores
+    .map((s) => {
+      const lead = leadMap.get(s.lead_id);
+      return lead ? mergeToLead(lead, s) : null;
+    })
+    .filter((x): x is Lead => x !== null);
+}
+
 export async function getHotLeads(limit = 50): Promise<Lead[]> {
   const supabase = await createClient();
 
