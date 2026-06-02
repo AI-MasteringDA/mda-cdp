@@ -388,9 +388,10 @@ export async function pullFromInstantlyReal() {
           .filter(Boolean) as string[]
       );
 
-      const newTouchpoints = touchpoints.filter(
-        (t) => !existingRawIds.has((t.payload as { raw_id: string }).raw_id)
-      );
+      const newTouchpoints = touchpoints.filter((t) => {
+        const rawId = (t.payload as { raw_id?: string } | undefined)?.raw_id;
+        return rawId ? !existingRawIds.has(rawId) : true;
+      });
       const skipped = touchpoints.length - newTouchpoints.length;
       if (skipped > 0) {
         console.log(`   ↳ Skip ${skipped} touchpoint đã tồn tại (dedupe by raw_id)`);
