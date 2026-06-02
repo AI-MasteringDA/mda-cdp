@@ -13,7 +13,13 @@ function getClient(): Anthropic {
   return _client;
 }
 
-export const AI_MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001";
+export const AI_MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
+
+const FALLBACK_MODELS = [
+  "claude-haiku-4-5",
+  "claude-3-5-haiku-latest",
+  "claude-3-5-haiku-20241022",
+];
 
 export type LeadInsight = {
   summary: string;
@@ -97,8 +103,22 @@ function formatLeadContext(ctx: LeadContext): string {
   return lines.join("\n");
 }
 
+async function tryModels(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> {
+  const tried: string[] = [];
+  for (const model of FALLBACK_MODELS) {
+    try {
+      return await getClient().messages.create({ ...params, model });
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      tried.push(`${model}: ${err.message.slice(0, 80)}`);
+      if (err.status !== 404) throw e; // re-throw non-404 errors immediately
+    }
+  }
+  throw new Error(`All Haiku models failed:\n${tried.join("\n")}`);
+}
+
 export async function generateLeadInsight(ctx: LeadContext): Promise<LeadInsight> {
-  const message = await getClient().messages.create({
+  const message = await tryModels({
     model: AI_MODEL,
     max_tokens: 800,
     system: [
