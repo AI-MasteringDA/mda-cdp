@@ -73,12 +73,15 @@ function eventTitle(type: string, subject?: string): string {
 }
 
 export async function POST(request: NextRequest) {
-  // 1. Verify secret token from query string
+  // 1. Verify secret token from query string (trim to handle env var newlines)
   const { searchParams } = new URL(request.url);
-  const providedSecret = searchParams.get("secret");
-  const expectedSecret = process.env.INSTANTLY_WEBHOOK_SECRET;
+  const providedSecret = searchParams.get("secret")?.trim();
+  const expectedSecret = process.env.INSTANTLY_WEBHOOK_SECRET?.trim();
   if (expectedSecret && providedSecret !== expectedSecret) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({
+      error: "Unauthorized",
+      hint: `Provided length: ${providedSecret?.length}, expected length: ${expectedSecret.length}`,
+    }, { status: 401 });
   }
 
   // 2. Parse payload
