@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Sparkles, Phone, Mail, Gift, Clock, Archive, RefreshCw, AlertCircle } from "lucide-react";
+import { useState } from "react";
+import { Sparkles, Phone, Mail, Gift, Clock, Archive, RefreshCw, AlertCircle, Wand2 } from "lucide-react";
 
 type Insight = {
   summary: string;
@@ -13,25 +13,25 @@ type Insight = {
 
 const ACTION_META: Record<
   Insight["action"],
-  { icon: React.ComponentType<{ className?: string; strokeWidth?: number }>; color: string; bg: string }
+  { icon: React.ComponentType<{ className?: string; strokeWidth?: number }>; bg: string }
 > = {
-  "GỌI NGAY":            { icon: Phone,   color: "#fff", bg: "#ff3b30" },
-  "EMAIL CÁ NHÂN HÓA":   { icon: Mail,    color: "#fff", bg: "#ff9500" },
-  "GỬI VOUCHER":         { icon: Gift,    color: "#fff", bg: "#34c759" },
-  "FOLLOW-UP NHẸ":       { icon: Clock,   color: "#fff", bg: "#5ac8fa" },
-  "ARCHIVE":             { icon: Archive, color: "#fff", bg: "#8e8e93" },
+  "GỌI NGAY":            { icon: Phone,   bg: "#ff3b30" },
+  "EMAIL CÁ NHÂN HÓA":   { icon: Mail,    bg: "#ff9500" },
+  "GỬI VOUCHER":         { icon: Gift,    bg: "#34c759" },
+  "FOLLOW-UP NHẸ":       { icon: Clock,   bg: "#5ac8fa" },
+  "ARCHIVE":             { icon: Archive, bg: "#8e8e93" },
 };
 
 export function AiInsightsPanel({ leadId }: { leadId: string }) {
   const [insight, setInsight] = useState<Insight | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function load(force = false) {
+  async function analyze() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/ai/lead-insights/${leadId}${force ? "?refresh=1" : ""}`);
+      const res = await fetch(`/api/ai/lead-insights/${leadId}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
       setInsight(data.insight);
@@ -42,11 +42,38 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
     }
   }
 
-  useEffect(() => {
-    load(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadId]);
+  // EMPTY STATE — chưa phân tích
+  if (!insight && !loading && !error) {
+    return (
+      <div className="sticky top-20 rounded-2xl bg-surface p-5">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-foreground" strokeWidth={1.75} />
+          <h3 className="text-[14px] font-semibold tracking-tight">AI Insights</h3>
+          <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-2 font-medium">
+            Claude Haiku 4.5
+          </span>
+        </div>
 
+        <p className="mt-3 text-[12px] text-muted leading-relaxed">
+          Claude sẽ đọc timeline + score → tóm tắt tình trạng lead + đề xuất hành động + 3 talking points cụ thể.
+        </p>
+
+        <button
+          onClick={analyze}
+          className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-foreground text-[13px] font-medium text-white transition-opacity hover:opacity-90"
+        >
+          <Wand2 className="h-4 w-4" strokeWidth={2} />
+          Phân tích lead này
+        </button>
+
+        <div className="mt-3 text-[10px] text-muted-2 text-center leading-relaxed">
+          ~3-5 giây · chi phí ~50đ / lần
+        </div>
+      </div>
+    );
+  }
+
+  // LOADING STATE
   if (loading) {
     return (
       <div className="sticky top-20 rounded-2xl bg-surface p-5">
@@ -64,6 +91,7 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
     );
   }
 
+  // ERROR STATE
   if (error) {
     return (
       <div className="sticky top-20 rounded-2xl bg-surface p-5">
@@ -71,9 +99,9 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
           <AlertCircle className="h-4 w-4 text-[#ff3b30]" strokeWidth={1.75} />
           <h3 className="text-[14px] font-semibold tracking-tight">Lỗi AI</h3>
         </div>
-        <p className="mt-3 text-[12px] text-muted leading-relaxed">{error}</p>
+        <p className="mt-3 text-[12px] text-muted leading-relaxed break-words">{error}</p>
         <button
-          onClick={() => load(true)}
+          onClick={analyze}
           className="mt-3 flex items-center gap-1.5 text-[12px] font-medium text-[var(--accent)] hover:underline"
         >
           <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.75} />
@@ -83,8 +111,8 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
     );
   }
 
+  // SUCCESS STATE — insight rendered
   if (!insight) return null;
-
   const ActionIcon = ACTION_META[insight.action].icon;
 
   return (
@@ -93,8 +121,8 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
         <Sparkles className="h-4 w-4 text-foreground" strokeWidth={1.75} />
         <h3 className="text-[14px] font-semibold tracking-tight">AI Insights</h3>
         <button
-          onClick={() => load(true)}
-          title="Refresh"
+          onClick={analyze}
+          title="Phân tích lại"
           className="ml-auto rounded p-1 text-muted-2 hover:bg-white hover:text-foreground"
         >
           <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.75} />
@@ -149,7 +177,7 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
             {insight.talking_points.map((s, i) => (
               <li key={i} className="flex gap-2 text-[12px] text-foreground leading-relaxed">
                 <span className="font-medium text-muted-2 shrink-0">{i + 1}.</span>
-                <span>"{s}"</span>
+                <span>&quot;{s}&quot;</span>
               </li>
             ))}
           </ul>
