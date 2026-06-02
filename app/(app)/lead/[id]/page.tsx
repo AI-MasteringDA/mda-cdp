@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronRight, Sparkles, Lock } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import { Avatar } from "@/components/ui/Avatar";
 import { Chip, ScoreBadge, TierChip } from "@/components/ui/Chip";
 import { Timeline } from "@/components/Timeline";
+import { AiInsightsPanel } from "@/components/AiInsightsPanel";
 import { getLeadById } from "@/lib/supabase/queries";
 
 export const dynamic = "force-dynamic";
@@ -134,37 +135,7 @@ export default async function LeadDetailPage({
           </section>
 
           <aside className="lg:col-span-1">
-            <div className="sticky top-20 rounded-2xl bg-surface p-5">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-foreground" strokeWidth={1.75} />
-                <h3 className="text-[14px] font-semibold tracking-tight">
-                  Gợi ý chăm sóc
-                </h3>
-                <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-2 font-medium">
-                  V3
-                </span>
-              </div>
-
-              <div className="mt-6 flex flex-col items-center text-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white">
-                  <Lock className="h-5 w-5 text-muted" strokeWidth={1.5} />
-                </div>
-                <h4 className="mt-3 text-[14px] font-semibold">
-                  Chưa cấu hình Claude AI
-                </h4>
-                <p className="mt-2 text-[12px] text-muted leading-relaxed">
-                  Phần này sẽ sinh email/tin nhắn cá nhân hóa dựa hồ sơ 360°
-                  + 50 touchpoints gần nhất. Cần ANTHROPIC_API_KEY + template
-                  trong DB.
-                </p>
-                <a
-                  href="/templates"
-                  className="mt-4 text-[12px] font-medium text-[var(--accent)] hover:underline"
-                >
-                  Cài đặt Templates AI →
-                </a>
-              </div>
-            </div>
+            <AiInsightsPanel leadId={lead.id} />
           </aside>
         </div>
       </main>
