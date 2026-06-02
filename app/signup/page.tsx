@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Sparkles, CheckCircle2 } from "lucide-react";
-import { signInWithMagicLink } from "./actions";
+import { signUpWithMagicLink } from "./actions";
 
-export default function LoginPage() {
+export default function SignupPage() {
   const [pending, setPending] = useState(false);
   const [sent, setSent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -12,7 +13,7 @@ export default function LoginPage() {
   async function handleSubmit(formData: FormData) {
     setPending(true);
     setError(null);
-    const result = await signInWithMagicLink(formData);
+    const result = await signUpWithMagicLink(formData);
     setPending(false);
     if (result?.error) setError(result.error);
     else if (result?.success) setSent(result.email);
@@ -26,66 +27,56 @@ export default function LoginPage() {
             <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground">
               <Sparkles className="h-4 w-4 text-white" strokeWidth={1.75} />
             </div>
-            <span className="text-[14px] font-semibold tracking-tight">
-              MDA Platform
-            </span>
+            <span className="text-[14px] font-semibold tracking-tight">MDA Platform</span>
           </div>
 
           {sent ? (
             <div className="space-y-4">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#dcfce7]">
-                <CheckCircle2
-                  className="h-6 w-6 text-[var(--success)]"
-                  strokeWidth={1.75}
-                />
+                <CheckCircle2 className="h-6 w-6 text-[var(--success)]" strokeWidth={1.75} />
               </div>
-              <h1 className="text-[28px] font-semibold tracking-tight">
-                Kiểm tra email
-              </h1>
+              <h1 className="text-[28px] font-semibold tracking-tight">Kiểm tra email</h1>
               <p className="text-[14px] text-muted leading-relaxed">
-                Một liên kết đăng nhập đã được gửi đến{" "}
-                <strong className="text-foreground">{sent}</strong>. Click link
-                để vào dashboard.
+                Link kích hoạt workspace đã gửi đến <strong className="text-foreground">{sent}</strong>.
+                Click vào link để vào dashboard. Lần đầu đăng nhập, hệ thống sẽ tự tạo workspace riêng cho bạn.
               </p>
               <p className="text-[12px] text-muted-2">
-                Không thấy mail? Kiểm tra thư mục Spam, hoặc{" "}
-                <button
-                  onClick={() => setSent(null)}
-                  className="text-[var(--accent)] hover:underline"
-                >
+                Không thấy mail? Kiểm tra Spam, hoặc{" "}
+                <button onClick={() => setSent(null)} className="text-[var(--accent)] hover:underline">
                   thử lại
-                </button>
-                .
+                </button>.
               </p>
             </div>
           ) : (
             <>
-              <h1 className="text-[32px] font-semibold tracking-tight">
-                Đăng nhập
-              </h1>
+              <h1 className="text-[32px] font-semibold tracking-tight">Tạo workspace</h1>
               <p className="mt-2 text-[14px] text-muted">
-                Nhập email công ty — chúng tôi gửi link đăng nhập, không cần
-                mật khẩu.
+                Mỗi email = 1 workspace riêng. Data hoàn toàn cách ly với account khác.
               </p>
 
               <form action={handleSubmit} className="mt-8 space-y-4">
                 <div>
-                  <label className="text-[12px] font-medium text-foreground">
-                    Email công ty
-                  </label>
+                  <label className="text-[12px] font-medium text-foreground">Tên workspace (tùy chọn)</label>
+                  <input
+                    type="text"
+                    name="workspace_name"
+                    placeholder="VD: Công ty TNHH ABC"
+                    className="mt-1.5 h-11 w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 text-[14px] outline-none transition-colors placeholder:text-muted-2 focus:border-[var(--accent)]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[12px] font-medium text-foreground">Email</label>
                   <input
                     type="email"
                     name="email"
                     required
-                    placeholder="ban@mastering-da.com"
+                    placeholder="you@company.com"
                     className="mt-1.5 h-11 w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 text-[14px] outline-none transition-colors placeholder:text-muted-2 focus:border-[var(--accent)]"
                   />
                 </div>
 
                 {error && (
-                  <div className="rounded-lg bg-[#fff5f5] p-3 text-[12px] text-[var(--hot)]">
-                    {error}
-                  </div>
+                  <div className="rounded-lg bg-[#fff5f5] p-3 text-[12px] text-[var(--hot)]">{error}</div>
                 )}
 
                 <button
@@ -93,20 +84,23 @@ export default function LoginPage() {
                   disabled={pending}
                   className="mt-2 flex h-11 w-full items-center justify-center rounded-lg bg-foreground text-[14px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
                 >
-                  {pending ? "Đang gửi..." : "Gửi link đăng nhập"}
+                  {pending ? "Đang gửi..." : "Tạo workspace + gửi link"}
                 </button>
               </form>
+
+              <div className="mt-6 text-center text-[12px] text-muted">
+                Đã có workspace?{" "}
+                <Link href="/login" className="font-medium text-foreground hover:underline">
+                  Đăng nhập
+                </Link>
+              </div>
             </>
           )}
         </div>
       </main>
 
       <footer className="py-6 text-center text-[11px] text-muted-2">
-        Chưa có workspace?{" "}
-        <a href="/signup" className="font-medium text-foreground hover:underline">
-          Tạo mới
-        </a>
-        {" · "}© 2026 MDA Platform · Multi-tenant CDP
+        © 2026 MDA Platform · Multi-tenant CDP
       </footer>
     </div>
   );

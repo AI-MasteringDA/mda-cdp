@@ -9,6 +9,7 @@ import {
   Snowflake,
   Moon,
   Users,
+  LogOut,
   Settings,
   Sparkles,
   Plug,
@@ -101,8 +102,20 @@ function NavGroup({
   );
 }
 
-export function Sidebar() {
+export function Sidebar({
+  user,
+  workspaceName,
+}: {
+  user?: { email?: string };
+  workspaceName?: string;
+}) {
   const pathname = usePathname();
+  const userName = user?.email?.split("@")[0] || "User";
+
+  async function handleSignOut() {
+    const res = await fetch("/api/auth/sign-out", { method: "POST" });
+    if (res.ok) window.location.href = "/login";
+  }
 
   return (
     <aside className="hairline-r flex h-screen w-[240px] shrink-0 flex-col bg-white sticky top-0">
@@ -112,7 +125,9 @@ export function Sidebar() {
         </div>
         <div>
           <div className="text-[13px] font-semibold leading-tight">MDA Platform</div>
-          <div className="text-[10px] text-muted-2 leading-tight">Cockpit + Growth</div>
+          <div className="text-[10px] text-muted-2 leading-tight truncate max-w-[160px]">
+            {workspaceName || "Workspace"}
+          </div>
         </div>
       </div>
 
@@ -125,11 +140,18 @@ export function Sidebar() {
 
       <div className="px-3 py-3 border-t border-[var(--border-subtle)]">
         <div className="flex items-center gap-3 rounded-lg px-2 py-2">
-          <Avatar name="Phương Thảo" color="#FFE3F0" size={32} />
-          <div className="min-w-0">
-            <div className="truncate text-[13px] font-medium">Phương Thảo</div>
-            <div className="truncate text-[11px] text-muted-2">Manager</div>
+          <Avatar name={userName} color="#FFE3F0" size={32} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13px] font-medium">{userName}</div>
+            <div className="truncate text-[11px] text-muted-2">{user?.email}</div>
           </div>
+          <button
+            onClick={handleSignOut}
+            title="Đăng xuất"
+            className="rounded-md p-1.5 text-muted hover:bg-subtle hover:text-foreground"
+          >
+            <LogOut className="h-4 w-4" strokeWidth={1.75} />
+          </button>
         </div>
       </div>
     </aside>
