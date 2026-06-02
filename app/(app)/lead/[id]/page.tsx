@@ -46,13 +46,34 @@ export default async function LeadDetailPage({
                 <Chip variant="outline">{lead.stage}</Chip>
               </div>
               <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted">
-                <span>{lead.email}</span>
-                <span className="text-muted-2">·</span>
-                <span>{lead.phone}</span>
-                <span className="text-muted-2">·</span>
-                <span>Nguồn: {lead.source}</span>
-                <span className="text-muted-2">·</span>
-                <span>TVV phụ trách: {lead.assignee}</span>
+                {lead.email && <span>{lead.email}</span>}
+                {lead.email && lead.phone && <span className="text-muted-2">·</span>}
+                {lead.phone && <span>{lead.phone}</span>}
+              </div>
+              {lead.company && (
+                <div className="mt-1 text-[13px] text-muted">
+                  🏢 {lead.company}
+                </div>
+              )}
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-2">
+                <span>
+                  Nguồn:{" "}
+                  <span className="font-medium text-foreground">{lead.source}</span>
+                  {lead.leadSource && (
+                    <span className="ml-1">
+                      ({lead.leadSource})
+                    </span>
+                  )}
+                </span>
+                {lead.assignee && lead.assignee !== "—" && (
+                  <>
+                    <span>·</span>
+                    <span>
+                      TVV phụ trách:{" "}
+                      <span className="font-medium text-foreground">{lead.assignee}</span>
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 

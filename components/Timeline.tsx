@@ -2,26 +2,38 @@ import {
   Mail,
   MousePointerClick,
   MessageCircle,
+  MessageSquareReply,
   Eye,
   Phone,
   FileText,
   Send,
   Reply,
-  Activity,
+  UserPlus,
+  Trophy,
+  XCircle,
+  Calendar,
+  Paperclip,
 } from "lucide-react";
 import type { Touchpoint, LeadSource } from "@/types/lead";
 import { Chip } from "./ui/Chip";
 import { formatRelativeVi } from "@/lib/utils";
 
 const ICONS: Record<string, React.ComponentType<{ className?: string; strokeWidth?: number }>> = {
+  lead_created: UserPlus,
   email_open: Mail,
   email_click: MousePointerClick,
   email_sent: Send,
   email_reply: Reply,
   chat: MessageCircle,
+  chat_staff: MessageSquareReply,
   page_view: Eye,
   call: Phone,
+  meeting: Calendar,
+  note: FileText,
   form_submit: FileText,
+  conversion: Trophy,
+  lost: XCircle,
+  attachment: Paperclip,
 };
 
 const SOURCE_LABEL: Record<LeadSource, string> = {
@@ -66,7 +78,7 @@ export function Timeline({ touchpoints }: { touchpoints: Touchpoint[] }) {
           </div>
           <div className="space-y-2">
             {group.items.map((t) => {
-              const Icon = ICONS[t.type] ?? Activity;
+              const Icon = ICONS[t.type] ?? MessageCircle;
               return (
                 <div
                   key={t.id}

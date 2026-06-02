@@ -11,6 +11,9 @@ type LeadRow = {
   stage: string;
   last_touch_at: string;
   first_seen_at: string;
+  company?: string | null;
+  assignee?: string | null;
+  lead_source?: string | null;
 };
 
 type ScoreRow = {
@@ -46,7 +49,9 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
     lastContactAt: new Date(row.last_touch_at ?? row.first_seen_at),
     firstSeenAt: new Date(row.first_seen_at),
     stage: row.stage as Lead["stage"],
-    assignee: "—",
+    assignee: row.assignee || "—",
+    company: row.company || null,
+    leadSource: row.lead_source || null,
     touchpoints: touchpoints.map<Touchpoint>((t) => ({
       id: t.id,
       source: t.source as Touchpoint["source"],
