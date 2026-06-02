@@ -53,8 +53,18 @@ function mapUeTypeToEvent(ueType: number | undefined): string {
   }
 }
 
+// Rate limit: Instantly allow 20 req/min → throttle 3.5s mỗi request
+let lastFetchAt = 0;
+const FETCH_INTERVAL_MS = 3500;
+
 async function instantlyFetch(path: string, params: Record<string, string> = {}) {
   if (!API_KEY) throw new Error("Thiếu INSTANTLY_API_KEY");
+
+  // Throttle
+  const wait = lastFetchAt + FETCH_INTERVAL_MS - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastFetchAt = Date.now();
+
   const url = new URL(`${BASE_URL}${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
@@ -64,6 +74,25 @@ async function instantlyFetch(path: string, params: Record<string, string> = {})
       "Content-Type": "application/json",
     },
   });
+
+  // Retry on 429 (rate limit)
+  if (res.status === 429) {
+    console.log(`   ⏸️  Rate limit hit, đợi 60s...`);
+    await new Promise((r) => setTimeout(r, 60_000));
+    return instantlyFetch(path, params);
+  }
+
+  // Retry on 5xx (server error tạm thời) với exponential backoff
+  if (res.status >= 500 && res.status < 600) {
+    const retries = (params._retry ? Number(params._retry) : 0);
+    if (retries < 3) {
+      const wait = (retries + 1) * 5_000;
+      console.log(`   ⏸️  Server error ${res.status}, retry sau ${wait/1000}s...`);
+      await new Promise((r) => setTimeout(r, wait));
+      return instantlyFetch(path, { ...params, _retry: String(retries + 1) });
+    }
+  }
+
   if (!res.ok) throw new Error(`Instantly API ${res.status}: ${await res.text()}`);
   return res.json();
 }
@@ -114,12 +143,19 @@ async function pullInstantlyLeadsMap(maxPages = 20): Promise<Map<string, { fullN
  * Dùng làm cutoff cho incremental pull.
  */
 async function getLastSuccessfulSync(): Promise<Date> {
+  // Force full backfill nếu INSTANTLY_FULL_BACKFILL=true
+  if (process.env.INSTANTLY_FULL_BACKFILL === "true") {
+    const daysBack = Number(process.env.INSTANTLY_DAYS_BACK || 365);
+    console.log(`   ⚙️  FULL BACKFILL mode: ${daysBack} ngày`);
+    return new Date(Date.now() - daysBack * 24 * 3600_000);
+  }
+
   const { data } = await admin
     .from("sync_job")
     .select("started_at")
     .eq("source", "instantly")
     .eq("status", "success")
-    .gt("records_merged", 0) // chỉ tính job có data thật
+    .gt("records_merged", 0)
     .order("started_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -127,8 +163,8 @@ async function getLastSuccessfulSync(): Promise<Date> {
   if (data?.started_at) {
     return new Date(data.started_at);
   }
-  // Lần đầu chạy: cutoff = 7 ngày trước
-  return new Date(Date.now() - 7 * 24 * 3600_000);
+  const daysBack = Number(process.env.INSTANTLY_DAYS_BACK || 7);
+  return new Date(Date.now() - daysBack * 24 * 3600_000);
 }
 
 export async function pullFromInstantlyReal() {
@@ -155,7 +191,7 @@ export async function pullFromInstantlyReal() {
     const collected: InstantlyEmail[] = [];
     let cursor: string | undefined;
     let page = 0;
-    const MAX_PAGES = 30;
+    const MAX_PAGES = 500;
 
     while (page < MAX_PAGES) {
       const params: Record<string, string> = { limit: "100" };

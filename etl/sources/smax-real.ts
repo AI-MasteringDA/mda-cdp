@@ -80,7 +80,7 @@ export async function pullFromSmaxReal() {
     const allThreads: SmaxThread[] = [];
     let skip = 0;
     const LIMIT = 100;
-    const MAX_PAGES = 20;  // ~2000 threads max
+    const MAX_PAGES = 200;  // ~20000 threads max
     let page = 0;
 
     while (page < MAX_PAGES) {
@@ -154,17 +154,24 @@ export async function pullFromSmaxReal() {
       });
 
     if (touchpoints.length > 0) {
-      // Check existing thread_ids để skip duplicates
-      const threadIds = touchpoints.map((t) => (t.payload as { thread_id: string }).thread_id);
-      const { data: existing } = await admin
-        .from("fact_touchpoint")
-        .select("payload")
-        .eq("source", "smax");
-      const existingThreadIds = new Set(
-        (existing || [])
-          .map((e) => (e.payload as { thread_id?: string })?.thread_id)
-          .filter(Boolean) as string[]
-      );
+      // PAGINATED fetch existing thread_ids (handle >1000 rows)
+      const existingThreadIds = new Set<string>();
+      let from = 0;
+      while (true) {
+        const { data, error } = await admin
+          .from("fact_touchpoint")
+          .select("payload")
+          .eq("source", "smax")
+          .range(from, from + 999);
+        if (error || !data || data.length === 0) break;
+        for (const t of data) {
+          const tid = (t.payload as { thread_id?: string })?.thread_id;
+          if (tid) existingThreadIds.add(tid);
+        }
+        if (data.length < 1000) break;
+        from += 1000;
+      }
+      console.log(`   ↳ Cache ${existingThreadIds.size} existing thread_ids`);
 
       const newTouchpoints = touchpoints.filter(
         (t) => !existingThreadIds.has((t.payload as { thread_id: string }).thread_id)
@@ -175,22 +182,28 @@ export async function pullFromSmaxReal() {
       }
 
       if (newTouchpoints.length > 0) {
-        const BATCH = 500;
+        const BATCH = 100;
         let inserted = 0;
+        let failed = 0;
         for (let i = 0; i < newTouchpoints.length; i += BATCH) {
           const batch = newTouchpoints.slice(i, i + BATCH);
           const { error } = await admin.from("fact_touchpoint").insert(batch);
           if (error) {
-            console.warn(`⚠️ Batch ${i} insert error: ${error.message}`);
+            // Fallback: one-by-one để skip rows bị conflict
+            for (const tp of batch) {
+              const { error: e } = await admin.from("fact_touchpoint").insert([tp]);
+              if (!e) inserted++;
+              else failed++;
+            }
             continue;
           }
           inserted += batch.length;
         }
+        if (failed > 0) console.log(`   ⚠️ ${failed} touchpoint skip do conflict`);
         console.log(`✅ [SMAX REAL] Insert ${inserted} fact_touchpoint mới từ ${allThreads.length} threads`);
       } else {
         console.log(`✅ [SMAX REAL] 0 touchpoint mới — DB đã up-to-date`);
       }
-      void threadIds;
     }
 
     await admin

@@ -6,6 +6,7 @@ import { pullFromInstantlyReal } from "./sources/instantly-real";
 import { pullFromSmaxReal } from "./sources/smax-real";
 import { pullSmaxMessages } from "./sources/smax-messages";
 import { pullFromSalesforceReal } from "./sources/salesforce-real";
+import { pullFromWixReal } from "./sources/wix-real";
 
 const SOURCE = process.argv[2] ?? "all";
 
@@ -51,6 +52,10 @@ async function main() {
     if (SOURCE === "sf:real" || SOURCE === "salesforce:real") {
       const r = await pullFromSalesforceReal();
       totalInserted += r.inserted;
+      console.log("");
+    }
+    if (SOURCE === "wix" || SOURCE === "wix:real" || SOURCE === "web") {
+      await pullFromWixReal();
       console.log("");
     }
 

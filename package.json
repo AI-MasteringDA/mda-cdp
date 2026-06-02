@@ -18,7 +18,14 @@
     "etl:instantly:inspect": "tsx etl/debug/instantly-inspect.ts",
     "etl:smax:inspect": "tsx etl/debug/smax-inspect.ts",
     "etl:smax:msg:inspect": "tsx etl/debug/smax-messages-inspect.ts",
-    "etl:sf:inspect": "tsx etl/debug/salesforce-inspect.ts"
+    "etl:sf:inspect": "tsx etl/debug/salesforce-inspect.ts",
+    "etl:stats": "tsx etl/debug/stats.ts",
+    "etl:fix:stage": "tsx etl/debug/fix-stage.ts",
+    "etl:demo:leads": "tsx etl/debug/find-demo-leads.ts",
+    "etl:multi:source": "tsx etl/debug/find-multi-source.ts",
+    "etl:verify:scoring": "tsx etl/debug/verify-scoring.ts",
+    "etl:wix:inspect": "tsx etl/debug/wix-inspect.ts",
+    "etl:wix:real": "tsx etl/run-all.ts wix:real"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",

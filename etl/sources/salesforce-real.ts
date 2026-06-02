@@ -156,7 +156,7 @@ export async function pullFromSalesforceReal() {
       FROM Contact
       WHERE Email != null OR Phone != null
       ORDER BY LastModifiedDate DESC
-      LIMIT 500
+      LIMIT 10000
     `.replace(/\s+/g, " ").trim();
     const contacts = await sfQuery<SfContact>(contactSql);
     console.log(`   ↳ ${contacts.length} contacts pulled`);
@@ -196,7 +196,7 @@ export async function pullFromSalesforceReal() {
       FROM Lead
       WHERE (Email != null OR Phone != null) AND IsConverted = false
       ORDER BY CreatedDate DESC
-      LIMIT 500
+      LIMIT 10000
     `.replace(/\s+/g, " ").trim();
     const leads = await sfQuery<SfLead>(leadSql);
     console.log(`   ↳ ${leads.length} leads pulled`);
@@ -303,24 +303,28 @@ export async function pullFromSalesforceReal() {
       FROM Opportunity
       WHERE StageName IN ('Closed Won', 'Closed Lost', 'Negotiation', 'BANT Analysis', 'Created')
       ORDER BY LastModifiedDate DESC
-      LIMIT 500
+      LIMIT 10000
     `.replace(/\s+/g, " ").trim();
     const opps = await sfQuery<SfOpportunity>(oppSql);
     const wonCount = opps.filter((o) => o.StageName === "Closed Won").length;
     const lostCount = opps.filter((o) => o.StageName === "Closed Lost").length;
     console.log(`   ↳ ${opps.length} opportunities (${wonCount} Won, ${lostCount} Lost)`);
 
-    // Pull Opportunity-Contact relationships
-    console.log("📋 Pulling Opportunity-Contact relationships...");
-    const oppContactSql = `
-      SELECT OpportunityId, ContactId, IsPrimary, Role
-      FROM OpportunityContactRole
-      WHERE OpportunityId IN (${opps.slice(0, 200).map((o) => `'${o.Id}'`).join(",")})
-    `.replace(/\s+/g, " ").trim();
-    const oppContacts = opps.length > 0
-      ? await sfQuery<{ OpportunityId: string; ContactId: string; IsPrimary: boolean; Role: string }>(oppContactSql)
-      : [];
-    console.log(`   ↳ ${oppContacts.length} opp-contact relationships`);
+    // Pull Opportunity-Contact relationships — batch IN clause để pull cho TẤT CẢ opps
+    console.log("📋 Pulling Opportunity-Contact relationships (batched)...");
+    const oppContacts: Array<{ OpportunityId: string; ContactId: string; IsPrimary: boolean; Role: string }> = [];
+    const IN_BATCH = 200;
+    for (let i = 0; i < opps.length; i += IN_BATCH) {
+      const batch = opps.slice(i, i + IN_BATCH);
+      const sql = `
+        SELECT OpportunityId, ContactId, IsPrimary, Role
+        FROM OpportunityContactRole
+        WHERE OpportunityId IN (${batch.map((o) => `'${o.Id}'`).join(",")})
+      `.replace(/\s+/g, " ").trim();
+      const partial = await sfQuery<{ OpportunityId: string; ContactId: string; IsPrimary: boolean; Role: string }>(sql);
+      oppContacts.push(...partial);
+    }
+    console.log(`   ↳ ${oppContacts.length} opp-contact relationships (từ ${opps.length} opps)`);
 
     // Mark dim_lead.stage based on opportunity outcome
     const wonOppIds = new Set(opps.filter((o) => o.StageName === "Closed Won").map((o) => o.Id));
@@ -338,10 +342,22 @@ export async function pullFromSalesforceReal() {
     if (uniqueWonLeads.length > 0) {
       console.log(`   ↳ Marking ${uniqueWonLeads.length} dim_lead as "Đã chốt"...`);
       const BATCH = 100;
+      let updated = 0;
+      let updateFailed = 0;
       for (let i = 0; i < uniqueWonLeads.length; i += BATCH) {
         const batch = uniqueWonLeads.slice(i, i + BATCH);
-        await admin.from("dim_lead").update({ stage: "Đã chốt" }).in("lead_id", batch);
+        const { error, count } = await admin
+          .from("dim_lead")
+          .update({ stage: "Đã chốt" }, { count: "exact" })
+          .in("lead_id", batch);
+        if (error) {
+          console.warn(`   ⚠️ Update batch ${i}: ${error.message}`);
+          updateFailed += batch.length;
+        } else {
+          updated += count ?? 0;
+        }
       }
+      console.log(`   ↳ Updated ${updated} rows, ${updateFailed} failed`);
     }
 
     // 5. Tasks
@@ -353,7 +369,7 @@ export async function pullFromSalesforceReal() {
       FROM Task
       WHERE WhoId != null AND CreatedDate = LAST_N_DAYS:90
       ORDER BY CreatedDate DESC
-      LIMIT 500
+      LIMIT 10000
     `.replace(/\s+/g, " ").trim();
     const tasks = await sfQuery<SfTask>(taskSql);
     console.log(`   ↳ ${tasks.length} tasks pulled`);
