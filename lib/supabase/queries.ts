@@ -70,7 +70,7 @@ export async function getWarmLeads(limit = 200): Promise<Lead[]> {
     .from("fact_lead_score")
     .select("*")
     .eq("scored_at", new Date().toISOString().slice(0, 10))
-    .gte("hot_score", 40)
+    .gte("hot_score", 30)
     .lt("hot_score", 70)
     .order("hot_score", { ascending: false })
     .limit(limit);

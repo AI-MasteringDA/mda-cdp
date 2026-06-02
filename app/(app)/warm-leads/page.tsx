@@ -16,7 +16,7 @@ export default async function WarmLeadsPage() {
             {warmLeads.length} lead ấm — follow-up tuần này
           </h1>
           <p className="mt-1 text-[14px] text-muted">
-            Lead có điểm nóng <strong>40 – 69</strong> · đã có engagement nhưng chưa đủ
+            Lead có điểm nóng <strong>30 – 69</strong> · đã có engagement nhưng chưa đủ
             tiêu chí gọi NGAY. Đọc từ <code className="font-mono text-[12px] bg-subtle px-1.5 py-0.5 rounded">fact_lead_score</code>.
           </p>
         </div>
