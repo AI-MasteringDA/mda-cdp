@@ -10,10 +10,15 @@
     "etl": "tsx etl/run-all.ts all",
     "etl:smax": "tsx etl/run-all.ts smax",
     "etl:sf": "tsx etl/run-all.ts salesforce",
+    "etl:sf:real": "tsx etl/run-all.ts sf:real",
     "etl:instantly": "tsx etl/run-all.ts instantly",
     "etl:instantly:real": "tsx etl/run-all.ts instantly:real",
+    "etl:smax:real": "tsx etl/run-all.ts smax:real",
+    "etl:smax:messages": "tsx etl/run-all.ts smax:messages",
     "etl:instantly:inspect": "tsx etl/debug/instantly-inspect.ts",
-    "etl:smax:inspect": "tsx etl/debug/smax-inspect.ts"
+    "etl:smax:inspect": "tsx etl/debug/smax-inspect.ts",
+    "etl:smax:msg:inspect": "tsx etl/debug/smax-messages-inspect.ts",
+    "etl:sf:inspect": "tsx etl/debug/salesforce-inspect.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",

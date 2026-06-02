@@ -258,8 +258,29 @@ export async function pullFromInstantlyReal() {
       }));
 
     if (touchpoints.length > 0) {
-      const { error } = await admin.from("fact_touchpoint").insert(touchpoints);
-      if (error) throw new Error(`Insert fact_touchpoint: ${error.message}`);
+      // Dedupe by raw_id để tránh insert lặp khi chạy nhiều lần
+      const { data: existing } = await admin
+        .from("fact_touchpoint")
+        .select("payload")
+        .eq("source", "instantly");
+      const existingRawIds = new Set(
+        (existing || [])
+          .map((e) => (e.payload as { raw_id?: string })?.raw_id)
+          .filter(Boolean) as string[]
+      );
+
+      const newTouchpoints = touchpoints.filter(
+        (t) => !existingRawIds.has((t.payload as { raw_id: string }).raw_id)
+      );
+      const skipped = touchpoints.length - newTouchpoints.length;
+      if (skipped > 0) {
+        console.log(`   ↳ Skip ${skipped} touchpoint đã tồn tại (dedupe by raw_id)`);
+      }
+
+      if (newTouchpoints.length > 0) {
+        const { error } = await admin.from("fact_touchpoint").insert(newTouchpoints);
+        if (error) throw new Error(`Insert fact_touchpoint: ${error.message}`);
+      }
     }
 
     await admin

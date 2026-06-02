@@ -116,21 +116,41 @@ export async function getColdLeads(limit = 50): Promise<Lead[]> {
     .filter((x): x is Lead => x !== null);
 }
 
-export async function getAllLeadsCount(): Promise<number> {
+function buildSearchOrClause(q: string): string {
+  // Escape % and , để tránh broken query syntax
+  const safe = q.replace(/[%,]/g, "");
+  return [
+    `full_name.ilike.%${safe}%`,
+    `email.ilike.%${safe}%`,
+    `phone.ilike.%${safe}%`,
+  ].join(",");
+}
+
+export async function getAllLeadsCount(searchQuery?: string): Promise<number> {
   const supabase = await createClient();
-  const { count } = await supabase
-    .from("dim_lead")
-    .select("*", { count: "exact", head: true });
+  let q = supabase.from("dim_lead").select("*", { count: "exact", head: true });
+  if (searchQuery && searchQuery.trim()) {
+    q = q.or(buildSearchOrClause(searchQuery.trim()));
+  }
+  const { count } = await q;
   return count ?? 0;
 }
 
-export async function getAllLeads(limit = 100, offset = 0): Promise<Lead[]> {
+export async function getAllLeads(
+  limit = 100,
+  offset = 0,
+  searchQuery?: string
+): Promise<Lead[]> {
   const supabase = await createClient();
-  const { data: leads } = await supabase
+  let q = supabase
     .from("dim_lead")
     .select("*")
     .order("first_seen_at", { ascending: false })
     .range(offset, offset + limit - 1);
+  if (searchQuery && searchQuery.trim()) {
+    q = q.or(buildSearchOrClause(searchQuery.trim()));
+  }
+  const { data: leads } = await q;
   if (!leads || leads.length === 0) return [];
 
   const leadIds = leads.map((l) => l.lead_id);

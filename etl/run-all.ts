@@ -3,6 +3,9 @@ import { pullFromSmaxSimulator } from "./sources/smax-simulator";
 import { pullFromSalesforceSimulator } from "./sources/salesforce-simulator";
 import { pullFromInstantlySimulator } from "./sources/instantly-simulator";
 import { pullFromInstantlyReal } from "./sources/instantly-real";
+import { pullFromSmaxReal } from "./sources/smax-real";
+import { pullSmaxMessages } from "./sources/smax-messages";
+import { pullFromSalesforceReal } from "./sources/salesforce-real";
 
 const SOURCE = process.argv[2] ?? "all";
 
@@ -32,6 +35,21 @@ async function main() {
     }
     if (SOURCE === "instantly:real") {
       const r = await pullFromInstantlyReal();
+      totalInserted += r.inserted;
+      console.log("");
+    }
+    if (SOURCE === "smax:real") {
+      const r = await pullFromSmaxReal();
+      totalInserted += r.inserted;
+      console.log("");
+    }
+    if (SOURCE === "smax:messages") {
+      const r = await pullSmaxMessages();
+      totalInserted += r.inserted;
+      console.log("");
+    }
+    if (SOURCE === "sf:real" || SOURCE === "salesforce:real") {
+      const r = await pullFromSalesforceReal();
       totalInserted += r.inserted;
       console.log("");
     }

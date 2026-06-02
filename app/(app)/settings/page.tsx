@@ -2,6 +2,8 @@ import { Topbar } from "@/components/Topbar";
 import { EmptyConfigCard } from "@/components/EmptyConfigCard";
 import { Settings as SettingsIcon } from "lucide-react";
 
+export const dynamic = "force-dynamic";
+
 export default function SettingsPage() {
   return (
     <>

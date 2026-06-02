@@ -50,77 +50,101 @@ export async function resolveIdentity(
 }
 
 /**
- * Resolve identity. Nếu không match → AUTO-CREATE lead mới trong dim_lead.
- * Dùng cho source có lead thật (Instantly, Salesforce contacts).
- * KHÔNG dùng cho source random (SMAX phone vô danh).
+ * Resolve identity với UPSERT pattern + paginated fetch để handle DB >1000 rows.
+ * Auto-CREATE lead mới nếu chưa tồn tại (skip duplicates via ON CONFLICT).
  */
 export async function batchResolveOrCreate(
   records: RawRecord[],
   options: { source: string }
 ): Promise<IdentityMatch[]> {
-  // 1. Lấy existing leads
-  const { data: leads } = await admin.from("dim_lead").select("lead_id, phone, email");
-  const phoneMap = new Map<string, string>();
-  const emailMap = new Map<string, string>();
-  for (const l of leads ?? []) {
-    if (l.phone) phoneMap.set(normalizePhone(l.phone), l.lead_id);
-    if (l.email) emailMap.set(l.email.toLowerCase().trim(), l.lead_id);
+  // 1. Collect unique emails/phones từ records
+  const uniqueEmails = new Set<string>();
+  const uniquePhones = new Set<string>();
+  for (const r of records) {
+    if (r.email) uniqueEmails.add(r.email.toLowerCase().trim());
+    if (r.phone) uniquePhones.add(normalizePhone(r.phone));
   }
 
-  // 2. Tìm emails cần tạo mới (dedup)
-  const uniqueNewEmails = new Map<string, { name?: string }>();
+  // 2. Build new lead records để upsert (dedupe by email)
+  const newLeads: Array<{
+    email: string;
+    full_name: string;
+    source: string;
+    stage: string;
+    avatar_color: string;
+    first_seen_at: string;
+  }> = [];
+  const seenEmails = new Set<string>();
   for (const r of records) {
     const email = r.email?.toLowerCase().trim();
-    if (!email) continue;
-    if (emailMap.has(email)) continue;
-    if (!uniqueNewEmails.has(email)) {
-      uniqueNewEmails.set(email, { name: r.name || undefined });
-    }
-  }
-
-  // 3. Batch INSERT new leads
-  if (uniqueNewEmails.size > 0) {
-    console.log(`   ↳ [Identity] Auto-create ${uniqueNewEmails.size} lead mới từ source "${options.source}"`);
-    const newLeads = Array.from(uniqueNewEmails.entries()).map(([email, meta]) => ({
+    if (!email || seenEmails.has(email)) continue;
+    seenEmails.add(email);
+    newLeads.push({
       email,
-      full_name: meta.name || email.split("@")[0],
+      full_name: r.name || email.split("@")[0],
       source: options.source,
       stage: "Mới",
       avatar_color: pickAvatarColor(email),
       first_seen_at: new Date().toISOString(),
-    }));
+    });
+  }
 
-    // Insert in batches of 500
+  // 3. UPSERT (ignoreDuplicates skip rows có email trùng)
+  if (newLeads.length > 0) {
+    console.log(`   ↳ [Identity] Upsert ${newLeads.length} lead mới từ source "${options.source}"`);
     const BATCH = 500;
     for (let i = 0; i < newLeads.length; i += BATCH) {
       const batch = newLeads.slice(i, i + BATCH);
-      const { data: created, error } = await admin
+      const { error } = await admin
         .from("dim_lead")
-        .insert(batch)
-        .select("lead_id, email");
+        .upsert(batch, { onConflict: "email", ignoreDuplicates: true });
       if (error) {
-        console.warn(`   ⚠️ Lỗi insert lead batch ${i}: ${error.message}`);
-        continue;
-      }
-      for (const c of created ?? []) {
-        emailMap.set(c.email.toLowerCase().trim(), c.lead_id);
+        console.warn(`   ⚠️ Upsert batch ${i}: ${error.message}`);
       }
     }
   }
 
-  // 4. Match
+  // 4. Fetch lead_ids cho ALL emails ta cần (batched IN-query)
+  const emailLeadMap = new Map<string, string>();
+  const emailArr = Array.from(uniqueEmails);
+  for (let i = 0; i < emailArr.length; i += 100) {
+    const batch = emailArr.slice(i, i + 100);
+    const { data } = await admin
+      .from("dim_lead")
+      .select("lead_id, email")
+      .in("email", batch);
+    for (const l of data ?? []) {
+      if (l.email) emailLeadMap.set(l.email.toLowerCase().trim(), l.lead_id);
+    }
+  }
+
+  // 5. Fetch lead_ids cho phones (fallback)
+  const phoneLeadMap = new Map<string, string>();
+  const phoneArr = Array.from(uniquePhones);
+  for (let i = 0; i < phoneArr.length; i += 100) {
+    const batch = phoneArr.slice(i, i + 100);
+    const { data } = await admin
+      .from("dim_lead")
+      .select("lead_id, phone")
+      .in("phone", batch);
+    for (const l of data ?? []) {
+      if (l.phone) phoneLeadMap.set(normalizePhone(l.phone), l.lead_id);
+    }
+  }
+
+  // 6. Match each record
   return records.map((r) => {
     const email = r.email?.toLowerCase().trim();
-    if (email && emailMap.has(email)) {
-      const wasNew = uniqueNewEmails.has(email);
+    if (email && emailLeadMap.has(email)) {
+      const wasNew = seenEmails.has(email);
       return {
         rawId: r.id,
-        leadId: emailMap.get(email)!,
+        leadId: emailLeadMap.get(email)!,
         matchedBy: wasNew ? "created" : "email",
       };
     }
     if (r.phone) {
-      const leadId = phoneMap.get(normalizePhone(r.phone));
+      const leadId = phoneLeadMap.get(normalizePhone(r.phone));
       if (leadId) return { rawId: r.id, leadId, matchedBy: "phone" };
     }
     return { rawId: r.id, leadId: null, matchedBy: "none" };
