@@ -5,7 +5,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import {
   getDashboardKPI,
   getHotLeads,
-  getColdLeads,
+  getWarmLeads,
   getRecentActivities,
 } from "@/lib/supabase/queries";
 import { formatRelativeVi } from "@/lib/utils";
@@ -15,10 +15,10 @@ import Link from "next/link";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [kpi, hotLeads, coldLeads, activities] = await Promise.all([
+  const [kpi, hotLeads, warmLeads, activities] = await Promise.all([
     getDashboardKPI(),
     getHotLeads(10),
-    getColdLeads(10),
+    getWarmLeads(10),
     getRecentActivities(8),
   ]);
 
@@ -29,13 +29,13 @@ export default async function DashboardPage() {
       <main className="mx-auto max-w-[1280px] px-8 py-8">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
           <KPICard
-            label="Lead nóng hôm nay"
+            label="🔥 Lead NÓNG (gọi NGAY)"
             value={kpi.hotToday.value}
             deltaPct={kpi.hotToday.deltaPct}
             deltaPositive={kpi.hotToday.deltaPositive}
           />
           <KPICard
-            label="Lead nguội cần cứu"
+            label="💤 Lead NGỦ ĐÔNG (đóng case)"
             value={kpi.coldToRescue.value}
             deltaPct={kpi.coldToRescue.deltaPct}
             deltaPositive={kpi.coldToRescue.deltaPositive}
@@ -76,11 +76,9 @@ export default async function DashboardPage() {
             </div>
             <div className="px-3 py-2">
               {hotLeads.length === 0 ? (
-                <EmptyState message="Chưa có lead nóng (hot_score >= 70). Cần thêm rule hoặc touchpoint." />
+                <EmptyState message="Chưa có lead NÓNG (điểm ≥ 70)." />
               ) : (
-                hotLeads.map((lead) => (
-                  <LeadListItem key={lead.id} lead={lead} variant="hot" />
-                ))
+                hotLeads.map((lead) => <LeadListItem key={lead.id} lead={lead} />)
               )}
             </div>
           </section>
@@ -124,14 +122,14 @@ export default async function DashboardPage() {
           <div className="hairline-b flex items-center justify-between px-6 py-4">
             <div>
               <h3 className="text-[15px] font-semibold tracking-tight">
-                Lead nguội — cần cứu
+                Lead ẤM — follow-up tuần này
               </h3>
               <p className="mt-0.5 text-[12px] text-muted">
-                Lead có nguy cơ rời phễu nếu không liên hệ trong 48h
+                Điểm 40-69 · có engagement, chưa đủ tiêu chí gọi NGAY
               </p>
             </div>
             <Link
-              href="/cold-leads"
+              href="/warm-leads"
               className="flex items-center gap-1 text-[12px] font-medium text-muted hover:text-foreground"
             >
               Xem tất cả
@@ -139,12 +137,10 @@ export default async function DashboardPage() {
             </Link>
           </div>
           <div className="px-3 py-2">
-            {coldLeads.length === 0 ? (
-              <EmptyState message="Chưa có lead nguội (cold_score >= 70)." />
+            {warmLeads.length === 0 ? (
+              <EmptyState message="Chưa có lead ấm." />
             ) : (
-              coldLeads.map((lead) => (
-                <LeadListItem key={lead.id} lead={lead} variant="cold" />
-              ))
+              warmLeads.map((lead) => <LeadListItem key={lead.id} lead={lead} />)
             )}
           </div>
         </section>

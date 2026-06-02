@@ -73,13 +73,7 @@ export default async function AllLeadsPage({
                 : "Chưa có lead nào."}
             </div>
           ) : (
-            sorted.map((lead) => (
-              <LeadListItem
-                key={lead.id}
-                lead={lead}
-                variant={lead.hotScore >= lead.coldScore ? "hot" : "cold"}
-              />
-            ))
+            sorted.map((lead) => <LeadListItem key={lead.id} lead={lead} />)
           )}
         </div>
 

@@ -1,14 +1,26 @@
 import { cn } from "@/lib/utils";
+import type { LeadTier } from "@/types/lead";
 
-type Variant = "default" | "hot" | "cold" | "warm" | "success" | "outline";
+type Variant = "default" | "hot" | "cold" | "warm" | "cool" | "dormant" | "success" | "outline" | "positive" | "negative";
 
 const VARIANTS: Record<Variant, string> = {
   default: "bg-subtle text-foreground",
   hot: "bg-[#ff3b30] text-white",
   cold: "bg-[#8e8e93] text-white",
   warm: "bg-[#ff9500] text-white",
+  cool: "bg-[#5ac8fa] text-white",
+  dormant: "bg-[#3a3a3c] text-white",
   success: "bg-[#34c759] text-white",
   outline: "bg-white text-muted border border-[var(--border-subtle)]",
+  positive: "bg-[#dcfce7] text-[#166534] border border-[#bbf7d0]",
+  negative: "bg-[#fee2e2] text-[#991b1b] border border-[#fecaca]",
+};
+
+export const TIER_VARIANT: Record<LeadTier, Variant> = {
+  "NÓNG": "hot",
+  "ẤM": "warm",
+  "MÁT": "cool",
+  "NGỦ ĐÔNG": "dormant",
 };
 
 export function Chip({
@@ -33,20 +45,33 @@ export function Chip({
   );
 }
 
+const TIER_COLORS: Record<LeadTier, string> = {
+  "NÓNG": "#ff3b30",
+  "ẤM": "#ff9500",
+  "MÁT": "#5ac8fa",
+  "NGỦ ĐÔNG": "#3a3a3c",
+};
+
 export function ScoreBadge({
   score,
-  variant,
+  tier,
 }: {
   score: number;
-  variant: "hot" | "cold";
+  tier?: LeadTier;
 }) {
-  const bg = variant === "hot" ? "#ff3b30" : "#8e8e93";
+  const t: LeadTier =
+    tier ?? (score >= 70 ? "NÓNG" : score >= 40 ? "ẤM" : score >= 20 ? "MÁT" : "NGỦ ĐÔNG");
   return (
     <div
       className="inline-flex items-center justify-center rounded-lg px-2.5 py-1 text-sm font-semibold text-white tabular-nums"
-      style={{ background: bg, minWidth: 44 }}
+      style={{ background: TIER_COLORS[t], minWidth: 44 }}
+      title={`${score}/100 — ${t}`}
     >
       {score}
     </div>
   );
+}
+
+export function TierChip({ tier }: { tier: LeadTier }) {
+  return <Chip variant={TIER_VARIANT[tier]}>{tier}</Chip>;
 }

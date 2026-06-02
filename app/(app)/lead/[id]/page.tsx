@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronRight, Sparkles, Lock } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import { Avatar } from "@/components/ui/Avatar";
-import { Chip, ScoreBadge } from "@/components/ui/Chip";
+import { Chip, ScoreBadge, TierChip } from "@/components/ui/Chip";
 import { Timeline } from "@/components/Timeline";
 import { getLeadById } from "@/lib/supabase/queries";
 
@@ -78,49 +78,38 @@ export default async function LeadDetailPage({
             </div>
 
             <div className="flex flex-col items-end gap-2">
-              <div className="flex items-center gap-3">
-                <div className="text-right">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-2 font-medium">
-                    Điểm nóng
-                  </div>
-                  <div className="mt-1">
-                    <ScoreBadge score={lead.hotScore} variant="hot" />
-                  </div>
+              <div className="text-right">
+                <div className="text-[10px] uppercase tracking-wider text-muted-2 font-medium">
+                  Điểm tổng / 100
                 </div>
-                <div className="text-right">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-2 font-medium">
-                    Điểm nguội
-                  </div>
-                  <div className="mt-1">
-                    <ScoreBadge score={lead.coldScore} variant="cold" />
-                  </div>
+                <div className="mt-1 flex items-center gap-2 justify-end">
+                  <TierChip tier={lead.tier} />
+                  <ScoreBadge score={lead.score} tier={lead.tier} />
                 </div>
               </div>
             </div>
           </div>
 
-          {lead.hotReasons.length > 0 && (
-            <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-[var(--border-subtle)] pt-4">
-              <span className="text-[11px] uppercase tracking-wider text-muted-2 font-medium mr-2">
-                Vì sao nóng
-              </span>
-              {lead.hotReasons.map((r) => (
-                <Chip key={r} variant="outline">
-                  {r}
-                </Chip>
-              ))}
-            </div>
-          )}
-          {lead.coldReasons.length > 0 && (
-            <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-[var(--border-subtle)] pt-4">
-              <span className="text-[11px] uppercase tracking-wider text-muted-2 font-medium mr-2">
-                Vì sao nguội
-              </span>
-              {lead.coldReasons.map((r) => (
-                <Chip key={r} variant="outline">
-                  {r}
-                </Chip>
-              ))}
+          {lead.reasons.length > 0 && (
+            <div className="mt-4 border-t border-[var(--border-subtle)] pt-4">
+              <div className="text-[11px] uppercase tracking-wider text-muted-2 font-medium mb-2">
+                Cấu thành điểm
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {lead.reasons.map((r) => (
+                  <Chip
+                    key={r.label}
+                    variant={r.sign === "+" ? "positive" : "negative"}
+                  >
+                    {r.sign}
+                    {r.points} {r.label}
+                  </Chip>
+                ))}
+                <span className="ml-2 text-[11px] text-muted-2">
+                  Base 40 {lead.reasons.reduce((s, r) => s + (r.sign === "+" ? r.points : -r.points), 0) >= 0 ? "+" : ""}
+                  {lead.reasons.reduce((s, r) => s + (r.sign === "+" ? r.points : -r.points), 0)} = {lead.score}/100
+                </span>
+              </div>
             </div>
           )}
         </header>

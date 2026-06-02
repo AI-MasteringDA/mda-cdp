@@ -26,6 +26,14 @@ export interface Touchpoint {
   occurredAt: Date;
 }
 
+export type LeadTier = "NÓNG" | "ẤM" | "MÁT" | "NGỦ ĐÔNG";
+
+export interface ScoreReason {
+  sign: "+" | "-";
+  label: string;
+  points: number;
+}
+
 export interface Lead {
   id: string;
   name: string;
@@ -33,6 +41,11 @@ export interface Lead {
   phone: string;
   source: LeadSource;
   avatarColor: string;
+  // V5: unified score 0-100 + categorical tier
+  score: number;
+  tier: LeadTier;
+  reasons: ScoreReason[];
+  // Deprecated, kept for backward-compat (will be removed)
   hotScore: number;
   coldScore: number;
   hotReasons: string[];
@@ -44,4 +57,11 @@ export interface Lead {
   company?: string | null;
   leadSource?: string | null;
   touchpoints: Touchpoint[];
+}
+
+export function scoreToTier(score: number): LeadTier {
+  if (score >= 70) return "NÓNG";
+  if (score >= 40) return "ẤM";
+  if (score >= 20) return "MÁT";
+  return "NGỦ ĐÔNG";
 }

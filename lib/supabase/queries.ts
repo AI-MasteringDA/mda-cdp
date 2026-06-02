@@ -1,5 +1,14 @@
 import { createClient } from "./server";
-import type { Lead, Touchpoint } from "@/types/lead";
+import type { Lead, LeadTier, ScoreReason, Touchpoint } from "@/types/lead";
+import { scoreToTier } from "@/types/lead";
+
+// Map UI tier label to (minScore, maxScore inclusive)
+export const TIER_RANGE: Record<LeadTier, [number, number]> = {
+  "NÓNG": [70, 100],
+  "ẤM": [40, 69],
+  "MÁT": [20, 39],
+  "NGỦ ĐÔNG": [0, 19],
+};
 
 type LeadRow = {
   lead_id: string;
@@ -34,7 +43,23 @@ type TouchRow = {
   occurred_at: string;
 };
 
+function parseReasons(raw: unknown): ScoreReason[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((r): r is { sign: string; label: string; points: number } =>
+      typeof r === "object" && r !== null &&
+      "sign" in r && "label" in r && "points" in r
+    )
+    .map((r) => ({
+      sign: (r.sign === "-" ? "-" : "+") as "+" | "-",
+      label: String(r.label),
+      points: Number(r.points) || 0,
+    }));
+}
+
 function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = []): Lead {
+  const unifiedScore = score?.hot_score ?? 0;
+  const reasons = parseReasons(score?.hot_reasons);
   return {
     id: row.lead_id,
     name: row.full_name,
@@ -42,10 +67,14 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
     phone: row.phone,
     source: row.source as Lead["source"],
     avatarColor: row.avatar_color,
-    hotScore: score?.hot_score ?? 0,
+    score: unifiedScore,
+    tier: scoreToTier(unifiedScore),
+    reasons,
+    // Backward-compat (deprecated, computed from unified)
+    hotScore: unifiedScore,
     coldScore: score?.cold_score ?? 0,
-    hotReasons: score?.hot_reasons ?? [],
-    coldReasons: score?.cold_reasons ?? [],
+    hotReasons: reasons.map((r) => `${r.sign}${r.points} ${r.label}`),
+    coldReasons: [],
     lastContactAt: new Date(row.last_touch_at ?? row.first_seen_at),
     firstSeenAt: new Date(row.first_seen_at),
     stage: row.stage as Lead["stage"],
@@ -63,17 +92,25 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
   };
 }
 
-export async function getWarmLeads(limit = 200): Promise<Lead[]> {
+async function fetchLeadsByScoreRange(
+  minScore: number,
+  maxScore: number,
+  limit: number,
+  offset: number,
+  scoreAsc = false // for cold/dormant, ascending = "most dormant first"
+): Promise<Lead[]> {
   const supabase = await createClient();
-
-  const { data: scores } = await supabase
+  const today = new Date().toISOString().slice(0, 10);
+  let query = supabase
     .from("fact_lead_score")
     .select("*")
-    .eq("scored_at", new Date().toISOString().slice(0, 10))
-    .gte("hot_score", 30)
-    .lt("hot_score", 70)
-    .order("hot_score", { ascending: false })
-    .limit(limit);
+    .eq("scored_at", today)
+    .gte("hot_score", minScore)
+    .lte("hot_score", maxScore);
+  query = scoreAsc
+    ? query.order("hot_score", { ascending: true })
+    : query.order("hot_score", { ascending: false });
+  const { data: scores } = await query.range(offset, offset + limit - 1);
   if (!scores || scores.length === 0) return [];
 
   const leadIds = scores.map((s) => s.lead_id);
@@ -92,73 +129,38 @@ export async function getWarmLeads(limit = 200): Promise<Lead[]> {
     .filter((x): x is Lead => x !== null);
 }
 
-export async function getHotLeads(limit = 50): Promise<Lead[]> {
+async function countLeadsByScoreRange(min: number, max: number): Promise<number> {
   const supabase = await createClient();
-
-  // 1. Query top scores TRƯỚC (chỉ vài rows)
-  const { data: scores } = await supabase
-    .from("fact_lead_score")
-    .select("*")
-    .eq("scored_at", new Date().toISOString().slice(0, 10))
-    .gte("hot_score", 70)
-    .order("hot_score", { ascending: false })
-    .limit(limit);
-  if (!scores || scores.length === 0) return [];
-
-  // 2. Query leads theo lead_id (chính xác, nhanh)
-  const leadIds = scores.map((s) => s.lead_id);
-  const { data: leads } = await supabase
-    .from("dim_lead")
-    .select("*")
-    .in("lead_id", leadIds);
-  if (!leads) return [];
-
-  const leadMap = new Map(leads.map((l) => [l.lead_id, l]));
-  return scores
-    .map((s) => {
-      const lead = leadMap.get(s.lead_id);
-      return lead ? mergeToLead(lead, s) : null;
-    })
-    .filter((x): x is Lead => x !== null);
-}
-
-export async function getColdLeadsCount(): Promise<number> {
-  const supabase = await createClient();
+  const today = new Date().toISOString().slice(0, 10);
   const { count } = await supabase
     .from("fact_lead_score")
     .select("*", { count: "exact", head: true })
-    .eq("scored_at", new Date().toISOString().slice(0, 10))
-    .gte("cold_score", 40);
+    .eq("scored_at", today)
+    .gte("hot_score", min)
+    .lte("hot_score", max);
   return count ?? 0;
 }
 
-export async function getColdLeads(limit = 100, offset = 0): Promise<Lead[]> {
-  const supabase = await createClient();
+export const getHotLeads = (limit = 50, offset = 0) =>
+  fetchLeadsByScoreRange(70, 100, limit, offset);
+export const getHotLeadsCount = () => countLeadsByScoreRange(70, 100);
 
-  const { data: scores } = await supabase
-    .from("fact_lead_score")
-    .select("*")
-    .eq("scored_at", new Date().toISOString().slice(0, 10))
-    .gte("cold_score", 40)
-    .order("cold_score", { ascending: false })
-    .range(offset, offset + limit - 1);
-  if (!scores || scores.length === 0) return [];
+export const getWarmLeads = (limit = 100, offset = 0) =>
+  fetchLeadsByScoreRange(40, 69, limit, offset);
+export const getWarmLeadsCount = () => countLeadsByScoreRange(40, 69);
 
-  const leadIds = scores.map((s) => s.lead_id);
-  const { data: leads } = await supabase
-    .from("dim_lead")
-    .select("*")
-    .in("lead_id", leadIds);
-  if (!leads) return [];
+export const getCoolLeads = (limit = 100, offset = 0) =>
+  fetchLeadsByScoreRange(20, 39, limit, offset);
+export const getCoolLeadsCount = () => countLeadsByScoreRange(20, 39);
 
-  const leadMap = new Map(leads.map((l) => [l.lead_id, l]));
-  return scores
-    .map((s) => {
-      const lead = leadMap.get(s.lead_id);
-      return lead ? mergeToLead(lead, s) : null;
-    })
-    .filter((x): x is Lead => x !== null);
-}
+export const getDormantLeads = (limit = 100, offset = 0) =>
+  fetchLeadsByScoreRange(0, 19, limit, offset, true); // ascending so 0 first = most dormant
+export const getDormantLeadsCount = () => countLeadsByScoreRange(0, 19);
+
+// Deprecated aliases — old /cold-leads route still uses these
+export const getColdLeads = (limit = 100, offset = 0) =>
+  fetchLeadsByScoreRange(0, 39, limit, offset, true);
+export const getColdLeadsCount = () => countLeadsByScoreRange(0, 39);
 
 function buildSearchOrClause(q: string): string {
   // Escape % and , để tránh broken query syntax

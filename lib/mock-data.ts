@@ -1,4 +1,16 @@
 import type { Lead, Touchpoint } from "@/types/lead";
+import { scoreToTier } from "@/types/lead";
+
+// Helper: add V5 fields (score, tier, reasons) derived from legacy hotScore/coldScore
+function withV5<T extends { hotScore: number; coldScore: number; hotReasons: string[]; coldReasons: string[] }>(l: T) {
+  const score = l.hotScore; // legacy hot_score acts as unified score
+  return {
+    ...l,
+    score,
+    tier: scoreToTier(score),
+    reasons: l.hotReasons.map((r) => ({ sign: "+" as const, label: r, points: 0 })),
+  };
+}
 
 const AVATAR_COLORS = [
   "#FFE5D9", "#FFE3F0", "#E0F2FE", "#DCFCE7", "#FEF3C7",
@@ -23,7 +35,7 @@ function tp(
   };
 }
 
-export const MOCK_LEADS: Lead[] = [
+const MOCK_RAW = [
   {
     id: "L-001",
     name: "Nguyễn Văn An",
@@ -188,6 +200,8 @@ export const MOCK_LEADS: Lead[] = [
     ],
   },
 ];
+
+export const MOCK_LEADS: Lead[] = MOCK_RAW.map(withV5) as Lead[];
 
 export const KPI_TODAY = {
   hotToday: { value: 23, deltaPct: 12, deltaPositive: true },

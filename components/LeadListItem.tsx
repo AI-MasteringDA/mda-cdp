@@ -2,18 +2,12 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import type { Lead } from "@/types/lead";
 import { Avatar } from "./ui/Avatar";
-import { Chip, ScoreBadge } from "./ui/Chip";
+import { Chip, ScoreBadge, TierChip } from "./ui/Chip";
 import { formatRelativeVi } from "@/lib/utils";
 
-export function LeadListItem({
-  lead,
-  variant,
-}: {
-  lead: Lead;
-  variant: "hot" | "cold";
-}) {
-  const reasons = variant === "hot" ? lead.hotReasons : lead.coldReasons;
-  const score = variant === "hot" ? lead.hotScore : lead.coldScore;
+export function LeadListItem({ lead }: { lead: Lead }) {
+  // Show top 3 reasons (sorted by impact)
+  const topReasons = lead.reasons.slice(0, 3);
 
   return (
     <Link
@@ -29,9 +23,13 @@ export function LeadListItem({
           <div className="truncate text-[12px] text-muted">{lead.email}</div>
         </div>
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          {reasons.slice(0, 3).map((r) => (
-            <Chip key={r} variant="outline">
-              {r}
+          {topReasons.map((r) => (
+            <Chip
+              key={r.label}
+              variant={r.sign === "+" ? "positive" : "negative"}
+            >
+              {r.sign}
+              {r.points} {r.label}
             </Chip>
           ))}
           <span className="text-[11px] text-muted-2">
@@ -40,7 +38,8 @@ export function LeadListItem({
         </div>
       </div>
 
-      <ScoreBadge score={score} variant={variant} />
+      <TierChip tier={lead.tier} />
+      <ScoreBadge score={lead.score} tier={lead.tier} />
       <ChevronRight
         className="h-4 w-4 text-muted-2 transition-transform group-hover:translate-x-0.5"
         strokeWidth={1.75}

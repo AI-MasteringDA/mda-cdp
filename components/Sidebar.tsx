@@ -7,6 +7,7 @@ import {
   Flame,
   Thermometer,
   Snowflake,
+  Moon,
   Users,
   Settings,
   Sparkles,
@@ -32,9 +33,10 @@ type NavItem = { href: string; label: string; icon: React.ComponentType<{ classN
 
 const COCKPIT: NavItem[] = [
   { href: "/dashboard", label: "Tổng quan", icon: LayoutDashboard },
-  { href: "/hot-leads", label: "Lead nóng", icon: Flame },
-  { href: "/warm-leads", label: "Lead ấm", icon: Thermometer },
-  { href: "/cold-leads", label: "Lead nguội", icon: Snowflake },
+  { href: "/hot-leads", label: "Lead NÓNG", icon: Flame },
+  { href: "/warm-leads", label: "Lead ẤM", icon: Thermometer },
+  { href: "/cool-leads", label: "Lead MÁT", icon: Snowflake },
+  { href: "/dormant-leads", label: "Lead NGỦ ĐÔNG", icon: Moon },
   { href: "/leads", label: "Tất cả lead", icon: Users },
 ];
 

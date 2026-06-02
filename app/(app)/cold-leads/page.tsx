@@ -40,9 +40,7 @@ export default async function ColdLeadsPage({
               Chưa có lead nguội nào.
             </div>
           ) : (
-            coldLeads.map((lead) => (
-              <LeadListItem key={lead.id} lead={lead} variant="cold" />
-            ))
+            coldLeads.map((lead) => <LeadListItem key={lead.id} lead={lead} />)
           )}
         </div>
 
