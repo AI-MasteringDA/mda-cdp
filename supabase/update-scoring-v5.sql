@@ -75,6 +75,15 @@ BEGIN
   computed AS (
     SELECT
       s.lid,
+      s.chat_3d,
+      s.reply_3d,
+      s.email_7d,
+      s.chat_staff_total,
+      s.total_engagement,
+      s.source_count,
+      s.has_conversion,
+      s.silent_days,
+      s.engagement_count,
       -- Bắt đầu base 40 (trung tính cho lead mới)
       40 +
       -- POSITIVE points
@@ -93,8 +102,7 @@ BEGIN
         ELSE -60
       END) +
       (CASE WHEN s.engagement_count = 0 THEN -10 ELSE 0 END)
-      AS raw_score,
-      s.*
+      AS raw_score
     FROM signals s
   ),
   clamped AS (
