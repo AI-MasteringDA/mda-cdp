@@ -221,6 +221,67 @@ async function getLastSuccessfulSync(): Promise<Date> {
   return new Date(Date.now() - daysBack * 24 * 3600_000);
 }
 
+/**
+ * Process a batch of emails: identity resolve + insert touchpoints.
+ * Runs during pagination so partial progress is persisted to DB.
+ */
+async function processBatch(
+  batch: InstantlyEmail[],
+  sinceMs: number,
+  leadsMap: Map<string, { fullName: string; phone?: string }>,
+  existingRawIds: Set<string>
+): Promise<{ inserted: number; created: number }> {
+  const inRange = batch.filter((e) => {
+    const t = new Date(e.timestamp_email || 0).getTime();
+    return t >= sinceMs;
+  });
+  if (inRange.length === 0) return { inserted: 0, created: 0 };
+
+  const recordsForMatch = inRange.map((e) => {
+    const email = (e.lead || e.to_address_email_list?.split(",")[0] || "").toLowerCase().trim();
+    const enrichment = leadsMap.get(email);
+    return { id: e.id, email, name: enrichment?.fullName, phone: enrichment?.phone };
+  });
+  const matches = await batchResolveOrCreate(recordsForMatch, { source: "instantly" });
+  const matchMap = new Map(matches.map((m) => [m.rawId, m.leadId]));
+  const created = matches.filter((m) => m.matchedBy === "created").length;
+
+  const touchpoints = inRange
+    .filter((e) => matchMap.get(e.id) && !existingRawIds.has(e.id))
+    .map((e) => ({
+      lead_id: matchMap.get(e.id)!,
+      source: "instantly",
+      event_type: mapUeTypeToEvent(e.ue_type),
+      title: e.ue_type === 3
+        ? `Phản hồi email: ${e.subject || "(no subject)"}`
+        : e.ue_type === 2
+        ? `Đã mở email: ${e.subject || "(no subject)"}`
+        : e.ue_type === 4
+        ? `Đã click email: ${e.subject || "(no subject)"}`
+        : `Đã gửi email: ${e.subject || "(no subject)"}`,
+      detail: null,
+      occurred_at: e.timestamp_email || e.timestamp_created || new Date().toISOString(),
+      payload: {
+        raw_id: e.id, // ← critical for dedupe
+        subject: e.subject,
+        campaign_id: e.campaign_id,
+        ue_type: e.ue_type,
+        from: e.from_address_email,
+        real: true,
+      },
+    }));
+
+  if (touchpoints.length > 0) {
+    const { error } = await admin.from("fact_touchpoint").insert(touchpoints);
+    if (error) throw new Error(`Insert fact_touchpoint: ${error.message}`);
+    // Track for next batches in this run
+    for (const t of touchpoints) {
+      existingRawIds.add((t.payload as { raw_id: string }).raw_id);
+    }
+  }
+  return { inserted: touchpoints.length, created };
+}
+
 export async function pullFromInstantlyReal() {
   console.log("📡 [Instantly REAL] Đang gọi API thật...");
 
@@ -239,13 +300,39 @@ export async function pullFromInstantlyReal() {
     console.log(`   ↳ Incremental sync: lấy email từ ${lastSync.toISOString().slice(0, 19)} trở đi`);
 
     // 2. Pull /leads parallel để enrich names
-    const leadsMapPromise = pullInstantlyLeadsMap();
+    const leadsMap = await pullInstantlyLeadsMap();
+
+    // Pre-load existing raw_ids for dedupe (single fetch, then track in-memory)
+    console.log("   ↳ Loading existing Instantly raw_ids for dedupe...");
+    const existingRawIds = new Set<string>();
+    {
+      let fromRow = 0;
+      while (true) {
+        const { data } = await admin
+          .from("fact_touchpoint")
+          .select("payload")
+          .eq("source", "instantly")
+          .range(fromRow, fromRow + 999);
+        if (!data || data.length === 0) break;
+        for (const t of data) {
+          const rawId = (t.payload as { raw_id?: string })?.raw_id;
+          if (rawId) existingRawIds.add(rawId);
+        }
+        if (data.length < 1000) break;
+        fromRow += 1000;
+      }
+    }
+    console.log(`   ↳ ${existingRawIds.size} email đã có trong DB → sẽ skip dedupe`);
 
     // 3. Pull /emails with pagination + RESUME from saved cursor.
-    // On 5xx error, save progress and break gracefully — next run resumes.
-    const collected: InstantlyEmail[] = [];
+    // INSERT IN BATCHES every BATCH_PAGES — survives Ctrl+C, timeout, 5xx.
+    const BATCH_PAGES = 10; // insert every 1000 emails
+    let pendingBatch: InstantlyEmail[] = [];
     let cursor: string | undefined = await loadInstantlyCursor();
     let page = 0;
+    let totalCollected = 0;
+    let totalInserted = 0;
+    let totalCreated = 0;
     const MAX_PAGES = 1000;
     let failedAt: string | undefined;
 
@@ -263,19 +350,25 @@ export async function pullFromInstantlyReal() {
       } catch (err) {
         const msg = (err as Error).message;
         console.warn(`   ⚠️ Page ${page} failed after retries: ${msg.slice(0, 120)}`);
-        console.warn(`   📍 Saving cursor for next resume...`);
         failedAt = cursor;
         break;
       }
 
       const items = resp.items || [];
-      collected.push(...items);
+      pendingBatch.push(...items);
+      totalCollected += items.length;
       page++;
 
-      // Save cursor every 10 pages so partial progress isn't lost
-      if (page % 10 === 0 && resp.next_starting_after) {
-        await saveInstantlyCursor(resp.next_starting_after);
-        console.log(`   💾 Cursor checkpointed at page ${page} (${collected.length} emails so far)`);
+      // INSERT BATCH every N pages + save cursor
+      if (page % BATCH_PAGES === 0 && pendingBatch.length > 0) {
+        const { inserted, created } = await processBatch(pendingBatch, sinceMs, leadsMap, existingRawIds);
+        totalInserted += inserted;
+        totalCreated += created;
+        pendingBatch = [];
+        if (resp.next_starting_after) {
+          await saveInstantlyCursor(resp.next_starting_after);
+        }
+        console.log(`   💾 Inserted batch page ${page}: +${inserted} touchpoints (+${created} new leads) | total ${totalInserted}`);
       }
 
       const oldestTs = items.length > 0
@@ -295,131 +388,34 @@ export async function pullFromInstantlyReal() {
       cursor = resp.next_starting_after;
     }
 
+    // Flush remaining batch after loop ends
+    if (pendingBatch.length > 0) {
+      const { inserted, created } = await processBatch(pendingBatch, sinceMs, leadsMap, existingRawIds);
+      totalInserted += inserted;
+      totalCreated += created;
+      console.log(`   💾 Final flush: +${inserted} touchpoints (+${created} new leads)`);
+    }
+
     if (failedAt) {
       await saveInstantlyCursor(failedAt);
       console.log(`   📍 Cursor saved at ${failedAt.slice(0, 8)}... — re-run ETL to resume`);
     }
 
-    const inRange = collected.filter((e) => {
-      const t = new Date(e.timestamp_email || 0).getTime();
-      return t >= sinceMs;
-    });
-
-    console.log(`📦 [Instantly] Pull ${collected.length} emails (${page} pages), ${inRange.length} mới trong khoảng incremental`);
-
-    const leadsMap = await leadsMapPromise;
-
-    if (inRange.length === 0) {
-      await admin
-        .from("sync_job")
-        .update({
-          status: "success",
-          finished_at: new Date().toISOString(),
-          records_in: 0,
-          records_merged: 0,
-        })
-        .eq("id", jobId);
-      console.log("✅ Không có email mới — DB đã up-to-date");
-      return { inserted: 0, jobId };
-    }
-
-    // 4. Identity match + auto-create (với name enrichment)
-    const recordsForMatch = inRange.map((e) => {
-      const email = (e.lead || e.to_address_email_list?.split(",")[0] || "").toLowerCase().trim();
-      const enrichment = leadsMap.get(email);
-      return {
-        id: e.id,
-        email,
-        name: enrichment?.fullName,
-        phone: enrichment?.phone,
-      };
-    });
-    const matches = await batchResolveOrCreate(recordsForMatch, { source: "instantly" });
-    logMatches(matches, "Instantly REAL");
-
-    // 5. Update tên cho lead cũ nếu có name mới đẹp hơn
-    const updates: Array<{ leadId: string; fullName: string }> = [];
-    for (const m of matches) {
-      if (m.matchedBy === "email" || m.matchedBy === "phone") {
-        const rec = recordsForMatch.find((r) => r.id === m.rawId);
-        if (rec?.name && m.leadId) {
-          updates.push({ leadId: m.leadId, fullName: rec.name });
-        }
-      }
-    }
-    if (updates.length > 0) {
-      console.log(`   ↳ Update tên cho ${updates.length} lead cũ`);
-      // Batch update
-      for (const u of updates) {
-        await admin
-          .from("dim_lead")
-          .update({ full_name: u.fullName })
-          .eq("lead_id", u.leadId)
-          .or(`full_name.is.null,full_name.like.%@%,full_name.eq.${u.fullName.split(" ")[0]}`);
-      }
-    }
-
-    // 6. Insert touchpoints
-    const matchMap = new Map(matches.map((m) => [m.rawId, m.leadId]));
-    const touchpoints = inRange
-      .filter((e) => matchMap.get(e.id))
-      .map((e) => ({
-        lead_id: matchMap.get(e.id)!,
-        source: "instantly",
-        event_type: mapUeTypeToEvent(e.ue_type),
-        title: e.ue_type === 3
-          ? `Phản hồi email: ${e.subject || "(no subject)"}`
-          : `Đã gửi email: ${e.subject || "(no subject)"}`,
-        detail: null,
-        occurred_at: e.timestamp_email || e.timestamp_created || new Date().toISOString(),
-        payload: {
-          subject: e.subject,
-          campaign_id: e.campaign_id,
-          ue_type: e.ue_type,
-          from: e.from_address_email,
-          real: true,
-        },
-      }));
-
-    if (touchpoints.length > 0) {
-      // Dedupe by raw_id để tránh insert lặp khi chạy nhiều lần
-      const { data: existing } = await admin
-        .from("fact_touchpoint")
-        .select("payload")
-        .eq("source", "instantly");
-      const existingRawIds = new Set(
-        (existing || [])
-          .map((e) => (e.payload as { raw_id?: string })?.raw_id)
-          .filter(Boolean) as string[]
-      );
-
-      const newTouchpoints = touchpoints.filter((t) => {
-        const rawId = (t.payload as { raw_id?: string } | undefined)?.raw_id;
-        return rawId ? !existingRawIds.has(rawId) : true;
-      });
-      const skipped = touchpoints.length - newTouchpoints.length;
-      if (skipped > 0) {
-        console.log(`   ↳ Skip ${skipped} touchpoint đã tồn tại (dedupe by raw_id)`);
-      }
-
-      if (newTouchpoints.length > 0) {
-        const { error } = await admin.from("fact_touchpoint").insert(newTouchpoints);
-        if (error) throw new Error(`Insert fact_touchpoint: ${error.message}`);
-      }
-    }
+    console.log(`📦 [Instantly] Pulled ${totalCollected} emails (${page} pages), inserted ${totalInserted} new touchpoints (+${totalCreated} leads)`);
 
     await admin
       .from("sync_job")
       .update({
-        status: "success",
+        status: failedAt ? "failed" : "success",
         finished_at: new Date().toISOString(),
-        records_in: inRange.length,
-        records_merged: touchpoints.length,
+        records_in: totalCollected,
+        records_merged: totalInserted,
+        error_message: failedAt ? `Cursor saved at ${failedAt.slice(0, 8)} — re-run to resume` : null,
       })
       .eq("id", jobId);
 
-    console.log(`✅ [Instantly REAL] Insert ${touchpoints.length} fact_touchpoint`);
-    return { inserted: touchpoints.length, jobId };
+    console.log(`✅ [Instantly REAL] Insert ${totalInserted} fact_touchpoint`);
+    return { inserted: totalInserted, jobId };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await admin
