@@ -53,9 +53,10 @@ function mapUeTypeToEvent(ueType: number | undefined): string {
   }
 }
 
-// Rate limit: Instantly allow 20 req/min → throttle 3.5s mỗi request
+// Rate limit: Instantly allow 20 req/min → throttle ~5s mỗi request
+// (slightly under 12 req/min, leaves headroom for /leads + /emails alternating)
 let lastFetchAt = 0;
-const FETCH_INTERVAL_MS = 3500;
+const FETCH_INTERVAL_MS = 5000;
 
 async function instantlyFetch(path: string, params: Record<string, string> = {}) {
   if (!API_KEY) throw new Error("Thiếu INSTANTLY_API_KEY");
@@ -83,14 +84,16 @@ async function instantlyFetch(path: string, params: Record<string, string> = {})
   }
 
   // Retry on 5xx (server error tạm thời) với exponential backoff
+  // Bumped to 5 retries with longer waits for stubborn server-side issues
   if (res.status >= 500 && res.status < 600) {
     const retries = (params._retry ? Number(params._retry) : 0);
-    if (retries < 3) {
-      const wait = (retries + 1) * 5_000;
-      console.log(`   ⏸️  Server error ${res.status}, retry sau ${wait/1000}s...`);
+    if (retries < 5) {
+      const wait = (retries + 1) * 15_000; // 15s, 30s, 45s, 60s, 75s
+      console.log(`   ⏸️  Server error ${res.status}, retry ${retries + 1}/5 sau ${wait/1000}s...`);
       await new Promise((r) => setTimeout(r, wait));
       return instantlyFetch(path, { ...params, _retry: String(retries + 1) });
     }
+    console.warn(`   ❌ Gave up after 5 retries on ${path}`);
   }
 
   if (!res.ok) throw new Error(`Instantly API ${res.status}: ${await res.text()}`);
@@ -136,6 +139,31 @@ async function pullInstantlyLeadsMap(maxPages = 20): Promise<Map<string, { fullN
 
   console.log(`   ↳ Map ${map.size} email → name`);
   return map;
+}
+
+/**
+ * Cursor persistence — saved in `etl_state` table so we can resume after 500 errors.
+ */
+async function loadInstantlyCursor(): Promise<string | undefined> {
+  const { data } = await admin
+    .from("etl_state")
+    .select("value")
+    .eq("source", "instantly")
+    .eq("key", "emails_cursor")
+    .maybeSingle();
+  return (data?.value as string) || undefined;
+}
+
+async function saveInstantlyCursor(cursor: string | null): Promise<void> {
+  if (cursor === null) {
+    await admin.from("etl_state").delete()
+      .eq("source", "instantly").eq("key", "emails_cursor");
+  } else {
+    await admin.from("etl_state").upsert(
+      { source: "instantly", key: "emails_cursor", value: cursor, updated_at: new Date().toISOString() },
+      { onConflict: "source,key" }
+    );
+  }
 }
 
 /**
@@ -187,29 +215,63 @@ export async function pullFromInstantlyReal() {
     // 2. Pull /leads parallel để enrich names
     const leadsMapPromise = pullInstantlyLeadsMap();
 
-    // 3. Pull /emails with pagination, early-stop khi vượt cutoff
+    // 3. Pull /emails with pagination + RESUME from saved cursor.
+    // On 5xx error, save progress and break gracefully — next run resumes.
     const collected: InstantlyEmail[] = [];
-    let cursor: string | undefined;
+    let cursor: string | undefined = await loadInstantlyCursor();
     let page = 0;
-    const MAX_PAGES = 500;
+    const MAX_PAGES = 1000;
+    let failedAt: string | undefined;
+
+    if (cursor) {
+      console.log(`   ↻  Resuming from saved cursor (page ${page})`);
+    }
 
     while (page < MAX_PAGES) {
       const params: Record<string, string> = { limit: "100" };
       if (cursor) params.starting_after = cursor;
 
-      const resp: { items?: InstantlyEmail[]; next_starting_after?: string } =
-        await instantlyFetch("/emails", params);
+      let resp: { items?: InstantlyEmail[]; next_starting_after?: string };
+      try {
+        resp = await instantlyFetch("/emails", params);
+      } catch (err) {
+        const msg = (err as Error).message;
+        console.warn(`   ⚠️ Page ${page} failed after retries: ${msg.slice(0, 120)}`);
+        console.warn(`   📍 Saving cursor for next resume...`);
+        failedAt = cursor;
+        break;
+      }
 
       const items = resp.items || [];
       collected.push(...items);
       page++;
 
+      // Save cursor every 10 pages so partial progress isn't lost
+      if (page % 10 === 0 && resp.next_starting_after) {
+        await saveInstantlyCursor(resp.next_starting_after);
+        console.log(`   💾 Cursor checkpointed at page ${page} (${collected.length} emails so far)`);
+      }
+
       const oldestTs = items.length > 0
         ? Math.min(...items.map((i) => new Date(i.timestamp_email || 0).getTime()))
         : 0;
-      if (oldestTs > 0 && oldestTs < sinceMs) break;
-      if (!resp.next_starting_after || items.length === 0) break;
+      if (oldestTs > 0 && oldestTs < sinceMs) {
+        // Reached historical cutoff — done, clear saved cursor
+        await saveInstantlyCursor(null);
+        console.log(`   ✓ Hit historical cutoff, cursor cleared`);
+        break;
+      }
+      if (!resp.next_starting_after || items.length === 0) {
+        await saveInstantlyCursor(null);
+        console.log(`   ✓ Reached end of feed, cursor cleared`);
+        break;
+      }
       cursor = resp.next_starting_after;
+    }
+
+    if (failedAt) {
+      await saveInstantlyCursor(failedAt);
+      console.log(`   📍 Cursor saved at ${failedAt.slice(0, 8)}... — re-run ETL to resume`);
     }
 
     const inRange = collected.filter((e) => {
