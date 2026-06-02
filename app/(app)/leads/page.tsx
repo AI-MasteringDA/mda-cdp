@@ -20,7 +20,10 @@ export default async function AllLeadsPage({
     getAllLeads(PAGE_SIZE, offset, searchQuery),
     getAllLeadsCount(searchQuery),
   ]);
-  const sorted = [...leads].sort((a, b) => b.hotScore - a.hotScore);
+  // Server already sorts by hot_score DESC for default mode; for search keep DB order
+  const sorted = searchQuery
+    ? [...leads].sort((a, b) => b.hotScore - a.hotScore)
+    : leads;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const buildPageUrl = (p: number) => {

@@ -147,26 +147,52 @@ export async function getAllLeads(
   searchQuery?: string
 ): Promise<Lead[]> {
   const supabase = await createClient();
-  let q = supabase
-    .from("dim_lead")
-    .select("*")
-    .order("first_seen_at", { ascending: false })
-    .range(offset, offset + limit - 1);
-  if (searchQuery && searchQuery.trim()) {
-    q = q.or(buildSearchOrClause(searchQuery.trim()));
-  }
-  const { data: leads } = await q;
-  if (!leads || leads.length === 0) return [];
+  const today = new Date().toISOString().slice(0, 10);
 
-  const leadIds = leads.map((l) => l.lead_id);
+  // Search mode: filter dim_lead by name/email/phone first, then sort locally by hot
+  if (searchQuery && searchQuery.trim()) {
+    const { data: leads } = await supabase
+      .from("dim_lead")
+      .select("*")
+      .or(buildSearchOrClause(searchQuery.trim()))
+      .range(offset, offset + limit - 1);
+    if (!leads || leads.length === 0) return [];
+    const leadIds = leads.map((l) => l.lead_id);
+    const { data: scores } = await supabase
+      .from("fact_lead_score")
+      .select("*")
+      .eq("scored_at", today)
+      .in("lead_id", leadIds);
+    const scoreMap = new Map((scores ?? []).map((s) => [s.lead_id, s]));
+    return leads.map((l) => mergeToLead(l, scoreMap.get(l.lead_id)));
+  }
+
+  // Default mode: sort by hot_score DESC server-side via fact_lead_score
+  // → fetch ranked scores (paginated), then join leads
   const { data: scores } = await supabase
     .from("fact_lead_score")
     .select("*")
-    .eq("scored_at", new Date().toISOString().slice(0, 10))
-    .in("lead_id", leadIds);
-  const scoreMap = new Map((scores ?? []).map((s) => [s.lead_id, s]));
+    .eq("scored_at", today)
+    .order("hot_score", { ascending: false })
+    .order("cold_score", { ascending: false })
+    .range(offset, offset + limit - 1);
+  if (!scores || scores.length === 0) return [];
 
-  return leads.map((l) => mergeToLead(l, scoreMap.get(l.lead_id)));
+  const leadIds = scores.map((s) => s.lead_id);
+  const { data: leads } = await supabase
+    .from("dim_lead")
+    .select("*")
+    .in("lead_id", leadIds);
+  if (!leads) return [];
+
+  const leadMap = new Map(leads.map((l) => [l.lead_id, l]));
+  // Preserve scoring order
+  return scores
+    .map((s) => {
+      const l = leadMap.get(s.lead_id);
+      return l ? mergeToLead(l, s) : null;
+    })
+    .filter((x): x is Lead => x !== null);
 }
 
 export async function getLeadById(id: string): Promise<Lead | null> {
