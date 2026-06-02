@@ -1,7 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_ROUTES = ["/login", "/signup", "/auth/callback", "/api/debug-env", "/api/whoami"];
+const PUBLIC_ROUTES = [
+  "/login",
+  "/signup",
+  "/auth/callback",
+  "/api/debug-env",
+  "/api/whoami",
+  "/api/webhook/", // all webhook receivers (Instantly, SMAX, etc.)
+  "/api/cron/",     // Vercel Cron endpoints (auth via x-vercel-cron header)
+];
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
