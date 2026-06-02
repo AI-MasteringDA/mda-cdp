@@ -58,7 +58,11 @@ function mapUeTypeToEvent(ueType: number | undefined): string {
 let lastFetchAt = 0;
 const FETCH_INTERVAL_MS = 5000;
 
-async function instantlyFetch(path: string, params: Record<string, string> = {}) {
+async function instantlyFetch(
+  path: string,
+  params: Record<string, string> = {},
+  method: "GET" | "POST" = "GET"
+) {
   if (!API_KEY) throw new Error("Thiếu INSTANTLY_API_KEY");
 
   // Throttle
@@ -66,21 +70,37 @@ async function instantlyFetch(path: string, params: Record<string, string> = {})
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   lastFetchAt = Date.now();
 
-  const url = new URL(`${BASE_URL}${path}`);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  // Strip internal _retry from params before sending
+  const cleanParams: Record<string, string> = {};
+  for (const [k, v] of Object.entries(params)) {
+    if (!k.startsWith("_")) cleanParams[k] = v;
+  }
 
-  const res = await fetch(url.toString(), {
+  let url: string;
+  let body: string | undefined;
+  if (method === "POST") {
+    url = `${BASE_URL}${path}`;
+    body = JSON.stringify(cleanParams);
+  } else {
+    const u = new URL(`${BASE_URL}${path}`);
+    for (const [k, v] of Object.entries(cleanParams)) u.searchParams.set(k, v);
+    url = u.toString();
+  }
+
+  const res = await fetch(url, {
+    method,
     headers: {
       Authorization: `Bearer ${API_KEY}`,
       "Content-Type": "application/json",
     },
+    body,
   });
 
   // Retry on 429 (rate limit)
   if (res.status === 429) {
     console.log(`   ⏸️  Rate limit hit, đợi 60s...`);
     await new Promise((r) => setTimeout(r, 60_000));
-    return instantlyFetch(path, params);
+    return instantlyFetch(path, params, method);
   }
 
   // Retry on 5xx (server error tạm thời) với exponential backoff
@@ -91,7 +111,7 @@ async function instantlyFetch(path: string, params: Record<string, string> = {})
       const wait = (retries + 1) * 15_000; // 15s, 30s, 45s, 60s, 75s
       console.log(`   ⏸️  Server error ${res.status}, retry ${retries + 1}/5 sau ${wait/1000}s...`);
       await new Promise((r) => setTimeout(r, wait));
-      return instantlyFetch(path, { ...params, _retry: String(retries + 1) });
+      return instantlyFetch(path, { ...params, _retry: String(retries + 1) }, method);
     }
     console.warn(`   ❌ Gave up after 5 retries on ${path}`);
   }
@@ -115,8 +135,9 @@ async function pullInstantlyLeadsMap(maxPages = 20): Promise<Map<string, { fullN
     if (cursor) params.starting_after = cursor;
 
     try {
+      // Instantly v2 changed /leads (GET) → /leads/list (POST)
       const resp: { items?: InstantlyLead[]; next_starting_after?: string } =
-        await instantlyFetch("/leads", params);
+        await instantlyFetch("/leads/list", params, "POST");
       const items = resp.items || [];
 
       for (const l of items) {
