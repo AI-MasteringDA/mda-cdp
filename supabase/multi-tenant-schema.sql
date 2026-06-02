@@ -46,6 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_sync_job_account        ON sync_job(account_id);
 -- dim_lead.email unique → cần thay đổi: unique per (account_id, email)
 -- Drop existing global unique constraint, add composite unique
 ALTER TABLE dim_lead DROP CONSTRAINT IF EXISTS dim_lead_email_key;
+ALTER TABLE dim_lead DROP CONSTRAINT IF EXISTS dim_lead_account_email_unique;
 ALTER TABLE dim_lead ADD CONSTRAINT dim_lead_account_email_unique UNIQUE (account_id, email);
 
 -- 4. RLS HELPER: check if current user belongs to an account
