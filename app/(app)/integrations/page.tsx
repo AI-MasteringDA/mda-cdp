@@ -73,6 +73,11 @@ export default async function IntegrationsPage() {
                 {integ.recordCount > 0 && (
                   <span className="ml-auto text-[12px] font-medium tabular-nums">
                     {integ.recordCount.toLocaleString("vi-VN")} lead
+                    {integ.touchpointCount > 0 && (
+                      <span className="ml-1 text-muted-2">
+                        · {integ.touchpointCount.toLocaleString("vi-VN")} tp
+                      </span>
+                    )}
                   </span>
                 )}
               </div>

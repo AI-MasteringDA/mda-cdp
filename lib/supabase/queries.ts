@@ -347,9 +347,9 @@ export async function getIntegrationsStatus() {
     { id: "salesforce", name: "Salesforce",     category: "CRM",     description: "Sales Cloud + Service Cloud — deal, contact, hoạt động tư vấn.", authType: "OAuth 2.0" },
     { id: "smax",       name: "SMAX",           category: "Chat",    description: "Chat trên fanpage, bot, auto-message.",                          authType: "API Key" },
     { id: "instantly",  name: "Instantly",      category: "Email",   description: "Email outreach + tracking open/click.",                         authType: "API Key" },
+    { id: "web",        name: "Wix Website",    category: "Web",     description: "Contacts CRM + Members + Form submissions từ mastering-da.com.",  authType: "API Key" },
     { id: "lark",       name: "Lark Bot",       category: "Webhook", description: "Gửi cảnh báo urgent đến TVV phụ trách qua DM/group.",            authType: "Webhook URL" },
     { id: "fanpage",    name: "Facebook Fanpage", category: "Social", description: "MasteringDataAnalytics + PhuongThaoAnalytics — đo lead nguồn.", authType: "OAuth 2.0" },
-    { id: "web",        name: "Website + Ads",  category: "Web",     description: "Pageview, blog reads, click bảng giá.",                          authType: "Webhook URL" },
   ];
 
   const { data: jobs } = await supabase
@@ -357,13 +357,29 @@ export async function getIntegrationsStatus() {
     .select("source, status, started_at, finished_at, error_message")
     .order("started_at", { ascending: false });
 
-  const { data: leadsBySrc } = await supabase
-    .from("dim_lead")
-    .select("source");
+  // Count leads per source via head:true (exact count, bypass 1000 default limit)
   const countBySource: Record<string, number> = {};
-  for (const l of leadsBySrc ?? []) {
-    countBySource[l.source] = (countBySource[l.source] ?? 0) + 1;
-  }
+  await Promise.all(
+    SOURCES.map(async (s) => {
+      const { count } = await supabase
+        .from("dim_lead")
+        .select("*", { count: "exact", head: true })
+        .eq("source", s.id);
+      countBySource[s.id] = count ?? 0;
+    })
+  );
+
+  // Also count touchpoints per source (more accurate signal of activity)
+  const touchpointsBySource: Record<string, number> = {};
+  await Promise.all(
+    SOURCES.map(async (s) => {
+      const { count } = await supabase
+        .from("fact_touchpoint")
+        .select("*", { count: "exact", head: true })
+        .eq("source", s.id);
+      touchpointsBySource[s.id] = count ?? 0;
+    })
+  );
 
   const latestBySrc = new Map<string, { status: string; started_at: string; error_message: string | null }>();
   for (const j of jobs ?? []) {
@@ -375,11 +391,11 @@ export async function getIntegrationsStatus() {
   return SOURCES.map((s) => {
     const latest = latestBySrc.get(s.id);
     let status: "connected" | "error" | "disconnected" | "pending";
-    if (!latest) {
+    if (!latest && (countBySource[s.id] ?? 0) === 0) {
       status = "disconnected";
-    } else if (latest.status === "failed") {
+    } else if (latest?.status === "failed") {
       status = "error";
-    } else if (latest.status === "running") {
+    } else if (latest?.status === "running") {
       status = "pending";
     } else {
       status = "connected";
@@ -389,6 +405,7 @@ export async function getIntegrationsStatus() {
       status,
       lastSyncAt: latest ? new Date(latest.started_at) : undefined,
       recordCount: countBySource[s.id] ?? 0,
+      touchpointCount: touchpointsBySource[s.id] ?? 0,
       errorMessage: latest?.error_message ?? undefined,
     };
   });
