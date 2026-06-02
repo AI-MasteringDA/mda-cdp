@@ -45,10 +45,15 @@ function buildFullName(lead: InstantlyLead): string | null {
   return full || null;
 }
 
+// Instantly ue_type mapping (email activity types):
+// 1 = sent, 2 = opened, 3 = replied, 4 = clicked, 5 = bounced/failed
 function mapUeTypeToEvent(ueType: number | undefined): string {
   switch (ueType) {
     case 1: return "email_sent";
+    case 2: return "email_open";
     case 3: return "email_reply";
+    case 4: return "email_click";
+    case 5: return "email_bounce";
     default: return "email_sent";
   }
 }
