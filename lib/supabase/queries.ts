@@ -122,16 +122,26 @@ export async function getHotLeads(limit = 50): Promise<Lead[]> {
     .filter((x): x is Lead => x !== null);
 }
 
-export async function getColdLeads(limit = 50): Promise<Lead[]> {
+export async function getColdLeadsCount(): Promise<number> {
+  const supabase = await createClient();
+  const { count } = await supabase
+    .from("fact_lead_score")
+    .select("*", { count: "exact", head: true })
+    .eq("scored_at", new Date().toISOString().slice(0, 10))
+    .gte("cold_score", 40);
+  return count ?? 0;
+}
+
+export async function getColdLeads(limit = 100, offset = 0): Promise<Lead[]> {
   const supabase = await createClient();
 
   const { data: scores } = await supabase
     .from("fact_lead_score")
     .select("*")
     .eq("scored_at", new Date().toISOString().slice(0, 10))
-    .gte("cold_score", 70)
+    .gte("cold_score", 40)
     .order("cold_score", { ascending: false })
-    .limit(limit);
+    .range(offset, offset + limit - 1);
   if (!scores || scores.length === 0) return [];
 
   const leadIds = scores.map((s) => s.lead_id);
