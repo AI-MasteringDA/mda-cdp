@@ -89,17 +89,33 @@ export async function batchResolveOrCreate(
     });
   }
 
-  // 3. UPSERT (ignoreDuplicates skip rows có email trùng)
+  // 3. Insert truly new leads only (multi-tenant: UNIQUE is on account_id+email
+  // not email alone, so onConflict: "email" no longer matches. Check-then-insert
+  // instead — safer for current sequential ETL anyway.)
   if (newLeads.length > 0) {
-    console.log(`   ↳ [Identity] Upsert ${newLeads.length} lead mới từ source "${options.source}"`);
-    const BATCH = 500;
-    for (let i = 0; i < newLeads.length; i += BATCH) {
-      const batch = newLeads.slice(i, i + BATCH);
-      const { error } = await admin
+    // Pre-check which emails already exist (paginated IN-query)
+    const existingEmails = new Set<string>();
+    const allEmails = newLeads.map((l) => l.email);
+    for (let i = 0; i < allEmails.length; i += 100) {
+      const batch = allEmails.slice(i, i + 100);
+      const { data } = await admin
         .from("dim_lead")
-        .upsert(batch, { onConflict: "email", ignoreDuplicates: true });
-      if (error) {
-        console.warn(`   ⚠️ Upsert batch ${i}: ${error.message}`);
+        .select("email")
+        .in("email", batch);
+      for (const l of data ?? []) {
+        if (l.email) existingEmails.add(l.email.toLowerCase().trim());
+      }
+    }
+
+    const trulyNew = newLeads.filter((l) => !existingEmails.has(l.email));
+    console.log(`   ↳ [Identity] Insert ${trulyNew.length} lead mới (skip ${newLeads.length - trulyNew.length} đã tồn tại) từ source "${options.source}"`);
+
+    const BATCH = 500;
+    for (let i = 0; i < trulyNew.length; i += BATCH) {
+      const batch = trulyNew.slice(i, i + BATCH);
+      const { error } = await admin.from("dim_lead").insert(batch);
+      if (error && !error.message.includes("duplicate key")) {
+        console.warn(`   ⚠️ Insert batch ${i}: ${error.message}`);
       }
     }
   }
