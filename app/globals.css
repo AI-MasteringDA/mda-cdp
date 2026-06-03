@@ -1,37 +1,62 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --surface: #fbfbfd;
-  --subtle: #f5f5f7;
-  --foreground: #1d1d1f;
-  --muted: #6e6e73;
-  --muted-2: #86868b;
-  --border: #d2d2d7;
-  --border-subtle: #ececef;
-  --accent: #0071e3;
-  --hot: #ff3b30;
-  --warm: #ff9500;
-  --cold: #8e8e93;
-  --success: #34c759;
+  /* Soft Structuralism palette — refined whites, subtle warm undertones */
+  --background: #fafafa;
+  --surface: #ffffff;
+  --subtle: #f4f4f5;
+  --soft: #ededef;
+  --foreground: #09090b;
+  --foreground-secondary: #3f3f46;
+  --muted: #71717a;
+  --muted-2: #a1a1aa;
+  --border: #d4d4d8;
+  --border-subtle: #e4e4e7;
+  --border-strong: #18181b;
+
+  /* Brand */
+  --accent: #18181b;
+  --accent-fg: #fafafa;
+
+  /* Semantic tier colors — soft, not screaming */
+  --hot: #dc2626;
+  --hot-soft: #fee2e2;
+  --warm: #ea580c;
+  --warm-soft: #ffedd5;
+  --cool: #0891b2;
+  --cool-soft: #cffafe;
+  --dormant: #52525b;
+  --dormant-soft: #e4e4e7;
+  --success: #16a34a;
+  --success-soft: #dcfce7;
+
+  /* Shadows — diffused ambient */
+  --shadow-sm: 0 1px 2px 0 rgba(9, 9, 11, 0.04);
+  --shadow-md: 0 4px 16px -4px rgba(9, 9, 11, 0.08), 0 2px 4px -2px rgba(9, 9, 11, 0.04);
+  --shadow-lg: 0 12px 32px -8px rgba(9, 9, 11, 0.10), 0 4px 8px -4px rgba(9, 9, 11, 0.04);
+  --shadow-xl: 0 24px 48px -12px rgba(9, 9, 11, 0.18), 0 8px 16px -8px rgba(9, 9, 11, 0.08);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);
   --color-subtle: var(--subtle);
+  --color-soft: var(--soft);
   --color-foreground: var(--foreground);
+  --color-foreground-secondary: var(--foreground-secondary);
   --color-muted: var(--muted);
   --color-muted-2: var(--muted-2);
   --color-border: var(--border);
   --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
   --color-accent: var(--accent);
   --color-hot: var(--hot);
   --color-warm: var(--warm);
-  --color-cold: var(--cold);
+  --color-cool: var(--cool);
+  --color-dormant: var(--dormant);
   --color-success: var(--success);
-  --font-sans: var(--font-inter), system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
+  --font-sans: var(--font-display), "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-mono), "JetBrains Mono", ui-monospace, monospace;
 }
 
 html,
@@ -39,34 +64,87 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
-  font-feature-settings: "ss01", "cv11";
+  font-feature-settings: "ss01", "cv11", "cv02", "cv03";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-h1,
-h2,
-h3 {
-  letter-spacing: -0.02em;
+/* Tighter tracking for big display text */
+h1, h2, h3, h4 {
+  letter-spacing: -0.025em;
+  font-feature-settings: "ss01", "ss02", "cv11";
 }
 
-.hairline-b {
-  border-bottom: 1px solid var(--border-subtle);
+.font-display {
+  font-family: var(--font-sans);
+  letter-spacing: -0.03em;
 }
-.hairline-r {
-  border-right: 1px solid var(--border-subtle);
+
+.font-mono {
+  font-family: var(--font-mono);
 }
-.hairline {
-  border: 1px solid var(--border-subtle);
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
 }
 
 /* ============================================================
-   ANIMATIONS — spring motion, premium feel (Linear/Notion vibe)
+   PREMIUM TEXTURE — subtle film grain on body
    ============================================================ */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 999;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
 
+/* ============================================================
+   DOUBLE-BEZEL CARD PATTERN — premium agency style
+   ============================================================ */
+.bezel {
+  background: var(--soft);
+  padding: 6px;
+  border-radius: 28px;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 0 0 1px rgba(9, 9, 11, 0.04);
+}
+.bezel-inner {
+  background: var(--surface);
+  border-radius: 22px;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 0 0 1px rgba(9, 9, 11, 0.04);
+}
+
+/* Lighter card — no outer bezel */
+.card-soft {
+  background: var(--surface);
+  border-radius: 20px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ============================================================
+   LEGACY hairline (kept for compat)
+   ============================================================ */
+.hairline-b { border-bottom: 1px solid var(--border-subtle); }
+.hairline-r { border-right: 1px solid var(--border-subtle); }
+.hairline   { border: 1px solid var(--border-subtle); }
+
+/* ============================================================
+   ANIMATIONS — agency-grade motion
+   ============================================================ */
 @keyframes fadeUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(16px); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0); filter: blur(0); }
 }
 @keyframes fadeIn {
   from { opacity: 0; }
@@ -77,109 +155,89 @@ h3 {
   to   { opacity: 1; transform: translateX(0); }
 }
 @keyframes scaleIn {
-  from { opacity: 0; transform: scale(0.96); }
+  from { opacity: 0; transform: scale(0.95); }
   to   { opacity: 1; transform: scale(1); }
 }
 @keyframes barGrow {
   from { transform: scaleX(0); }
   to   { transform: scaleX(1); }
 }
-@keyframes shimmer {
-  0%   { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-@keyframes pulse-soft {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.6; }
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 0 0 currentColor; opacity: 0.4; }
+  50%      { box-shadow: 0 0 0 8px transparent; opacity: 0; }
 }
 
-/* Utility classes */
-.anim-fade-up    { animation: fadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.anim-fade-in    { animation: fadeIn 0.4s ease-out both; }
-.anim-slide-in   { animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.anim-scale-in   { animation: scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.anim-bar-grow   { animation: barGrow 0.8s cubic-bezier(0.16, 1, 0.3, 1) both; transform-origin: left; }
-.anim-pulse-soft { animation: pulse-soft 2s ease-in-out infinite; }
+/* Premium ease (taste-skill signature: cubic-bezier(0.32, 0.72, 0, 1)) */
+.anim-fade-up    { animation: fadeUp 0.8s cubic-bezier(0.32, 0.72, 0, 1) both; }
+.anim-fade-in    { animation: fadeIn 0.6s cubic-bezier(0.32, 0.72, 0, 1) both; }
+.anim-slide-in   { animation: slideIn 0.7s cubic-bezier(0.32, 0.72, 0, 1) both; }
+.anim-scale-in   { animation: scaleIn 0.6s cubic-bezier(0.32, 0.72, 0, 1) both; }
+.anim-bar-grow   { animation: barGrow 1s cubic-bezier(0.32, 0.72, 0, 1) both; transform-origin: left; }
 
 /* Stagger delays */
-.delay-1  { animation-delay: 50ms; }
-.delay-2  { animation-delay: 100ms; }
-.delay-3  { animation-delay: 150ms; }
-.delay-4  { animation-delay: 200ms; }
-.delay-5  { animation-delay: 250ms; }
-.delay-6  { animation-delay: 300ms; }
-.delay-7  { animation-delay: 350ms; }
-.delay-8  { animation-delay: 400ms; }
+.delay-1 { animation-delay: 60ms; }
+.delay-2 { animation-delay: 120ms; }
+.delay-3 { animation-delay: 180ms; }
+.delay-4 { animation-delay: 240ms; }
+.delay-5 { animation-delay: 300ms; }
+.delay-6 { animation-delay: 360ms; }
+.delay-7 { animation-delay: 420ms; }
+.delay-8 { animation-delay: 480ms; }
 
-/* Premium card — soft hover lift */
+/* Card hover physics */
 .card-lift {
-  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-              border-color 0.25s ease;
+  transition: transform 0.7s cubic-bezier(0.32, 0.72, 0, 1),
+              box-shadow 0.7s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .card-lift:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.08),
-              0 2px 6px -2px rgba(0, 0, 0, 0.04);
-  border-color: var(--border);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lg);
 }
 
-/* Interactive — buttons/links subtle press */
+/* Button physics */
 .press {
-  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1),
-              background-color 0.2s ease;
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1),
+              background-color 0.3s ease;
 }
 .press:active {
-  transform: scale(0.97);
+  transform: scale(0.98);
 }
 
-/* Smooth row hover (list items) */
+/* Row hover — slides + accent bar */
 .row-hover {
   position: relative;
-  transition: background-color 0.2s ease, padding-left 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.4s cubic-bezier(0.32, 0.72, 0, 1),
+              padding-left 0.5s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .row-hover:hover {
   background-color: var(--subtle);
-  padding-left: calc(0.75rem + 4px);
+  padding-left: calc(0.75rem + 6px);
 }
 .row-hover::before {
   content: "";
   position: absolute;
   left: 0;
-  top: 12%;
-  bottom: 12%;
-  width: 2px;
+  top: 15%;
+  bottom: 15%;
+  width: 3px;
   background: var(--foreground);
   border-radius: 2px;
   transform: scaleY(0);
-  transform-origin: center;
-  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.5s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .row-hover:hover::before {
   transform: scaleY(1);
 }
 
-/* Chevron arrow slide on hover */
+/* Arrow translates diagonally on group hover */
 .hover-arrow {
-  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.5s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .group:hover .hover-arrow {
-  transform: translateX(3px);
+  transform: translate(4px, -1px) scale(1.05);
 }
 
-/* Skeleton shimmer for loading states */
-.skeleton-shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--subtle) 0%,
-    rgba(255, 255, 255, 0.5) 50%,
-    var(--subtle) 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.6s ease-in-out infinite;
-}
-
-/* Animated tab underline */
+/* Tab underline — scales from center */
 .tab-underline {
   position: relative;
 }
@@ -191,39 +249,20 @@ h3 {
   right: 50%;
   height: 2px;
   background: var(--foreground);
-  transition: left 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-              right 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: 2px;
+  transition: left 0.5s cubic-bezier(0.32, 0.72, 0, 1),
+              right 0.5s cubic-bezier(0.32, 0.72, 0, 1);
 }
-.tab-underline:hover::after {
-  left: 0;
-  right: 0;
-}
+.tab-underline:hover::after,
 .tab-underline.active::after {
   left: 0;
   right: 0;
 }
 
-/* Number tabular grow on data update */
-.kpi-number {
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-  transition: color 0.3s ease;
-}
-
-/* Glow ring for hot leads / important elements */
-.glow-hot {
-  box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.4);
-  animation: glowHot 2s ease-in-out infinite;
-}
-@keyframes glowHot {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.4); }
-  50%      { box-shadow: 0 0 0 8px rgba(255, 59, 48, 0); }
-}
-
-/* Sidebar active item — smooth highlight */
+/* Nav item active state */
 .nav-item {
   position: relative;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 .nav-item::before {
   content: "";
@@ -235,10 +274,51 @@ h3 {
   background: var(--foreground);
   border-radius: 2px;
   transform: scaleY(0);
-  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.5s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .nav-item.active::before {
   transform: scaleY(1);
+}
+
+/* Glow pulse for important elements (NÓNG indicators) */
+.glow-hot {
+  position: relative;
+}
+.glow-hot::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  background: var(--hot);
+  opacity: 0;
+  z-index: -1;
+  animation: glowPulse 2.5s ease-in-out infinite;
+}
+
+/* Eyebrow tag — small uppercase label above headings */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.eyebrow::before {
+  content: "";
+  width: 16px;
+  height: 1px;
+  background: var(--muted-2);
+}
+
+/* Gradient text for hero numbers */
+.gradient-num {
+  background: linear-gradient(180deg, var(--foreground) 0%, var(--foreground-secondary) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 /* Reduce motion for accessibility */

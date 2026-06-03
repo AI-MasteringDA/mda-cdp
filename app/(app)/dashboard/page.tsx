@@ -172,156 +172,170 @@ export default async function DashboardPage() {
       <Topbar title="Tổng quan" />
       <DashboardTabs />
 
-      <main className="mx-auto max-w-[1280px] px-8 py-8">
-        <div className="mb-6">
-          <h1 className="text-[22px] font-semibold tracking-tight">Tổng quan workspace</h1>
-          <p className="mt-1 text-[12px] text-muted">
-            Chỉ số lifetime · cập nhật theo Vercel Cron mỗi 1h
+      <main className="mx-auto max-w-[1400px] px-8 py-12">
+        {/* Hero header */}
+        <div className="mb-12 anim-fade-up">
+          <span className="eyebrow">Workspace Overview</span>
+          <h1 className="mt-4 text-[44px] font-bold tracking-[-0.045em] leading-[1.05] font-display">
+            Mọi chỉ số quan trọng,<br />
+            <span className="text-muted-2">trong 1 view duy nhất.</span>
+          </h1>
+          <p className="mt-4 text-[15px] text-muted max-w-2xl leading-relaxed">
+            Cập nhật mỗi giờ qua Vercel Cron · Realtime opens/clicks qua Instantly webhook ·
+            Scoring dựa trên engagement đa kênh.
           </p>
         </div>
 
-        {/* KPI Row 1 */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <div className="anim-fade-up delay-1"><KPICard label="🔥 Lead NÓNG" value={hot} deltaLabel={`/${(hot + warm + cool + dormant).toLocaleString("vi-VN")} total`} /></div>
-          <div className="anim-fade-up delay-2"><KPICard label="🎓 Conversion" value={conversions} deltaLabel={`${won} đã chốt`} /></div>
-          <div className="anim-fade-up delay-3"><KPICard label="📈 Conv rate" value={convRate} unit="%" deltaLabel="conv / total lead" /></div>
-          <div className="anim-fade-up delay-4"><KPICard label="🆕 Tổng lead" value={totalLeads.toLocaleString("vi-VN")} deltaLabel="trong workspace" /></div>
+        {/* KPI Grid — 2x4 with double-bezel */}
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-4">
+          <div className="anim-fade-up delay-1"><KPICard label="Lead NÓNG" value={hot} deltaLabel={`trên ${(hot + warm + cool + dormant).toLocaleString("vi-VN")} lead`} accent="hot" /></div>
+          <div className="anim-fade-up delay-2"><KPICard label="Conversion" value={conversions} deltaLabel={`${won} đã chốt`} accent="success" /></div>
+          <div className="anim-fade-up delay-3"><KPICard label="Conv Rate" value={convRate} unit="%" deltaLabel="conv / total" accent="success" /></div>
+          <div className="anim-fade-up delay-4"><KPICard label="Tổng Lead" value={totalLeads.toLocaleString("vi-VN")} deltaLabel="lifetime" /></div>
+          <div className="anim-fade-up delay-5"><KPICard label="Lead Chat" value={chats} deltaLabel={`${chatStaff} TVV reply`} accent="cool" /></div>
+          <div className="anim-fade-up delay-6"><KPICard label="Reply Rate" value={replyRate} unit="%" deltaLabel="reply / chat" accent="cool" /></div>
+          <div className="anim-fade-up delay-7"><KPICard label="Email Sent" value={emailsSent} deltaLabel={`${emailOpens} opens`} accent="warm" /></div>
+          <div className="anim-fade-up delay-8"><KPICard label="Open Rate" value={openRate} unit="%" deltaLabel="opens / sent" accent="warm" /></div>
         </div>
 
-        {/* KPI Row 2 */}
-        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <div className="anim-fade-up delay-5"><KPICard label="💬 Lead chat" value={chats} deltaLabel={`${chatStaff} TVV reply`} /></div>
-          <div className="anim-fade-up delay-6"><KPICard label="↩ Reply rate" value={replyRate} unit="%" deltaLabel="reply / chat" /></div>
-          <div className="anim-fade-up delay-7"><KPICard label="📧 Email gửi" value={emailsSent} deltaLabel={`${emailOpens} đã mở`} /></div>
-          <div className="anim-fade-up delay-8"><KPICard label="📬 Open rate" value={openRate} unit="%" deltaLabel="opens / sent" /></div>
+        {/* Section: Lead distribution */}
+        <div className="mt-16">
+          <span className="eyebrow">Lead Intelligence</span>
+          <h2 className="mt-3 text-[28px] font-bold tracking-[-0.03em]">Phân bố & nguồn data</h2>
         </div>
 
-        {/* Tier Donut + Source Leads */}
-        <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <section className="hairline card-lift anim-fade-up rounded-2xl bg-white p-6" style={{ animationDelay: "300ms" }}>
-            <div className="mb-5">
-              <h3 className="text-[15px] font-semibold">Phân bố Lead theo tier</h3>
-              <p className="mt-0.5 text-[12px] text-muted">Scoring hiện tại</p>
-            </div>
-            <SimpleDonut data={tierData} size={180} />
-          </section>
-
-          <section className="hairline card-lift anim-fade-up rounded-2xl bg-white p-6" style={{ animationDelay: "400ms" }}>
-            <div className="mb-5">
-              <h3 className="text-[15px] font-semibold">Lead theo nguồn</h3>
-              <p className="mt-0.5 text-[12px] text-muted">Số lead unique mỗi source</p>
-            </div>
-            <SimpleBar data={sourceLeads} valueLabel="lead" />
-          </section>
-        </div>
-
-        {/* Source Touchpoints + Total stats */}
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <section className="hairline card-lift anim-fade-up rounded-2xl bg-white p-6" style={{ animationDelay: "500ms" }}>
-            <div className="mb-5">
-              <h3 className="text-[15px] font-semibold">Touchpoint theo nguồn</h3>
-              <p className="mt-0.5 text-[12px] text-muted">Tổng số event mỗi source</p>
+          <section className="bezel anim-fade-up card-lift" style={{ animationDelay: "300ms" }}>
+            <div className="bezel-inner p-7">
+              <div className="mb-6">
+                <span className="eyebrow">Tier Distribution</span>
+                <h3 className="mt-2 text-[18px] font-bold tracking-tight">Phân bố scoring</h3>
+              </div>
+              <SimpleDonut data={tierData} size={180} />
             </div>
-            <SimpleBar data={sourceTp} valueLabel="events" />
           </section>
 
-          <section className="hairline card-lift anim-fade-up rounded-2xl bg-white p-6" style={{ animationDelay: "550ms" }}>
-            <div className="mb-5">
-              <h3 className="text-[15px] font-semibold">📊 Quy mô workspace</h3>
-              <p className="mt-0.5 text-[12px] text-muted">Snapshot tại thời điểm</p>
+          <section className="bezel anim-fade-up card-lift" style={{ animationDelay: "400ms" }}>
+            <div className="bezel-inner p-7">
+              <div className="mb-6">
+                <span className="eyebrow">Source Mix</span>
+                <h3 className="mt-2 text-[18px] font-bold tracking-tight">Lead theo nguồn</h3>
+              </div>
+              <SimpleBar data={sourceLeads} valueLabel="lead" />
             </div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-2 font-medium">Lead</div>
-                <div className="mt-1 text-[28px] font-semibold tabular-nums">{totalLeads.toLocaleString("vi-VN")}</div>
+          </section>
+        </div>
+
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <section className="bezel anim-fade-up card-lift" style={{ animationDelay: "500ms" }}>
+            <div className="bezel-inner p-7">
+              <div className="mb-6">
+                <span className="eyebrow">Activity Volume</span>
+                <h3 className="mt-2 text-[18px] font-bold tracking-tight">Touchpoint theo nguồn</h3>
               </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-2 font-medium">Touchpoint</div>
-                <div className="mt-1 text-[28px] font-semibold tabular-nums">{totalTouchpoints.toLocaleString("vi-VN")}</div>
+              <SimpleBar data={sourceTp} valueLabel="events" />
+            </div>
+          </section>
+
+          <section className="bezel anim-fade-up card-lift" style={{ animationDelay: "550ms" }}>
+            <div className="bezel-inner p-7">
+              <div className="mb-6">
+                <span className="eyebrow">Workspace Scale</span>
+                <h3 className="mt-2 text-[18px] font-bold tracking-tight">Snapshot</h3>
               </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-2 font-medium">Đã chốt</div>
-                <div className="mt-1 text-[28px] font-semibold tabular-nums text-[#22c55e]">{won.toLocaleString("vi-VN")}</div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-2 font-medium">Avg tp/lead</div>
-                <div className="mt-1 text-[28px] font-semibold tabular-nums">
-                  {totalLeads ? (totalTouchpoints / totalLeads).toFixed(1) : "0"}
+              <div className="grid grid-cols-2 gap-x-6 gap-y-6">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-muted-2 font-semibold">Lead</div>
+                  <div className="mt-2 text-[36px] font-bold tabular-nums tracking-[-0.03em] gradient-num">{totalLeads.toLocaleString("vi-VN")}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-muted-2 font-semibold">Touchpoint</div>
+                  <div className="mt-2 text-[36px] font-bold tabular-nums tracking-[-0.03em] gradient-num">{totalTouchpoints.toLocaleString("vi-VN")}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-muted-2 font-semibold">Đã chốt</div>
+                  <div className="mt-2 text-[36px] font-bold tabular-nums tracking-[-0.03em] text-[var(--success)]">{won.toLocaleString("vi-VN")}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-muted-2 font-semibold">Avg tp/lead</div>
+                  <div className="mt-2 text-[36px] font-bold tabular-nums tracking-[-0.03em] gradient-num">
+                    {totalLeads ? (totalTouchpoints / totalLeads).toFixed(1) : "0"}
+                  </div>
                 </div>
               </div>
             </div>
           </section>
         </div>
 
-        {/* Recent Activity */}
+        {/* Activity */}
         {recent.length > 0 && (
-          <section className="anim-fade-up mt-6 hairline rounded-2xl bg-white" style={{ animationDelay: "650ms" }}>
-            <div className="hairline-b flex items-center justify-between px-6 py-4">
+          <div className="mt-16">
+            <div className="mb-6 flex items-end justify-between">
               <div>
-                <h3 className="text-[15px] font-semibold">⚡ Hoạt động realtime</h3>
-                <p className="mt-0.5 text-[12px] text-muted">10 sự kiện mới nhất</p>
+                <span className="eyebrow">Live Feed</span>
+                <h2 className="mt-3 text-[28px] font-bold tracking-[-0.03em]">Hoạt động realtime</h2>
               </div>
-              <Link href="/leads" className="flex items-center gap-1 text-[12px] font-medium text-muted hover:text-foreground">
-                Tất cả lead
-                <ChevronRight className="h-3.5 w-3.5" strokeWidth={2} />
+              <Link href="/leads" className="press group inline-flex items-center gap-2 rounded-full bg-foreground px-5 py-2.5 text-[13px] font-semibold text-white">
+                Xem tất cả lead
+                <ChevronRight className="hover-arrow h-4 w-4" strokeWidth={2} />
               </Link>
             </div>
-            <div className="divide-y divide-[var(--border-subtle)]">
-              {recent.map((r, i) => (
-                <div key={r.id} className={`anim-slide-in flex items-start gap-3 px-6 py-3 transition-colors hover:bg-subtle`} style={{ animationDelay: `${700 + i * 40}ms` }}>
-                  <div className="text-[11px] uppercase tracking-wider text-muted-2 w-16 shrink-0 mt-1">
-                    {r.source}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[13px] truncate">
-                      <span className="font-medium">{r.lead}</span>
-                      <span className="text-muted-2 ml-2">·</span>
-                      <span className="text-muted ml-2">{r.title}</span>
+            <section className="bezel anim-fade-up" style={{ animationDelay: "650ms" }}>
+              <div className="bezel-inner divide-y divide-[var(--border-subtle)]">
+                {recent.map((r, i) => (
+                  <div key={r.id} className="anim-slide-in flex items-center gap-5 px-7 py-4 transition-colors hover:bg-[var(--subtle)]" style={{ animationDelay: `${700 + i * 40}ms` }}>
+                    <div className="inline-flex items-center gap-2 rounded-full bg-[var(--subtle)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-muted-2 shrink-0">
+                      {r.source}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[14px]">
+                        <span className="font-semibold">{r.lead}</span>
+                        <span className="text-muted-2 mx-2">·</span>
+                        <span className="text-muted">{r.title}</span>
+                      </div>
+                    </div>
+                    <div className="text-[12px] text-muted-2 tabular-nums shrink-0 font-medium">
+                      {formatRelative(r.at)}
                     </div>
                   </div>
-                  <div className="text-[11px] text-muted-2 tabular-nums shrink-0">
-                    {formatRelative(r.at)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
+                ))}
+              </div>
+            </section>
+          </div>
         )}
 
-        {/* Navigation to other dashboards */}
-        <section className="anim-fade-up mt-6 hairline rounded-2xl bg-white p-6" style={{ animationDelay: "800ms" }}>
-          <h3 className="text-[15px] font-semibold mb-3">🧭 Đi tới dashboard khác</h3>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Link href="/dashboard/sales" className="press card-lift group rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3">
-              <div className="flex items-center justify-between">
-                <div className="text-[14px] font-medium">Sales / TVV</div>
-                <ChevronRight className="hover-arrow h-4 w-4 text-muted-2" strokeWidth={1.75} />
+        {/* Explore other dashboards */}
+        <div className="mt-16">
+          <span className="eyebrow">Deep Dive</span>
+          <h2 className="mt-3 text-[28px] font-bold tracking-[-0.03em]">Khám phá dashboard khác</h2>
+        </div>
+        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {[
+            { href: "/dashboard/sales",     title: "Sales / TVV",     desc: "Hiệu suất TVV · conversion · response rate",    delay: 700 },
+            { href: "/dashboard/marketing", title: "Marketing",        desc: "Source efficiency · campaign performance",       delay: 760 },
+            { href: "/dashboard/funnel",    title: "Conversion Funnel",desc: "5-stage funnel · drop-off · insights",           delay: 820 },
+            { href: "/dashboard/trends",    title: "Trends & Cohort",  desc: "Weekly buckets · activity trend · cohort",       delay: 880 },
+          ].map((card) => (
+            <Link
+              key={card.href}
+              href={card.href}
+              className="bezel press card-lift group anim-fade-up"
+              style={{ animationDelay: `${card.delay}ms` }}
+            >
+              <div className="bezel-inner p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <span className="eyebrow">View</span>
+                  <ChevronRight className="hover-arrow h-4 w-4 text-muted-2" strokeWidth={1.75} />
+                </div>
+                <h3 className="text-[18px] font-bold tracking-tight">{card.title}</h3>
+                <p className="mt-2 text-[12px] text-muted leading-relaxed">{card.desc}</p>
               </div>
-              <div className="text-[11px] text-muted-2 mt-1">Hiệu suất TVV, conversion</div>
             </Link>
-            <Link href="/dashboard/marketing" className="press card-lift group rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3">
-              <div className="flex items-center justify-between">
-                <div className="text-[14px] font-medium">Marketing</div>
-                <ChevronRight className="hover-arrow h-4 w-4 text-muted-2" strokeWidth={1.75} />
-              </div>
-              <div className="text-[11px] text-muted-2 mt-1">Source efficiency, campaigns</div>
-            </Link>
-            <Link href="/dashboard/funnel" className="press card-lift group rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3">
-              <div className="flex items-center justify-between">
-                <div className="text-[14px] font-medium">Conversion Funnel</div>
-                <ChevronRight className="hover-arrow h-4 w-4 text-muted-2" strokeWidth={1.75} />
-              </div>
-              <div className="text-[11px] text-muted-2 mt-1">5-stage funnel</div>
-            </Link>
-            <Link href="/dashboard/trends" className="press card-lift group rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3">
-              <div className="flex items-center justify-between">
-                <div className="text-[14px] font-medium">Trends</div>
-                <ChevronRight className="hover-arrow h-4 w-4 text-muted-2" strokeWidth={1.75} />
-              </div>
-              <div className="text-[11px] text-muted-2 mt-1">Hoạt động theo thời gian</div>
-            </Link>
-          </div>
-        </section>
+          ))}
+        </div>
+
+        {/* Footer breathing space */}
+        <div className="h-24" />
       </main>
     </>
   );
