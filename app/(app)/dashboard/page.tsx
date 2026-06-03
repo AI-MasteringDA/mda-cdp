@@ -2,13 +2,11 @@ import { Topbar } from "@/components/Topbar";
 import { KPICard } from "@/components/KPICard";
 import { DashboardTabs } from "@/components/DashboardTabs";
 import { DateRangeFilter, parseRange } from "@/components/DateRangeFilter";
-import { DashboardCharts } from "@/components/DashboardCharts";
 import {
   getKpisInRange,
   getTierDistribution,
   getSourceDistribution,
   getEventTypeDistribution,
-  getDailyActivity,
 } from "@/lib/supabase/queries";
 
 export const dynamic = "force-dynamic";
@@ -32,8 +30,6 @@ export default async function DashboardPage({
     safe(() => getSourceDistribution(), [] as Awaited<ReturnType<typeof getSourceDistribution>>),
     safe(() => getEventTypeDistribution(), [] as Awaited<ReturnType<typeof getEventTypeDistribution>>),
   ]);
-  // getDailyActivity removed temporarily — too many parallel queries was crashing
-  const daily: Awaited<ReturnType<typeof getDailyActivity>> = [];
 
   return (
     <>
@@ -66,12 +62,25 @@ export default async function DashboardPage({
           </>
         )}
 
-        <DashboardCharts
-          tiers={tiers}
-          sources={sources}
-          eventTypes={eventTypes}
-          daily={daily}
-        />
+        {/* TEMP: charts removed entirely. Display raw data to confirm queries work. */}
+        <div className="mt-8 hairline rounded-2xl bg-white p-6">
+          <h3 className="text-[15px] font-semibold mb-3">DEBUG: Tier data</h3>
+          <pre className="text-[11px] overflow-x-auto bg-subtle p-3 rounded">
+            {JSON.stringify(tiers, null, 2)}
+          </pre>
+        </div>
+        <div className="mt-4 hairline rounded-2xl bg-white p-6">
+          <h3 className="text-[15px] font-semibold mb-3">DEBUG: Source data</h3>
+          <pre className="text-[11px] overflow-x-auto bg-subtle p-3 rounded">
+            {JSON.stringify(sources, null, 2)}
+          </pre>
+        </div>
+        <div className="mt-4 hairline rounded-2xl bg-white p-6">
+          <h3 className="text-[15px] font-semibold mb-3">DEBUG: Event types data</h3>
+          <pre className="text-[11px] overflow-x-auto bg-subtle p-3 rounded">
+            {JSON.stringify(eventTypes, null, 2)}
+          </pre>
+        </div>
       </main>
     </>
   );
