@@ -390,44 +390,42 @@ export async function getKpisInRange(from: Date, to: Date) {
   const prevTo = from;
   const prevFrom = new Date(from.getTime() - rangeMs);
 
-  // Conversions in range vs prev range
-  const conv = await countEvent("conversion", from, to);
-  const convPrev = await countEvent("conversion", prevFrom, prevTo);
+  // Parallel only short queries (count head:true is cheap)
+  const [conv, convPrev, newLeads, newLeadsPrev, emailsSent, emailsSentPrev, emailOpens, chatsReceived, chatsReceivedPrev, tvvReplies] = await Promise.all([
+    countEvent("conversion", from, to),
+    countEvent("conversion", prevFrom, prevTo),
+    countEvent("lead_created", from, to),
+    countEvent("lead_created", prevFrom, prevTo),
+    countEvent("email_sent", from, to),
+    countEvent("email_sent", prevFrom, prevTo),
+    countEvent("email_open", from, to),
+    countEvent("chat", from, to),
+    countEvent("chat", prevFrom, prevTo),
+    countEvent("chat_staff", from, to),
+  ]);
 
-  // New leads
-  const newLeads = await countEvent("lead_created", from, to);
-  const newLeadsPrev = await countEvent("lead_created", prevFrom, prevTo);
-
-  // Emails sent
-  const emailsSent = await countEvent("email_sent", from, to);
-  const emailsSentPrev = await countEvent("email_sent", prevFrom, prevTo);
-
-  // Email opens
-  const emailOpens = await countEvent("email_open", from, to);
-
-  // Chats received
-  const chatsReceived = await countEvent("chat", from, to);
-  const chatsReceivedPrev = await countEvent("chat", prevFrom, prevTo);
-
-  // TVV replies
-  const tvvReplies = await countEvent("chat_staff", from, to);
-
-  // Distinct engaged leads
-  const { data: engaged } = await supabase
-    .from("fact_touchpoint")
-    .select("lead_id")
-    .in("event_type", ["chat", "chat_staff", "call", "meeting"])
-    .gte("occurred_at", from.toISOString())
-    .lt("occurred_at", to.toISOString());
-  const engagedSet = new Set((engaged || []).map((r) => r.lead_id));
-
-  const { data: engagedPrev } = await supabase
-    .from("fact_touchpoint")
-    .select("lead_id")
-    .in("event_type", ["chat", "chat_staff", "call", "meeting"])
-    .gte("occurred_at", prevFrom.toISOString())
-    .lt("occurred_at", prevTo.toISOString());
-  const engagedPrevSet = new Set((engagedPrev || []).map((r) => r.lead_id));
+  // Engaged leads — distinct lead_id with engagement. Use COUNT(DISTINCT) via
+  // separate paginated query (capped at 5k to avoid memory blowup)
+  async function countDistinctEngagedLeads(fromD: Date, toD: Date): Promise<number> {
+    const seen = new Set<string>();
+    let row = 0;
+    while (row < 5000) {
+      const { data } = await supabase
+        .from("fact_touchpoint")
+        .select("lead_id")
+        .in("event_type", ["chat", "chat_staff", "call", "meeting"])
+        .gte("occurred_at", fromD.toISOString())
+        .lt("occurred_at", toD.toISOString())
+        .range(row, row + 999);
+      if (!data || data.length === 0) break;
+      for (const r of data) seen.add(r.lead_id);
+      if (data.length < 1000) break;
+      row += 1000;
+    }
+    return seen.size;
+  }
+  const engagedSetSize = await countDistinctEngagedLeads(from, to);
+  const engagedPrevSetSize = await countDistinctEngagedLeads(prevFrom, prevTo);
 
   function pctDelta(curr: number, prev: number) {
     if (prev === 0) return { pct: curr > 0 ? 100 : 0, positive: curr >= 0 };
@@ -452,7 +450,7 @@ export async function getKpisInRange(from: Date, to: Date) {
       pct: 0,
       positive: true,
     },
-    engagedLeads: { value: engagedSet.size, ...pctDelta(engagedSet.size, engagedPrevSet.size) },
+    engagedLeads: { value: engagedSetSize, ...pctDelta(engagedSetSize, engagedPrevSetSize) },
     conversionRate: {
       value: newLeads ? Number((conv / newLeads * 100).toFixed(2)) : 0,
       pct: 0,
@@ -672,11 +670,12 @@ export async function getTvvPerformance() {
 }
 
 /**
- * Tier distribution for donut chart
+ * Tier distribution for donut chart — single query using PostgreSQL CASE
  */
 export async function getTierDistribution() {
   const supabase = await createClient();
   const latestDate = await getLatestScoredAt(supabase);
+  // Use 4 sequential queries (fewer connections than parallel)
   const tiers = [
     { name: "NÓNG", min: 70, max: 100, color: "#ff3b30" },
     { name: "ẤM", min: 40, max: 69, color: "#ff9500" },

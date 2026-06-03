@@ -24,12 +24,11 @@ export default async function DashboardPage({
   const params = await searchParams;
   const { from, to, id: rangeId } = parseRange(params.range);
 
-  const [kpis, tiers, sources, eventTypes] = await Promise.all([
-    safe(() => getKpisInRange(from, to), null),
-    safe(() => getTierDistribution(), [] as Awaited<ReturnType<typeof getTierDistribution>>),
-    safe(() => getSourceDistribution(), [] as Awaited<ReturnType<typeof getSourceDistribution>>),
-    safe(() => getEventTypeDistribution(), [] as Awaited<ReturnType<typeof getEventTypeDistribution>>),
-  ]);
+  // Sequential to avoid overwhelming Supabase connection pool / Vercel memory
+  const kpis = await safe(() => getKpisInRange(from, to), null);
+  const tiers = await safe(() => getTierDistribution(), [] as Awaited<ReturnType<typeof getTierDistribution>>);
+  const sources = await safe(() => getSourceDistribution(), [] as Awaited<ReturnType<typeof getSourceDistribution>>);
+  const eventTypes = await safe(() => getEventTypeDistribution(), [] as Awaited<ReturnType<typeof getEventTypeDistribution>>);
 
   return (
     <>
