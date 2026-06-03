@@ -37,7 +37,7 @@ jobs:
   heavy-sync:
     name: Heavy sync ${{ matrix.source }} (native)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     strategy:
       max-parallel: 1
       fail-fast: false
