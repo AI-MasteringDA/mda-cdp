@@ -92,6 +92,16 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
   };
 }
 
+async function getLatestScoredAt(supabase: Awaited<ReturnType<typeof createClient>>): Promise<string> {
+  const { data } = await supabase
+    .from("fact_lead_score")
+    .select("scored_at")
+    .order("scored_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.scored_at || new Date().toISOString().slice(0, 10);
+}
+
 async function fetchLeadsByScoreRange(
   minScore: number,
   maxScore: number,
@@ -100,11 +110,11 @@ async function fetchLeadsByScoreRange(
   scoreAsc = false // for cold/dormant, ascending = "most dormant first"
 ): Promise<Lead[]> {
   const supabase = await createClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const latestDate = await getLatestScoredAt(supabase);
   let query = supabase
     .from("fact_lead_score")
     .select("*")
-    .eq("scored_at", today)
+    .eq("scored_at", latestDate)
     .gte("hot_score", minScore)
     .lte("hot_score", maxScore);
   query = scoreAsc
@@ -131,11 +141,11 @@ async function fetchLeadsByScoreRange(
 
 async function countLeadsByScoreRange(min: number, max: number): Promise<number> {
   const supabase = await createClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const latestDate = await getLatestScoredAt(supabase);
   const { count } = await supabase
     .from("fact_lead_score")
     .select("*", { count: "exact", head: true })
-    .eq("scored_at", today)
+    .eq("scored_at", latestDate)
     .gte("hot_score", min)
     .lte("hot_score", max);
   return count ?? 0;
@@ -188,7 +198,7 @@ export async function getAllLeads(
   searchQuery?: string
 ): Promise<Lead[]> {
   const supabase = await createClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await getLatestScoredAt(supabase);
 
   // Search mode: filter dim_lead by name/email/phone first, then sort locally by hot
   if (searchQuery && searchQuery.trim()) {
@@ -245,11 +255,13 @@ export async function getLeadById(id: string): Promise<Lead | null> {
     .single();
   if (!lead) return null;
 
+  // Use most recent scored_at (handles cross-day case before cron recomputes)
   const { data: score } = await supabase
     .from("fact_lead_score")
     .select("*")
     .eq("lead_id", id)
-    .eq("scored_at", new Date().toISOString().slice(0, 10))
+    .order("scored_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   const { data: touchpoints } = await supabase
@@ -264,7 +276,7 @@ export async function getLeadById(id: string): Promise<Lead | null> {
 
 export async function getDashboardKPI() {
   const supabase = await createClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await getLatestScoredAt(supabase);
   const { count: hotCount } = await supabase
     .from("fact_lead_score")
     .select("*", { count: "exact", head: true })
