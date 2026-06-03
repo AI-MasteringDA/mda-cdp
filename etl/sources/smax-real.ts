@@ -76,12 +76,35 @@ export async function pullFromSmaxReal() {
   const jobId = jobData.id;
 
   try {
-    // Pagination — pull threads in batches
+    // INCREMENTAL: find the last_message_at of the most recent SMAX touchpoint.
+    // Stop pulling when we reach threads older than that (already in DB).
+    // First run with empty table: pulls everything (subject to MAX_PAGES).
+    let cutoffMs = 0;
+    {
+      const { data: lastTp } = await admin
+        .from("fact_touchpoint")
+        .select("occurred_at")
+        .eq("source", "smax")
+        .order("occurred_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (lastTp?.occurred_at) {
+        cutoffMs = new Date(lastTp.occurred_at).getTime();
+        const overlapMin = Number(process.env.SMAX_OVERLAP_MINUTES || 30);
+        cutoffMs -= overlapMin * 60_000; // small overlap so we don't miss updates
+        console.log(`   ↻ Incremental: pulling threads with last_message_at > ${new Date(cutoffMs).toISOString().slice(0, 19)}`);
+      } else {
+        console.log(`   ⚙️  No prior SMAX data → full backfill mode`);
+      }
+    }
+
+    // Pagination — SMAX returns most recent first, so stop early when older than cutoff
     const allThreads: SmaxThread[] = [];
     let skip = 0;
     const LIMIT = 100;
-    const MAX_PAGES = 200;  // ~20000 threads max
+    const MAX_PAGES = Number(process.env.SMAX_MAX_PAGES || 200);
     let page = 0;
+    let earlyStop = false;
 
     while (page < MAX_PAGES) {
       const resp: { data?: SmaxThread[]; total?: number } = await smaxPost(
@@ -89,10 +112,33 @@ export async function pullFromSmaxReal() {
         { page_pids: PAGE_PIDS, skip, limit: LIMIT }
       );
       const items = resp.data || [];
+
+      // Check if oldest item in this page is past cutoff → break
+      if (cutoffMs > 0 && items.length > 0) {
+        const oldestInPage = items
+          .map((t) => new Date(t.last_message_at || t.last_message_by_customer_at || 0).getTime())
+          .filter((ms) => ms > 0)
+          .reduce((min, ms) => Math.min(min, ms), Infinity);
+        if (oldestInPage > 0 && oldestInPage < cutoffMs) {
+          // Keep only items newer than cutoff from this page
+          const inRange = items.filter((t) => {
+            const ms = new Date(t.last_message_at || t.last_message_by_customer_at || 0).getTime();
+            return ms > cutoffMs;
+          });
+          allThreads.push(...inRange);
+          console.log(`   ✓ Reached cutoff at page ${page + 1} — stopping (took ${inRange.length}/${items.length} from this page)`);
+          earlyStop = true;
+          break;
+        }
+      }
+
       allThreads.push(...items);
       if (items.length < LIMIT) break;
       skip += LIMIT;
       page++;
+    }
+    if (!earlyStop && page >= MAX_PAGES) {
+      console.log(`   ⚠️  Hit MAX_PAGES=${MAX_PAGES} (~${MAX_PAGES * LIMIT} threads)`);
     }
 
     const channelStats: Record<string, number> = {};
