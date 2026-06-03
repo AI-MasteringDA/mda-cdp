@@ -371,6 +371,309 @@ export async function getDashboardKPI() {
 }
 
 /**
+ * KPI row data with date range filter
+ */
+export async function getKpisInRange(from: Date, to: Date) {
+  const supabase = await createClient();
+
+  async function countEvent(eventType: string, fromDate: Date, toDate: Date): Promise<number> {
+    const { count } = await supabase
+      .from("fact_touchpoint")
+      .select("*", { count: "exact", head: true })
+      .eq("event_type", eventType)
+      .gte("occurred_at", fromDate.toISOString())
+      .lt("occurred_at", toDate.toISOString());
+    return count ?? 0;
+  }
+
+  const rangeMs = to.getTime() - from.getTime();
+  const prevTo = from;
+  const prevFrom = new Date(from.getTime() - rangeMs);
+
+  // Conversions in range vs prev range
+  const conv = await countEvent("conversion", from, to);
+  const convPrev = await countEvent("conversion", prevFrom, prevTo);
+
+  // New leads
+  const newLeads = await countEvent("lead_created", from, to);
+  const newLeadsPrev = await countEvent("lead_created", prevFrom, prevTo);
+
+  // Emails sent
+  const emailsSent = await countEvent("email_sent", from, to);
+  const emailsSentPrev = await countEvent("email_sent", prevFrom, prevTo);
+
+  // Email opens
+  const emailOpens = await countEvent("email_open", from, to);
+
+  // Chats received
+  const chatsReceived = await countEvent("chat", from, to);
+  const chatsReceivedPrev = await countEvent("chat", prevFrom, prevTo);
+
+  // TVV replies
+  const tvvReplies = await countEvent("chat_staff", from, to);
+
+  // Distinct engaged leads
+  const { data: engaged } = await supabase
+    .from("fact_touchpoint")
+    .select("lead_id")
+    .in("event_type", ["chat", "chat_staff", "call", "meeting"])
+    .gte("occurred_at", from.toISOString())
+    .lt("occurred_at", to.toISOString());
+  const engagedSet = new Set((engaged || []).map((r) => r.lead_id));
+
+  const { data: engagedPrev } = await supabase
+    .from("fact_touchpoint")
+    .select("lead_id")
+    .in("event_type", ["chat", "chat_staff", "call", "meeting"])
+    .gte("occurred_at", prevFrom.toISOString())
+    .lt("occurred_at", prevTo.toISOString());
+  const engagedPrevSet = new Set((engagedPrev || []).map((r) => r.lead_id));
+
+  function pctDelta(curr: number, prev: number) {
+    if (prev === 0) return { pct: curr > 0 ? 100 : 0, positive: curr >= 0 };
+    const diff = ((curr - prev) / prev) * 100;
+    return { pct: Math.abs(Number(diff.toFixed(1))), positive: diff >= 0 };
+  }
+
+  return {
+    conversions: { value: conv, ...pctDelta(conv, convPrev) },
+    newLeads: { value: newLeads, ...pctDelta(newLeads, newLeadsPrev) },
+    emailsSent: { value: emailsSent, ...pctDelta(emailsSent, emailsSentPrev) },
+    emailOpens: { value: emailOpens, ...pctDelta(emailOpens, 0) },
+    openRate: {
+      value: emailsSent ? Number((emailOpens / emailsSent * 100).toFixed(1)) : 0,
+      pct: 0,
+      positive: true,
+    },
+    chatsReceived: { value: chatsReceived, ...pctDelta(chatsReceived, chatsReceivedPrev) },
+    tvvReplies: { value: tvvReplies, ...pctDelta(tvvReplies, 0) },
+    responseRate: {
+      value: chatsReceived ? Number((tvvReplies / chatsReceived * 100).toFixed(1)) : 0,
+      pct: 0,
+      positive: true,
+    },
+    engagedLeads: { value: engagedSet.size, ...pctDelta(engagedSet.size, engagedPrevSet.size) },
+    conversionRate: {
+      value: newLeads ? Number((conv / newLeads * 100).toFixed(2)) : 0,
+      pct: 0,
+      positive: true,
+    },
+  };
+}
+
+/**
+ * Daily activity series for the range
+ */
+export async function getDailyActivity(from: Date, to: Date) {
+  const supabase = await createClient();
+  const days: string[] = [];
+  const d = new Date(from);
+  d.setHours(0, 0, 0, 0);
+  while (d <= to) {
+    days.push(d.toISOString().slice(0, 10));
+    d.setDate(d.getDate() + 1);
+  }
+
+  // Pull all touchpoints in range (paginated to handle > 1000)
+  const allTouches: { occurred_at: string; event_type: string }[] = [];
+  let fromRow = 0;
+  while (fromRow < 50000) {
+    const { data } = await supabase
+      .from("fact_touchpoint")
+      .select("occurred_at, event_type")
+      .gte("occurred_at", from.toISOString())
+      .lt("occurred_at", to.toISOString())
+      .range(fromRow, fromRow + 999);
+    if (!data || data.length === 0) break;
+    allTouches.push(...data);
+    if (data.length < 1000) break;
+    fromRow += 1000;
+  }
+
+  const dayMap = new Map<string, { chat: number; email: number; conversion: number; other: number }>();
+  for (const day of days) {
+    dayMap.set(day, { chat: 0, email: 0, conversion: 0, other: 0 });
+  }
+  for (const t of allTouches) {
+    const day = t.occurred_at.slice(0, 10);
+    const entry = dayMap.get(day);
+    if (!entry) continue;
+    if (t.event_type === "chat" || t.event_type === "chat_staff") entry.chat++;
+    else if (t.event_type.startsWith("email_")) entry.email++;
+    else if (t.event_type === "conversion") entry.conversion++;
+    else entry.other++;
+  }
+  return days.map((day) => ({
+    day: day.slice(5), // MM-DD
+    ...dayMap.get(day)!,
+  }));
+}
+
+/**
+ * Conversion by source (for marketing dashboard)
+ */
+export async function getConversionBySource() {
+  const supabase = await createClient();
+  // Get all conversion events with lead_id (paginated)
+  const convLeads = new Set<string>();
+  let fromRow = 0;
+  while (true) {
+    const { data } = await supabase
+      .from("fact_touchpoint")
+      .select("lead_id")
+      .eq("event_type", "conversion")
+      .range(fromRow, fromRow + 999);
+    if (!data || data.length === 0) break;
+    for (const t of data) convLeads.add(t.lead_id);
+    if (data.length < 1000) break;
+    fromRow += 1000;
+  }
+
+  // For each source, count leads with conversion vs total leads
+  const sources = ["salesforce", "smax", "instantly", "web"];
+  const result: { source: string; converted: number; total: number; rate: number; color: string }[] = [];
+  const colorMap: Record<string, string> = {
+    salesforce: "#00a1e0", smax: "#7c3aed", instantly: "#f59e0b", web: "#10b981",
+  };
+  for (const src of sources) {
+    const { count: totalCount } = await supabase
+      .from("dim_lead")
+      .select("*", { count: "exact", head: true })
+      .eq("source", src);
+    // Count leads in this source that have at least one conversion
+    let converted = 0;
+    if (convLeads.size > 0) {
+      const convArr = Array.from(convLeads);
+      // Paginate IN clause
+      for (let i = 0; i < convArr.length; i += 100) {
+        const batch = convArr.slice(i, i + 100);
+        const { count } = await supabase
+          .from("dim_lead")
+          .select("*", { count: "exact", head: true })
+          .eq("source", src)
+          .in("lead_id", batch);
+        converted += count ?? 0;
+      }
+    }
+    result.push({
+      source: src,
+      converted,
+      total: totalCount ?? 0,
+      rate: totalCount ? Number((converted / totalCount * 100).toFixed(2)) : 0,
+      color: colorMap[src],
+    });
+  }
+  return result;
+}
+
+/**
+ * Conversion funnel: total leads → engaged → emailed → opened → converted
+ */
+export async function getConversionFunnel() {
+  const supabase = await createClient();
+
+  const { count: totalLeads } = await supabase
+    .from("dim_lead")
+    .select("*", { count: "exact", head: true });
+
+  // Engaged = total_touchpoints > 1
+  const { count: engagedLeads } = await supabase
+    .from("dim_lead")
+    .select("*", { count: "exact", head: true })
+    .gt("total_touchpoints", 1);
+
+  // Emailed = email_received_count > 0
+  const { count: emailedLeads } = await supabase
+    .from("dim_lead")
+    .select("*", { count: "exact", head: true })
+    .gt("email_received_count", 0);
+
+  // Chatted = chat_count > 0
+  const { count: chattedLeads } = await supabase
+    .from("dim_lead")
+    .select("*", { count: "exact", head: true })
+    .gt("chat_count", 0);
+
+  // Converted
+  const { count: convertedLeads } = await supabase
+    .from("dim_lead")
+    .select("*", { count: "exact", head: true })
+    .gt("conversion_count", 0);
+
+  return [
+    { stage: "1. Tổng lead", count: totalLeads ?? 0, color: "#a1a1aa" },
+    { stage: "2. Đã engage (>1 tp)", count: engagedLeads ?? 0, color: "#5ac8fa" },
+    { stage: "3. Đã nhận email", count: emailedLeads ?? 0, color: "#f59e0b" },
+    { stage: "4. Đã chat", count: chattedLeads ?? 0, color: "#ff9500" },
+    { stage: "5. Đã chốt 🎓", count: convertedLeads ?? 0, color: "#22c55e" },
+  ];
+}
+
+/**
+ * Top campaigns by email volume + conversion correlation
+ */
+export async function getTopCampaigns(limit = 10) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("fact_touchpoint")
+    .select("title, payload, lead_id, event_type")
+    .eq("source", "instantly")
+    .in("event_type", ["email_sent"])
+    .range(0, 9999);
+  if (!data) return [];
+
+  const campaignMap = new Map<string, { sent: number; leads: Set<string> }>();
+  for (const t of data) {
+    const subj = (t.title || "").replace(/^Đã gửi email: /, "").slice(0, 80);
+    if (!subj) continue;
+    if (!campaignMap.has(subj)) campaignMap.set(subj, { sent: 0, leads: new Set() });
+    const c = campaignMap.get(subj)!;
+    c.sent++;
+    c.leads.add(t.lead_id);
+  }
+
+  return [...campaignMap.entries()]
+    .map(([subject, c]) => ({ subject, sent: c.sent, uniqueLeads: c.leads.size }))
+    .sort((a, b) => b.sent - a.sent)
+    .slice(0, limit);
+}
+
+/**
+ * TVV (assignee) performance
+ */
+export async function getTvvPerformance() {
+  const supabase = await createClient();
+  // Top assignees by lead count + their conversion count
+  const { data: leads } = await supabase
+    .from("dim_lead")
+    .select("assignee, conversion_count, chat_staff_count, total_touchpoints, stage")
+    .not("assignee", "is", null);
+  if (!leads) return [];
+
+  const tvvMap = new Map<string, { leadCount: number; converted: number; replies: number; touchpoints: number }>();
+  for (const l of leads) {
+    const name = (l.assignee || "—").trim();
+    if (!tvvMap.has(name)) tvvMap.set(name, { leadCount: 0, converted: 0, replies: 0, touchpoints: 0 });
+    const m = tvvMap.get(name)!;
+    m.leadCount++;
+    if ((l.conversion_count ?? 0) > 0) m.converted++;
+    m.replies += l.chat_staff_count ?? 0;
+    m.touchpoints += l.total_touchpoints ?? 0;
+  }
+
+  return [...tvvMap.entries()]
+    .map(([name, m]) => ({
+      name,
+      leadCount: m.leadCount,
+      converted: m.converted,
+      replies: m.replies,
+      conversionRate: m.leadCount ? Number((m.converted / m.leadCount * 100).toFixed(2)) : 0,
+    }))
+    .sort((a, b) => b.leadCount - a.leadCount)
+    .slice(0, 15);
+}
+
+/**
  * Tier distribution for donut chart
  */
 export async function getTierDistribution() {
