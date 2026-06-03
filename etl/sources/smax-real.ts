@@ -173,6 +173,9 @@ export async function pullFromSmaxReal() {
     logMatches(matches, "SMAX REAL");
 
     // Build touchpoints (1 per thread)
+    // CLASSIFY SENDER: compare last_message_at vs last_message_by_customer_at
+    //   if last_message_at > last_message_by_customer_at → TVV/staff sent last → event_type='chat_staff'
+    //   if equal or no staff time → customer sent last → event_type='chat'
     const matchMap = new Map(matches.map((m) => [m.rawId, m.leadId]));
     const touchpoints = allThreads
       .filter((t) => matchMap.get(t.id))
@@ -180,11 +183,21 @@ export async function pullFromSmaxReal() {
         const customer = t.customer;
         const msg = t.message?.slice(0, 60) || "(no message)";
         const ellipsis = (t.message?.length || 0) > 60 ? "..." : "";
+
+        // Determine sender: TVV or Lead?
+        const lastMsgMs = t.last_message_at ? new Date(t.last_message_at).getTime() : 0;
+        const lastCustomerMs = t.last_message_by_customer_at ? new Date(t.last_message_by_customer_at).getTime() : 0;
+        const senderIsStaff = lastMsgMs > 0 && lastCustomerMs > 0 && lastMsgMs > lastCustomerMs;
+        // OR: if no customer time at all → assume TVV broadcast
+        const noCustomerMsg = lastMsgMs > 0 && lastCustomerMs === 0;
+        const eventType = senderIsStaff || noCustomerMsg ? "chat_staff" : "chat";
+        const titlePrefix = eventType === "chat_staff" ? "TVV chat" : "Chat";
+
         return {
           lead_id: matchMap.get(t.id)!,
           source: "smax",
-          event_type: "chat",
-          title: `Chat: ${msg}${ellipsis}`,
+          event_type: eventType,
+          title: `${titlePrefix}: ${msg}${ellipsis}`,
           detail: t.message || null,
           occurred_at: t.last_message_at || t.last_message_by_customer_at || new Date().toISOString(),
           payload: {
@@ -194,6 +207,9 @@ export async function pullFromSmaxReal() {
             platform: t.platform,
             tag_aliases: t.tag_aliases || [],
             customer_name: customer?.name || customer?.profile_name,
+            sender_is_staff: senderIsStaff || noCustomerMsg,
+            last_msg_at: t.last_message_at,
+            last_customer_msg_at: t.last_message_by_customer_at,
             real: true,
           },
         };
