@@ -28,12 +28,16 @@ async function runSource(name: string, fn: () => Promise<unknown>): Promise<Sour
 
 export async function GET(request: NextRequest) {
   // Verify cron secret — protects against unauthorized triggering
-  const authHeader = request.headers.get("authorization");
-  const expected = `Bearer ${process.env.CRON_SECRET}`;
+  const authHeader = request.headers.get("authorization")?.trim();
+  const secret = process.env.CRON_SECRET?.trim() || "";
+  const expected = `Bearer ${secret}`;
   // Also allow Vercel Cron's built-in auth via x-vercel-cron header
   const isVercelCron = request.headers.get("x-vercel-cron") === "1";
   if (!isVercelCron && authHeader !== expected) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({
+      error: "Unauthorized",
+      hint: `secret length: env=${secret.length} header=${authHeader?.replace("Bearer ", "").length ?? 0}`,
+    }, { status: 401 });
   }
 
   const overallStart = Date.now();
