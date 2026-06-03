@@ -462,51 +462,49 @@ export async function getKpisInRange(from: Date, to: Date) {
 }
 
 /**
- * Daily activity series for the range
+ * Daily activity series for the range — using per-day count queries (fast)
+ * instead of pulling all rows. For 30 days = 30 small queries in parallel.
  */
 export async function getDailyActivity(from: Date, to: Date) {
   const supabase = await createClient();
-  const days: string[] = [];
+  const days: { iso: string; start: Date; end: Date }[] = [];
   const d = new Date(from);
   d.setHours(0, 0, 0, 0);
   while (d <= to) {
-    days.push(d.toISOString().slice(0, 10));
+    const end = new Date(d);
+    end.setDate(end.getDate() + 1);
+    days.push({ iso: d.toISOString().slice(0, 10), start: new Date(d), end });
     d.setDate(d.getDate() + 1);
   }
+  // Cap to 90 days to keep dashboard fast
+  if (days.length > 90) days.splice(0, days.length - 90);
 
-  // Pull all touchpoints in range (paginated to handle > 1000)
-  const allTouches: { occurred_at: string; event_type: string }[] = [];
-  let fromRow = 0;
-  while (fromRow < 50000) {
-    const { data } = await supabase
-      .from("fact_touchpoint")
-      .select("occurred_at, event_type")
-      .gte("occurred_at", from.toISOString())
-      .lt("occurred_at", to.toISOString())
-      .range(fromRow, fromRow + 999);
-    if (!data || data.length === 0) break;
-    allTouches.push(...data);
-    if (data.length < 1000) break;
-    fromRow += 1000;
-  }
-
-  const dayMap = new Map<string, { chat: number; email: number; conversion: number; other: number }>();
-  for (const day of days) {
-    dayMap.set(day, { chat: 0, email: 0, conversion: 0, other: 0 });
-  }
-  for (const t of allTouches) {
-    const day = t.occurred_at.slice(0, 10);
-    const entry = dayMap.get(day);
-    if (!entry) continue;
-    if (t.event_type === "chat" || t.event_type === "chat_staff") entry.chat++;
-    else if (t.event_type.startsWith("email_")) entry.email++;
-    else if (t.event_type === "conversion") entry.conversion++;
-    else entry.other++;
-  }
-  return days.map((day) => ({
-    day: day.slice(5), // MM-DD
-    ...dayMap.get(day)!,
-  }));
+  const results = await Promise.all(
+    days.map(async (day) => {
+      const [chatCnt, emailCnt, convCnt] = await Promise.all([
+        supabase.from("fact_touchpoint").select("*", { count: "exact", head: true })
+          .in("event_type", ["chat", "chat_staff"])
+          .gte("occurred_at", day.start.toISOString())
+          .lt("occurred_at", day.end.toISOString()),
+        supabase.from("fact_touchpoint").select("*", { count: "exact", head: true })
+          .in("event_type", ["email_sent", "email_open", "email_click", "email_reply"])
+          .gte("occurred_at", day.start.toISOString())
+          .lt("occurred_at", day.end.toISOString()),
+        supabase.from("fact_touchpoint").select("*", { count: "exact", head: true })
+          .eq("event_type", "conversion")
+          .gte("occurred_at", day.start.toISOString())
+          .lt("occurred_at", day.end.toISOString()),
+      ]);
+      return {
+        day: day.iso.slice(5),
+        chat: chatCnt.count ?? 0,
+        email: emailCnt.count ?? 0,
+        conversion: convCnt.count ?? 0,
+        other: 0,
+      };
+    })
+  );
+  return results;
 }
 
 /**
