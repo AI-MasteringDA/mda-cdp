@@ -10,32 +10,84 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  trigger-sync:
+  # Fast sources via Vercel function (fits 60s)
+  fast-sync:
+    name: Fast sync via Vercel
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     strategy:
-      max-parallel: 1   # serialize so we don't burst Supabase
-      fail-fast: false  # one failure doesn't abort others
+      max-parallel: 1
+      fail-fast: false
       matrix:
-        source: [wix, smax, salesforce, instantly]
+        source: [wix, instantly]
     steps:
-      - name: Trigger ${{ matrix.source }} sync
+      - name: Trigger ${{ matrix.source }}
         run: |
-          echo "Triggering ${{ matrix.source }} at $(date -u +'%Y-%m-%d %H:%M:%S UTC')..."
-          RESPONSE=$(curl -sS -w "\nHTTP_CODE:%{http_code}\nTIME:%{time_total}s" \
-            --max-time 90 \
-            -X GET "https://mda-cdp.vercel.app/api/cron/sync/${{ matrix.source }}" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -H "User-Agent: GitHub-Actions-Cron")
-
+          RESPONSE=$(curl -sS -w "\nHTTP_CODE:%{http_code}" --max-time 75 \
+            "https://mda-cdp.vercel.app/api/cron/sync/${{ matrix.source }}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
           HTTP_CODE=$(echo "$RESPONSE" | grep -o 'HTTP_CODE:[0-9]*' | cut -d: -f2)
-          BODY=$(echo "$RESPONSE" | sed '/HTTP_CODE:/d' | sed '/TIME:/d')
+          BODY=$(echo "$RESPONSE" | grep -v 'HTTP_CODE:')
+          echo "[${{ matrix.source }}] HTTP $HTTP_CODE"
+          echo "$BODY"
+          [ "$HTTP_CODE" -ge 400 ] && exit 1
+          echo "✅ ${{ matrix.source }} OK"
 
-          echo "[${{ matrix.source }}] HTTP: $HTTP_CODE"
-          echo "[${{ matrix.source }}] Body: $BODY"
-
-          if [ "$HTTP_CODE" -ge 400 ]; then
-            echo "❌ ${{ matrix.source }} sync failed"
-            exit 1
+  # Heavy sources run native on GH Actions (no 60s limit)
+  heavy-sync:
+    name: Heavy sync ${{ matrix.source }} (native)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        source: [smax, salesforce]
+    env:
+      # Supabase
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      # SMAX
+      SMAX_API_KEY: ${{ secrets.SMAX_API_KEY }}
+      SMAX_USER_TOKEN: ${{ secrets.SMAX_USER_TOKEN }}
+      SMAX_BASE_URL: https://api.smax.ai
+      SMAX_DAYS_BACK: "1"
+      # Salesforce
+      SALESFORCE_INSTANCE_URL: ${{ secrets.SALESFORCE_INSTANCE_URL }}
+      SALESFORCE_CLIENT_ID: ${{ secrets.SALESFORCE_CLIENT_ID }}
+      SALESFORCE_CLIENT_SECRET: ${{ secrets.SALESFORCE_CLIENT_SECRET }}
+      SALESFORCE_API_VERSION: v59.0
+      ETL_OWNER_EMAIL: ai@mastering-da.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run ${{ matrix.source }} ETL
+        run: |
+          echo "Starting ${{ matrix.source }} ETL at $(date -u +'%H:%M:%S UTC')..."
+          if [ "${{ matrix.source }}" = "smax" ]; then
+            npm run etl:smax:real
+          else
+            npm run etl:sf:real
           fi
-          echo "✅ ${{ matrix.source }} sync OK"
+          echo "✅ ${{ matrix.source }} ETL done"
+
+  # After heavy sync, trigger scoring recompute on Vercel
+  recompute-scoring:
+    name: Recompute scoring
+    runs-on: ubuntu-latest
+    needs: [heavy-sync]
+    if: always()
+    timeout-minutes: 3
+    steps:
+      - name: Call recompute via Vercel
+        run: |
+          curl -sS --max-time 60 \
+            "https://mda-cdp.vercel.app/api/cron/sync/wix" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -o /dev/null
+          echo "✅ Triggered downstream"
