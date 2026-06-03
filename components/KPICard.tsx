@@ -7,12 +7,14 @@ export function KPICard({
   unit,
   deltaPct,
   deltaPositive,
+  deltaLabel = "so với tuần trước",
 }: {
   label: string;
   value: number | string;
   unit?: string;
   deltaPct?: number;
   deltaPositive?: boolean;
+  deltaLabel?: string;
 }) {
   return (
     <div className="hairline rounded-2xl bg-white p-6">
@@ -41,7 +43,7 @@ export function KPICard({
             {deltaPositive ? "+" : "−"}
             {Math.abs(deltaPct)}%
           </span>
-          <span className="text-[12px] text-muted-2">so với hôm qua</span>
+          <span className="text-[12px] text-muted-2">{deltaLabel}</span>
         </div>
       )}
     </div>

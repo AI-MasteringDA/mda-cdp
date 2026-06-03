@@ -277,23 +277,217 @@ export async function getLeadById(id: string): Promise<Lead | null> {
 export async function getDashboardKPI() {
   const supabase = await createClient();
   const today = await getLatestScoredAt(supabase);
+
+  const now = new Date();
+  const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
+  const weekAgo = new Date(startOfToday); weekAgo.setDate(weekAgo.getDate() - 7);
+  const twoWeekAgo = new Date(startOfToday); twoWeekAgo.setDate(twoWeekAgo.getDate() - 14);
+  const monthAgo = new Date(startOfToday); monthAgo.setDate(monthAgo.getDate() - 30);
+
+  async function countEvent(eventType: string, fromDate: Date, toDate?: Date): Promise<number> {
+    let q = supabase.from("fact_touchpoint")
+      .select("*", { count: "exact", head: true })
+      .eq("event_type", eventType)
+      .gte("occurred_at", fromDate.toISOString());
+    if (toDate) q = q.lt("occurred_at", toDate.toISOString());
+    const { count } = await q;
+    return count ?? 0;
+  }
+
+  // Hot lead count + delta vs previous scoring date
   const { count: hotCount } = await supabase
     .from("fact_lead_score")
     .select("*", { count: "exact", head: true })
     .eq("scored_at", today)
     .gte("hot_score", 70);
-  const { count: coldCount } = await supabase
-    .from("fact_lead_score")
+
+  // Conversions tuần này vs tuần trước
+  const convThisWeek = await countEvent("conversion", weekAgo);
+  const convLastWeek = await countEvent("conversion", twoWeekAgo, weekAgo);
+
+  // Đã tư vấn tuần này = distinct lead_id có chat/call/meeting trong 7d
+  const { data: engaged } = await supabase
+    .from("fact_touchpoint")
+    .select("lead_id")
+    .in("event_type", ["chat", "chat_staff", "call", "meeting"])
+    .gte("occurred_at", weekAgo.toISOString());
+  const engagedSet = new Set((engaged || []).map((r) => r.lead_id));
+  const { data: engagedPrev } = await supabase
+    .from("fact_touchpoint")
+    .select("lead_id")
+    .in("event_type", ["chat", "chat_staff", "call", "meeting"])
+    .gte("occurred_at", twoWeekAgo.toISOString())
+    .lt("occurred_at", weekAgo.toISOString());
+  const engagedPrevSet = new Set((engagedPrev || []).map((r) => r.lead_id));
+
+  // Conversion rate = total conversions / total leads (cumulative — stable metric)
+  const { count: totalConv } = await supabase
+    .from("fact_touchpoint")
     .select("*", { count: "exact", head: true })
-    .eq("scored_at", today)
-    .gte("cold_score", 70);
+    .eq("event_type", "conversion");
+  const { count: totalLeads } = await supabase
+    .from("dim_lead")
+    .select("*", { count: "exact", head: true });
+  const conversionRate = totalLeads ? ((totalConv ?? 0) / totalLeads * 100) : 0;
+
+  // Delta calc helpers
+  function pctDelta(curr: number, prev: number): { pct: number; positive: boolean } {
+    if (prev === 0) return { pct: curr > 0 ? 100 : 0, positive: curr >= 0 };
+    const diff = ((curr - prev) / prev) * 100;
+    return { pct: Math.abs(diff), positive: diff >= 0 };
+  }
+
+  const convDelta = pctDelta(convThisWeek, convLastWeek);
+  const engagedDelta = pctDelta(engagedSet.size, engagedPrevSet.size);
 
   return {
-    hotToday: { value: hotCount ?? 0, deltaPct: 12, deltaPositive: true },
-    coldToRescue: { value: coldCount ?? 0, deltaPct: 8, deltaPositive: false },
-    consultedWeek: { value: 156, deltaPct: 4, deltaPositive: true },
-    conversionRate: { value: 18.4, deltaPct: 1.2, deltaPositive: true },
+    hotToday: {
+      value: hotCount ?? 0,
+      deltaPct: 0,
+      deltaPositive: true,
+    },
+    conversionsWeek: {
+      value: convThisWeek,
+      deltaPct: convDelta.pct,
+      deltaPositive: convDelta.positive,
+    },
+    consultedWeek: {
+      value: engagedSet.size,
+      deltaPct: engagedDelta.pct,
+      deltaPositive: engagedDelta.positive,
+    },
+    conversionRate: {
+      value: Number(conversionRate.toFixed(2)),
+      deltaPct: 0,
+      deltaPositive: true,
+    },
+    // Extra for richer dashboard
+    extras: {
+      convMonth: await countEvent("conversion", monthAgo),
+      totalConv: totalConv ?? 0,
+      totalLeads: totalLeads ?? 0,
+    },
   };
+}
+
+/**
+ * Tier distribution for donut chart
+ */
+export async function getTierDistribution() {
+  const supabase = await createClient();
+  const latestDate = await getLatestScoredAt(supabase);
+  const tiers = [
+    { name: "NÓNG", min: 70, max: 100, color: "#ff3b30" },
+    { name: "ẤM", min: 40, max: 69, color: "#ff9500" },
+    { name: "MÁT", min: 20, max: 39, color: "#5ac8fa" },
+    { name: "NGỦ ĐÔNG", min: 0, max: 19, color: "#3a3a3c" },
+  ];
+  const results: { name: string; value: number; color: string }[] = [];
+  for (const t of tiers) {
+    const { count } = await supabase
+      .from("fact_lead_score")
+      .select("*", { count: "exact", head: true })
+      .eq("scored_at", latestDate)
+      .gte("hot_score", t.min)
+      .lte("hot_score", t.max);
+    results.push({ name: t.name, value: count ?? 0, color: t.color });
+  }
+  return results;
+}
+
+/**
+ * Source distribution — touchpoints + leads per source
+ */
+export async function getSourceDistribution() {
+  const supabase = await createClient();
+  const sources = [
+    { id: "salesforce", name: "Salesforce", color: "#00a1e0" },
+    { id: "smax", name: "SMAX", color: "#7c3aed" },
+    { id: "instantly", name: "Instantly", color: "#f59e0b" },
+    { id: "web", name: "Wix Website", color: "#10b981" },
+  ];
+  const results: { name: string; touchpoints: number; leads: number; color: string }[] = [];
+  for (const s of sources) {
+    const { count: tpCount } = await supabase
+      .from("fact_touchpoint")
+      .select("*", { count: "exact", head: true })
+      .eq("source", s.id);
+    const { count: leadCount } = await supabase
+      .from("dim_lead")
+      .select("*", { count: "exact", head: true })
+      .eq("source", s.id);
+    results.push({
+      name: s.name,
+      touchpoints: tpCount ?? 0,
+      leads: leadCount ?? 0,
+      color: s.color,
+    });
+  }
+  return results;
+}
+
+/**
+ * Event type distribution — what TVV is doing
+ */
+export async function getEventTypeDistribution() {
+  const supabase = await createClient();
+  const types = [
+    { id: "chat", label: "Lead chat đến", color: "#3b82f6" },
+    { id: "chat_staff", label: "TVV reply chat", color: "#06b6d4" },
+    { id: "email_sent", label: "Email gửi đi", color: "#f59e0b" },
+    { id: "email_open", label: "Email mở", color: "#84cc16" },
+    { id: "email_click", label: "Email click", color: "#10b981" },
+    { id: "conversion", label: "Conversion (mua)", color: "#22c55e" },
+    { id: "call", label: "Cuộc gọi", color: "#8b5cf6" },
+    { id: "lost", label: "Lost / Pause", color: "#ef4444" },
+  ];
+  const results: { label: string; value: number; color: string }[] = [];
+  for (const t of types) {
+    const { count } = await supabase
+      .from("fact_touchpoint")
+      .select("*", { count: "exact", head: true })
+      .eq("event_type", t.id);
+    if ((count ?? 0) > 0) {
+      results.push({ label: t.label, value: count ?? 0, color: t.color });
+    }
+  }
+  return results.sort((a, b) => b.value - a.value);
+}
+
+/**
+ * Conversions over last 12 weeks (line chart)
+ */
+export async function getConversionTrend() {
+  const supabase = await createClient();
+  const now = new Date();
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  const start = new Date(today); start.setDate(start.getDate() - 84); // 12 weeks
+
+  const result: { week: string; conversions: number; new_leads: number }[] = [];
+  for (let i = 11; i >= 0; i--) {
+    const weekStart = new Date(today); weekStart.setDate(weekStart.getDate() - (i + 1) * 7);
+    const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() - i * 7);
+    const { count: convCount } = await supabase
+      .from("fact_touchpoint")
+      .select("*", { count: "exact", head: true })
+      .eq("event_type", "conversion")
+      .gte("occurred_at", weekStart.toISOString())
+      .lt("occurred_at", weekEnd.toISOString());
+    const { count: leadCount } = await supabase
+      .from("fact_touchpoint")
+      .select("*", { count: "exact", head: true })
+      .eq("event_type", "lead_created")
+      .gte("occurred_at", weekStart.toISOString())
+      .lt("occurred_at", weekEnd.toISOString());
+    result.push({
+      week: `${weekStart.getDate()}/${weekStart.getMonth() + 1}`,
+      conversions: convCount ?? 0,
+      new_leads: leadCount ?? 0,
+    });
+    // Suppress unused warning
+    void start;
+  }
+  return result;
 }
 
 export async function getRecentActivities(limit = 8) {
