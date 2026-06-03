@@ -65,7 +65,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      # Install only ETL runtime deps (skip optional native deps that don't exist on lockfile)
+      - run: npm install --no-audit --no-fund --omit=optional
       - name: Run ${{ matrix.source }} ETL
         run: |
           echo "Starting ${{ matrix.source }} ETL at $(date -u +'%H:%M:%S UTC')..."
