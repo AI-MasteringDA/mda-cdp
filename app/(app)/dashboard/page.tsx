@@ -1,34 +1,82 @@
 import { Topbar } from "@/components/Topbar";
 import { KPICard } from "@/components/KPICard";
 import { DashboardTabs } from "@/components/DashboardTabs";
-import { DateRangeFilter, parseRange } from "@/components/DateRangeFilter";
-import {
-  getKpisInRange,
-  getTierDistribution,
-  getSourceDistribution,
-  getEventTypeDistribution,
-} from "@/lib/supabase/queries";
+import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try { return await fn(); } catch { return fallback; }
+async function countEvent(eventType: string): Promise<number> {
+  try {
+    const supabase = await createClient();
+    const { count } = await supabase
+      .from("fact_touchpoint")
+      .select("*", { count: "exact", head: true })
+      .eq("event_type", eventType);
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
-export default async function DashboardPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ range?: string }>;
-}) {
-  const params = await searchParams;
-  const { from, to, id: rangeId } = parseRange(params.range);
+async function countLeads(): Promise<number> {
+  try {
+    const supabase = await createClient();
+    const { count } = await supabase
+      .from("dim_lead")
+      .select("*", { count: "exact", head: true });
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
+}
 
-  // Sequential to avoid overwhelming Supabase connection pool / Vercel memory
-  const kpis = await safe(() => getKpisInRange(from, to), null);
-  const tiers = await safe(() => getTierDistribution(), [] as Awaited<ReturnType<typeof getTierDistribution>>);
-  const sources = await safe(() => getSourceDistribution(), [] as Awaited<ReturnType<typeof getSourceDistribution>>);
-  const eventTypes = await safe(() => getEventTypeDistribution(), [] as Awaited<ReturnType<typeof getEventTypeDistribution>>);
+async function countTouchpoints(): Promise<number> {
+  try {
+    const supabase = await createClient();
+    const { count } = await supabase
+      .from("fact_touchpoint")
+      .select("*", { count: "exact", head: true });
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function countHotLeads(): Promise<number> {
+  try {
+    const supabase = await createClient();
+    const { data: latest } = await supabase
+      .from("fact_lead_score")
+      .select("scored_at")
+      .order("scored_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!latest?.scored_at) return 0;
+    const { count } = await supabase
+      .from("fact_lead_score")
+      .select("*", { count: "exact", head: true })
+      .eq("scored_at", latest.scored_at)
+      .gte("hot_score", 70);
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+export default async function DashboardPage() {
+  // FULLY SEQUENTIAL — no Promise.all, no parallel anything
+  const totalLeads = await countLeads();
+  const totalTouchpoints = await countTouchpoints();
+  const conversions = await countEvent("conversion");
+  const chats = await countEvent("chat");
+  const emailsSent = await countEvent("email_sent");
+  const emailOpens = await countEvent("email_open");
+  const hotLeads = await countHotLeads();
+  const newLeads = await countEvent("lead_created");
+
+  const convRate = newLeads ? Number((conversions / newLeads * 100).toFixed(2)) : 0;
+  const openRate = emailsSent ? Number((emailOpens / emailsSent * 100).toFixed(1)) : 0;
 
   return (
     <>
@@ -36,49 +84,46 @@ export default async function DashboardPage({
       <DashboardTabs />
 
       <main className="mx-auto max-w-[1280px] px-8 py-8">
-        <div className="mb-6 flex items-end justify-between">
-          <div>
-            <h1 className="text-[22px] font-semibold tracking-tight">Tổng quan</h1>
-            <p className="mt-1 text-[12px] text-muted">So sánh với khoảng trước</p>
-          </div>
-          <DateRangeFilter value={rangeId} />
+        <h1 className="text-[22px] font-semibold tracking-tight mb-6">
+          Tổng quan — Cumulative metrics
+        </h1>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <KPICard label="🔥 Lead NÓNG" value={hotLeads} deltaLabel="cần gọi NGAY" />
+          <KPICard label="🎓 Conversion" value={conversions} deltaLabel={`từ ${totalLeads.toLocaleString("vi-VN")} lead`} />
+          <KPICard label="📈 Conversion rate" value={convRate} unit="%" deltaLabel="conv / lead mới" />
+          <KPICard label="🆕 Lead mới" value={newLeads} deltaLabel="lifetime" />
         </div>
 
-        {kpis && (
-          <>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <KPICard label="🎓 Conversion" value={kpis.conversions.value} deltaPct={kpis.conversions.pct} deltaPositive={kpis.conversions.positive} deltaLabel="khoảng trước" />
-              <KPICard label="🆕 Lead mới" value={kpis.newLeads.value} deltaPct={kpis.newLeads.pct} deltaPositive={kpis.newLeads.positive} deltaLabel="khoảng trước" />
-              <KPICard label="💬 Đã tư vấn" value={kpis.engagedLeads.value} deltaPct={kpis.engagedLeads.pct} deltaPositive={kpis.engagedLeads.positive} deltaLabel="có chat/call" />
-              <KPICard label="📈 Conv rate" value={kpis.conversionRate.value} unit="%" deltaLabel="conv / lead" />
-            </div>
-            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <KPICard label="📧 Email gửi" value={kpis.emailsSent.value} deltaPct={kpis.emailsSent.pct} deltaPositive={kpis.emailsSent.positive} />
-              <KPICard label="👁 Email opens" value={kpis.emailOpens.value} deltaLabel="lần mở" />
-              <KPICard label="📬 Open rate" value={kpis.openRate.value} unit="%" deltaLabel="opens/sent" />
-              <KPICard label="↩ Response rate" value={kpis.responseRate.value} unit="%" deltaLabel="reply/chat" />
-            </div>
-          </>
-        )}
+        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <KPICard label="💬 Lead chat" value={chats} deltaLabel="tổng lượt" />
+          <KPICard label="📧 Email gửi" value={emailsSent} deltaLabel="lifetime" />
+          <KPICard label="👁 Email opens" value={emailOpens} deltaLabel="lifetime" />
+          <KPICard label="📬 Open rate" value={openRate} unit="%" deltaLabel="opens / sent" />
+        </div>
 
-        {/* TEMP: charts removed entirely. Display raw data to confirm queries work. */}
         <div className="mt-8 hairline rounded-2xl bg-white p-6">
-          <h3 className="text-[15px] font-semibold mb-3">DEBUG: Tier data</h3>
-          <pre className="text-[11px] overflow-x-auto bg-subtle p-3 rounded">
-            {JSON.stringify(tiers, null, 2)}
-          </pre>
+          <h3 className="text-[15px] font-semibold mb-3">📊 Tổng quan workspace</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-muted-2 font-medium">Tổng lead</div>
+              <div className="mt-1 text-[24px] font-semibold tabular-nums">{totalLeads.toLocaleString("vi-VN")}</div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-muted-2 font-medium">Tổng touchpoint</div>
+              <div className="mt-1 text-[24px] font-semibold tabular-nums">{totalTouchpoints.toLocaleString("vi-VN")}</div>
+            </div>
+          </div>
         </div>
-        <div className="mt-4 hairline rounded-2xl bg-white p-6">
-          <h3 className="text-[15px] font-semibold mb-3">DEBUG: Source data</h3>
-          <pre className="text-[11px] overflow-x-auto bg-subtle p-3 rounded">
-            {JSON.stringify(sources, null, 2)}
-          </pre>
-        </div>
-        <div className="mt-4 hairline rounded-2xl bg-white p-6">
-          <h3 className="text-[15px] font-semibold mb-3">DEBUG: Event types data</h3>
-          <pre className="text-[11px] overflow-x-auto bg-subtle p-3 rounded">
-            {JSON.stringify(eventTypes, null, 2)}
-          </pre>
+
+        <div className="mt-6 hairline rounded-2xl bg-white p-6">
+          <h3 className="text-[15px] font-semibold mb-3">🔗 Đi tới các trang khác</h3>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            <a href="/dashboard/sales" className="rounded-lg border border-[var(--border-subtle)] px-4 py-3 text-[13px] hover:bg-subtle">→ Sales / TVV</a>
+            <a href="/dashboard/marketing" className="rounded-lg border border-[var(--border-subtle)] px-4 py-3 text-[13px] hover:bg-subtle">→ Marketing</a>
+            <a href="/dashboard/funnel" className="rounded-lg border border-[var(--border-subtle)] px-4 py-3 text-[13px] hover:bg-subtle">→ Funnel</a>
+            <a href="/dashboard/trends" className="rounded-lg border border-[var(--border-subtle)] px-4 py-3 text-[13px] hover:bg-subtle">→ Trends</a>
+          </div>
         </div>
       </main>
     </>
