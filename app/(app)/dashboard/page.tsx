@@ -26,13 +26,14 @@ export default async function DashboardPage({
   const params = await searchParams;
   const { from, to, id: rangeId } = parseRange(params.range);
 
-  const [kpis, tiers, sources, eventTypes, daily] = await Promise.all([
+  const [kpis, tiers, sources, eventTypes] = await Promise.all([
     safe(() => getKpisInRange(from, to), null),
     safe(() => getTierDistribution(), [] as Awaited<ReturnType<typeof getTierDistribution>>),
     safe(() => getSourceDistribution(), [] as Awaited<ReturnType<typeof getSourceDistribution>>),
     safe(() => getEventTypeDistribution(), [] as Awaited<ReturnType<typeof getEventTypeDistribution>>),
-    safe(() => getDailyActivity(from, to), [] as Awaited<ReturnType<typeof getDailyActivity>>),
   ]);
+  // getDailyActivity removed temporarily — too many parallel queries was crashing
+  const daily: Awaited<ReturnType<typeof getDailyActivity>> = [];
 
   return (
     <>
