@@ -2,6 +2,10 @@ import { Topbar } from "@/components/Topbar";
 import { KPICard } from "@/components/KPICard";
 import { DashboardTabs } from "@/components/DashboardTabs";
 import { DateRangeFilter, parseRange } from "@/components/DateRangeFilter";
+import { TierDonut } from "@/components/charts/TierDonut";
+import { SourceBar } from "@/components/charts/SourceBar";
+import { EventTypeBar } from "@/components/charts/EventTypeBar";
+import { DailyActivityArea } from "@/components/charts/DailyActivityArea";
 import {
   getKpisInRange,
   getTierDistribution,
@@ -49,12 +53,6 @@ export default async function DashboardPage({
   const sources = sourcesR.data;
   const eventTypes = eventTypesR.data;
   const daily = dailyR.data;
-
-  // Dynamic imports for charts (recharts heavy; client-only)
-  const { TierDonut } = await import("@/components/charts/TierDonut");
-  const { SourceBar } = await import("@/components/charts/SourceBar");
-  const { EventTypeBar } = await import("@/components/charts/EventTypeBar");
-  const { DailyActivityArea } = await import("@/components/charts/DailyActivityArea");
 
   return (
     <>
