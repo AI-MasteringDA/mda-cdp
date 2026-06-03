@@ -1,22 +1,43 @@
 import { Topbar } from "@/components/Topbar";
 import { KPICard } from "@/components/KPICard";
 import { DashboardTabs } from "@/components/DashboardTabs";
-import { getKpisInRange } from "@/lib/supabase/queries";
+import { DateRangeFilter, parseRange } from "@/components/DateRangeFilter";
+import {
+  TierDonut,
+  SourceBar,
+  EventTypeBar,
+  DailyActivityArea,
+} from "@/components/charts";
+import {
+  getKpisInRange,
+  getTierDistribution,
+  getSourceDistribution,
+  getEventTypeDistribution,
+  getDailyActivity,
+} from "@/lib/supabase/queries";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export default async function DashboardPage() {
-  const to = new Date();
-  const from = new Date(); from.setDate(from.getDate() - 30);
+async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+  try { return await fn(); } catch { return fallback; }
+}
 
-  let kpis = null;
-  let errorMsg = "";
-  try {
-    kpis = await getKpisInRange(from, to);
-  } catch (e) {
-    errorMsg = (e as Error).message || String(e);
-  }
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string }>;
+}) {
+  const params = await searchParams;
+  const { from, to, id: rangeId } = parseRange(params.range);
+
+  const [kpis, tiers, sources, eventTypes, daily] = await Promise.all([
+    safe(() => getKpisInRange(from, to), null),
+    safe(() => getTierDistribution(), [] as Awaited<ReturnType<typeof getTierDistribution>>),
+    safe(() => getSourceDistribution(), [] as Awaited<ReturnType<typeof getSourceDistribution>>),
+    safe(() => getEventTypeDistribution(), [] as Awaited<ReturnType<typeof getEventTypeDistribution>>),
+    safe(() => getDailyActivity(from, to), [] as Awaited<ReturnType<typeof getDailyActivity>>),
+  ]);
 
   return (
     <>
@@ -24,29 +45,67 @@ export default async function DashboardPage() {
       <DashboardTabs />
 
       <main className="mx-auto max-w-[1280px] px-8 py-8">
-        <h1 className="text-[22px] font-semibold tracking-tight mb-6">
-          Tổng quan
-        </h1>
-
-        {errorMsg && (
-          <div className="mb-6 rounded-2xl bg-[#fff5f5] border border-[#fecaca] p-4 text-[13px] font-mono text-[#991b1b]">
-            <strong>getKpisInRange error:</strong> {errorMsg.slice(0, 500)}
+        <div className="mb-6 flex items-end justify-between">
+          <div>
+            <h1 className="text-[22px] font-semibold tracking-tight">Tổng quan</h1>
+            <p className="mt-1 text-[12px] text-muted">So sánh với khoảng trước</p>
           </div>
-        )}
+          <DateRangeFilter value={rangeId} />
+        </div>
 
         {kpis && (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <KPICard label="🎓 Conversion" value={kpis.conversions.value} deltaPct={kpis.conversions.pct} deltaPositive={kpis.conversions.positive} />
-            <KPICard label="🆕 Lead mới" value={kpis.newLeads.value} deltaPct={kpis.newLeads.pct} deltaPositive={kpis.newLeads.positive} />
-            <KPICard label="💬 Đã tư vấn" value={kpis.engagedLeads.value} deltaPct={kpis.engagedLeads.pct} deltaPositive={kpis.engagedLeads.positive} />
-            <KPICard label="📈 Conv rate" value={kpis.conversionRate.value} unit="%" />
-          </div>
+          <>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <KPICard label="🎓 Conversion" value={kpis.conversions.value} deltaPct={kpis.conversions.pct} deltaPositive={kpis.conversions.positive} deltaLabel="khoảng trước" />
+              <KPICard label="🆕 Lead mới" value={kpis.newLeads.value} deltaPct={kpis.newLeads.pct} deltaPositive={kpis.newLeads.positive} deltaLabel="khoảng trước" />
+              <KPICard label="💬 Đã tư vấn" value={kpis.engagedLeads.value} deltaPct={kpis.engagedLeads.pct} deltaPositive={kpis.engagedLeads.positive} deltaLabel="có chat/call" />
+              <KPICard label="📈 Conv rate" value={kpis.conversionRate.value} unit="%" deltaLabel="conv / lead" />
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <KPICard label="📧 Email gửi" value={kpis.emailsSent.value} deltaPct={kpis.emailsSent.pct} deltaPositive={kpis.emailsSent.positive} />
+              <KPICard label="👁 Email opens" value={kpis.emailOpens.value} deltaLabel="lần mở" />
+              <KPICard label="📬 Open rate" value={kpis.openRate.value} unit="%" deltaLabel="opens/sent" />
+              <KPICard label="↩ Response rate" value={kpis.responseRate.value} unit="%" deltaLabel="reply/chat" />
+            </div>
+          </>
         )}
 
-        {!kpis && !errorMsg && (
-          <div className="rounded-2xl bg-subtle p-8 text-center text-[13px] text-muted">
-            Đang tải KPI...
-          </div>
+        {daily.length > 0 && (
+          <section className="mt-8 hairline rounded-2xl bg-white p-6">
+            <div className="mb-4">
+              <h3 className="text-[15px] font-semibold">Hoạt động theo ngày</h3>
+              <p className="mt-0.5 text-[12px] text-muted">Stack chat / email / conversion</p>
+            </div>
+            <DailyActivityArea data={daily} />
+          </section>
+        )}
+
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {tiers.length > 0 && (
+            <section className="hairline rounded-2xl bg-white p-6">
+              <div className="mb-4">
+                <h3 className="text-[15px] font-semibold">Phân bố Lead theo tier</h3>
+              </div>
+              <TierDonut data={tiers} />
+            </section>
+          )}
+          {sources.length > 0 && (
+            <section className="hairline rounded-2xl bg-white p-6">
+              <div className="mb-4">
+                <h3 className="text-[15px] font-semibold">Nguồn data</h3>
+              </div>
+              <SourceBar data={sources} metric="touchpoints" />
+            </section>
+          )}
+        </div>
+
+        {eventTypes.length > 0 && (
+          <section className="mt-6 hairline rounded-2xl bg-white p-6">
+            <div className="mb-4">
+              <h3 className="text-[15px] font-semibold">Loại event</h3>
+            </div>
+            <EventTypeBar data={eventTypes} />
+          </section>
         )}
       </main>
     </>
