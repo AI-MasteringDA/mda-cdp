@@ -77,18 +77,22 @@ jobs:
           fi
           echo "✅ ${{ matrix.source }} ETL done"
 
-  # After heavy sync, trigger scoring recompute on Vercel
-  recompute-scoring:
-    name: Recompute scoring
+  # After ALL syncs done, recompute aggregates + scores
+  recompute:
+    name: Recompute aggregates + scoring
     runs-on: ubuntu-latest
-    needs: [heavy-sync]
+    needs: [fast-sync, heavy-sync]
     if: always()
     timeout-minutes: 3
     steps:
-      - name: Call recompute via Vercel
+      - name: Call /api/cron/recompute on Vercel
         run: |
-          curl -sS --max-time 60 \
-            "https://mda-cdp.vercel.app/api/cron/sync/wix" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -o /dev/null
-          echo "✅ Triggered downstream"
+          RESPONSE=$(curl -sS -w "\nHTTP_CODE:%{http_code}" --max-time 60 \
+            "https://mda-cdp.vercel.app/api/cron/recompute" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          HTTP_CODE=$(echo "$RESPONSE" | grep -o 'HTTP_CODE:[0-9]*' | cut -d: -f2)
+          BODY=$(echo "$RESPONSE" | grep -v 'HTTP_CODE:')
+          echo "HTTP $HTTP_CODE"
+          echo "$BODY"
+          [ "$HTTP_CODE" -ge 400 ] && exit 1
+          echo "✅ Recompute done"
