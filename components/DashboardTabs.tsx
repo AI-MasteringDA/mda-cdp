@@ -27,10 +27,10 @@ export function DashboardTabs() {
                 key={tab.href}
                 href={tab.href}
                 className={cn(
-                  "flex items-center gap-2 border-b-2 px-4 py-3 text-[13px] font-medium transition-colors whitespace-nowrap",
+                  "tab-underline press flex items-center gap-2 border-b-2 border-transparent px-4 py-3 text-[13px] font-medium whitespace-nowrap transition-colors",
                   active
-                    ? "border-foreground text-foreground"
-                    : "border-transparent text-muted hover:text-foreground"
+                    ? "active text-foreground"
+                    : "text-muted hover:text-foreground"
                 )}
               >
                 <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />

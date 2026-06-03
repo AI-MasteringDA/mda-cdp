@@ -87,9 +87,9 @@ function NavGroup({
             key={item.href}
             href={item.href}
             className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13px] transition-colors",
+              "nav-item flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13px]",
               active
-                ? "bg-subtle text-foreground font-medium"
+                ? "active bg-subtle text-foreground font-medium"
                 : "text-muted hover:bg-subtle hover:text-foreground"
             )}
           >

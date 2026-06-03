@@ -17,12 +17,12 @@ export function KPICard({
   deltaLabel?: string;
 }) {
   return (
-    <div className="hairline rounded-2xl bg-white p-6">
+    <div className="hairline card-lift rounded-2xl bg-white p-6">
       <div className="text-[11px] uppercase tracking-wider text-muted-2 font-medium">
         {label}
       </div>
       <div className="mt-3 flex items-baseline gap-1.5">
-        <div className="text-[32px] font-semibold tracking-tight tabular-nums">
+        <div className="kpi-number text-[32px] font-semibold tracking-tight tabular-nums">
           {value}
         </div>
         {unit && <div className="text-base text-muted">{unit}</div>}

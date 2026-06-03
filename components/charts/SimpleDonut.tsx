@@ -21,7 +21,7 @@ export function SimpleDonut({ data, size = 180 }: { data: Segment[]; size?: numb
 
   return (
     <div className="flex items-center gap-6">
-      <div className="relative" style={{ width: size, height: size }}>
+      <div className="anim-scale-in relative" style={{ width: size, height: size }}>
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
           {/* background ring */}
           <circle cx={size / 2} cy={size / 2} r={radius} stroke="#f5f5f7" strokeWidth={stroke} fill="none" />
@@ -48,8 +48,8 @@ export function SimpleDonut({ data, size = 180 }: { data: Segment[]; size?: numb
         </div>
       </div>
       <div className="flex-1 space-y-2.5">
-        {segments.map((s) => (
-          <div key={s.name} className="flex items-center gap-3">
+        {segments.map((s, i) => (
+          <div key={s.name} className={`anim-slide-in delay-${Math.min(i + 1, 4)} flex items-center gap-3`}>
             <div className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: s.color }} />
             <span className="text-[13px] font-medium flex-1 truncate">{s.name}</span>
             <span className="text-[13px] tabular-nums text-muted">

@@ -182,23 +182,23 @@ export default async function DashboardPage() {
 
         {/* KPI Row 1 */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <KPICard label="🔥 Lead NÓNG" value={hot} deltaLabel={`/${(hot + warm + cool + dormant).toLocaleString("vi-VN")} total`} />
-          <KPICard label="🎓 Conversion" value={conversions} deltaLabel={`${won} đã chốt`} />
-          <KPICard label="📈 Conv rate" value={convRate} unit="%" deltaLabel="conv / total lead" />
-          <KPICard label="🆕 Tổng lead" value={totalLeads.toLocaleString("vi-VN")} deltaLabel="trong workspace" />
+          <div className="anim-fade-up delay-1"><KPICard label="🔥 Lead NÓNG" value={hot} deltaLabel={`/${(hot + warm + cool + dormant).toLocaleString("vi-VN")} total`} /></div>
+          <div className="anim-fade-up delay-2"><KPICard label="🎓 Conversion" value={conversions} deltaLabel={`${won} đã chốt`} /></div>
+          <div className="anim-fade-up delay-3"><KPICard label="📈 Conv rate" value={convRate} unit="%" deltaLabel="conv / total lead" /></div>
+          <div className="anim-fade-up delay-4"><KPICard label="🆕 Tổng lead" value={totalLeads.toLocaleString("vi-VN")} deltaLabel="trong workspace" /></div>
         </div>
 
         {/* KPI Row 2 */}
         <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <KPICard label="💬 Lead chat" value={chats} deltaLabel={`${chatStaff} TVV reply`} />
-          <KPICard label="↩ Reply rate" value={replyRate} unit="%" deltaLabel="reply / chat" />
-          <KPICard label="📧 Email gửi" value={emailsSent} deltaLabel={`${emailOpens} đã mở`} />
-          <KPICard label="📬 Open rate" value={openRate} unit="%" deltaLabel="opens / sent" />
+          <div className="anim-fade-up delay-5"><KPICard label="💬 Lead chat" value={chats} deltaLabel={`${chatStaff} TVV reply`} /></div>
+          <div className="anim-fade-up delay-6"><KPICard label="↩ Reply rate" value={replyRate} unit="%" deltaLabel="reply / chat" /></div>
+          <div className="anim-fade-up delay-7"><KPICard label="📧 Email gửi" value={emailsSent} deltaLabel={`${emailOpens} đã mở`} /></div>
+          <div className="anim-fade-up delay-8"><KPICard label="📬 Open rate" value={openRate} unit="%" deltaLabel="opens / sent" /></div>
         </div>
 
         {/* Tier Donut + Source Leads */}
         <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <section className="hairline rounded-2xl bg-white p-6">
+          <section className="hairline card-lift anim-fade-up rounded-2xl bg-white p-6" style={{ animationDelay: "300ms" }}>
             <div className="mb-5">
               <h3 className="text-[15px] font-semibold">Phân bố Lead theo tier</h3>
               <p className="mt-0.5 text-[12px] text-muted">Scoring hiện tại</p>
@@ -206,7 +206,7 @@ export default async function DashboardPage() {
             <SimpleDonut data={tierData} size={180} />
           </section>
 
-          <section className="hairline rounded-2xl bg-white p-6">
+          <section className="hairline card-lift anim-fade-up rounded-2xl bg-white p-6" style={{ animationDelay: "400ms" }}>
             <div className="mb-5">
               <h3 className="text-[15px] font-semibold">Lead theo nguồn</h3>
               <p className="mt-0.5 text-[12px] text-muted">Số lead unique mỗi source</p>
@@ -217,7 +217,7 @@ export default async function DashboardPage() {
 
         {/* Source Touchpoints + Total stats */}
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <section className="hairline rounded-2xl bg-white p-6">
+          <section className="hairline card-lift anim-fade-up rounded-2xl bg-white p-6" style={{ animationDelay: "500ms" }}>
             <div className="mb-5">
               <h3 className="text-[15px] font-semibold">Touchpoint theo nguồn</h3>
               <p className="mt-0.5 text-[12px] text-muted">Tổng số event mỗi source</p>
@@ -225,7 +225,7 @@ export default async function DashboardPage() {
             <SimpleBar data={sourceTp} valueLabel="events" />
           </section>
 
-          <section className="hairline rounded-2xl bg-white p-6">
+          <section className="hairline card-lift anim-fade-up rounded-2xl bg-white p-6" style={{ animationDelay: "550ms" }}>
             <div className="mb-5">
               <h3 className="text-[15px] font-semibold">📊 Quy mô workspace</h3>
               <p className="mt-0.5 text-[12px] text-muted">Snapshot tại thời điểm</p>
@@ -255,7 +255,7 @@ export default async function DashboardPage() {
 
         {/* Recent Activity */}
         {recent.length > 0 && (
-          <section className="mt-6 hairline rounded-2xl bg-white">
+          <section className="anim-fade-up mt-6 hairline rounded-2xl bg-white" style={{ animationDelay: "650ms" }}>
             <div className="hairline-b flex items-center justify-between px-6 py-4">
               <div>
                 <h3 className="text-[15px] font-semibold">⚡ Hoạt động realtime</h3>
@@ -267,8 +267,8 @@ export default async function DashboardPage() {
               </Link>
             </div>
             <div className="divide-y divide-[var(--border-subtle)]">
-              {recent.map((r) => (
-                <div key={r.id} className="flex items-start gap-3 px-6 py-3">
+              {recent.map((r, i) => (
+                <div key={r.id} className={`anim-slide-in flex items-start gap-3 px-6 py-3 transition-colors hover:bg-subtle`} style={{ animationDelay: `${700 + i * 40}ms` }}>
                   <div className="text-[11px] uppercase tracking-wider text-muted-2 w-16 shrink-0 mt-1">
                     {r.source}
                   </div>
@@ -289,23 +289,35 @@ export default async function DashboardPage() {
         )}
 
         {/* Navigation to other dashboards */}
-        <section className="mt-6 hairline rounded-2xl bg-white p-6">
+        <section className="anim-fade-up mt-6 hairline rounded-2xl bg-white p-6" style={{ animationDelay: "800ms" }}>
           <h3 className="text-[15px] font-semibold mb-3">🧭 Đi tới dashboard khác</h3>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Link href="/dashboard/sales" className="rounded-xl border border-[var(--border-subtle)] px-4 py-3 hover:bg-subtle">
-              <div className="text-[14px] font-medium">Sales / TVV</div>
+            <Link href="/dashboard/sales" className="press card-lift group rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="text-[14px] font-medium">Sales / TVV</div>
+                <ChevronRight className="hover-arrow h-4 w-4 text-muted-2" strokeWidth={1.75} />
+              </div>
               <div className="text-[11px] text-muted-2 mt-1">Hiệu suất TVV, conversion</div>
             </Link>
-            <Link href="/dashboard/marketing" className="rounded-xl border border-[var(--border-subtle)] px-4 py-3 hover:bg-subtle">
-              <div className="text-[14px] font-medium">Marketing</div>
+            <Link href="/dashboard/marketing" className="press card-lift group rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="text-[14px] font-medium">Marketing</div>
+                <ChevronRight className="hover-arrow h-4 w-4 text-muted-2" strokeWidth={1.75} />
+              </div>
               <div className="text-[11px] text-muted-2 mt-1">Source efficiency, campaigns</div>
             </Link>
-            <Link href="/dashboard/funnel" className="rounded-xl border border-[var(--border-subtle)] px-4 py-3 hover:bg-subtle">
-              <div className="text-[14px] font-medium">Conversion Funnel</div>
+            <Link href="/dashboard/funnel" className="press card-lift group rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="text-[14px] font-medium">Conversion Funnel</div>
+                <ChevronRight className="hover-arrow h-4 w-4 text-muted-2" strokeWidth={1.75} />
+              </div>
               <div className="text-[11px] text-muted-2 mt-1">5-stage funnel</div>
             </Link>
-            <Link href="/dashboard/trends" className="rounded-xl border border-[var(--border-subtle)] px-4 py-3 hover:bg-subtle">
-              <div className="text-[14px] font-medium">Trends</div>
+            <Link href="/dashboard/trends" className="press card-lift group rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="text-[14px] font-medium">Trends</div>
+                <ChevronRight className="hover-arrow h-4 w-4 text-muted-2" strokeWidth={1.75} />
+              </div>
               <div className="text-[11px] text-muted-2 mt-1">Hoạt động theo thời gian</div>
             </Link>
           </div>

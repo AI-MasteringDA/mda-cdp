@@ -12,7 +12,7 @@ export function LeadListItem({ lead }: { lead: Lead }) {
   return (
     <Link
       href={`/lead/${lead.id}`}
-      className="group flex items-center gap-4 rounded-xl px-3 py-3 transition-colors hover:bg-subtle"
+      className="group row-hover flex items-center gap-4 rounded-xl px-3 py-3"
     >
       <Avatar name={lead.name} color={lead.avatarColor} size={40} />
 
@@ -41,7 +41,7 @@ export function LeadListItem({ lead }: { lead: Lead }) {
       <TierChip tier={lead.tier} />
       <ScoreBadge score={lead.score} tier={lead.tier} />
       <ChevronRight
-        className="h-4 w-4 text-muted-2 transition-transform group-hover:translate-x-0.5"
+        className="hover-arrow h-4 w-4 text-muted-2"
         strokeWidth={1.75}
       />
     </Link>
