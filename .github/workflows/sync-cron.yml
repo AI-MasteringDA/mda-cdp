@@ -1,13 +1,10 @@
 name: Sync ETL Cron
 
-# Trigger every hour at minute 5 (offset from common cron times to avoid spike)
-# Plus manual trigger via Actions tab
 on:
   schedule:
     - cron: "5 * * * *"  # every hour at HH:05
-  workflow_dispatch:      # manual trigger button
+  workflow_dispatch:
 
-# Prevent overlapping runs
 concurrency:
   group: sync-etl
   cancel-in-progress: false
@@ -15,25 +12,30 @@ concurrency:
 jobs:
   trigger-sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
+    strategy:
+      max-parallel: 1   # serialize so we don't burst Supabase
+      fail-fast: false  # one failure doesn't abort others
+      matrix:
+        source: [wix, smax, salesforce, instantly]
     steps:
-      - name: Call /api/cron/sync-all on Vercel
+      - name: Trigger ${{ matrix.source }} sync
         run: |
-          echo "Triggering sync at $(date -u +'%Y-%m-%d %H:%M:%S UTC')..."
+          echo "Triggering ${{ matrix.source }} at $(date -u +'%Y-%m-%d %H:%M:%S UTC')..."
           RESPONSE=$(curl -sS -w "\nHTTP_CODE:%{http_code}\nTIME:%{time_total}s" \
-            -X GET "https://mda-cdp.vercel.app/api/cron/sync-all" \
+            --max-time 90 \
+            -X GET "https://mda-cdp.vercel.app/api/cron/sync/${{ matrix.source }}" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "User-Agent: GitHub-Actions-Cron")
 
           HTTP_CODE=$(echo "$RESPONSE" | grep -o 'HTTP_CODE:[0-9]*' | cut -d: -f2)
           BODY=$(echo "$RESPONSE" | sed '/HTTP_CODE:/d' | sed '/TIME:/d')
 
-          echo "HTTP: $HTTP_CODE"
-          echo "Response body:"
-          echo "$BODY" | head -100
+          echo "[${{ matrix.source }}] HTTP: $HTTP_CODE"
+          echo "[${{ matrix.source }}] Body: $BODY"
 
           if [ "$HTTP_CODE" -ge 400 ]; then
-            echo "❌ Sync failed with HTTP $HTTP_CODE"
+            echo "❌ ${{ matrix.source }} sync failed"
             exit 1
           fi
-          echo "✅ Sync completed"
+          echo "✅ ${{ matrix.source }} sync OK"
