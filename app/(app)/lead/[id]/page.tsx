@@ -4,7 +4,7 @@ import { ChevronRight } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import { Avatar } from "@/components/ui/Avatar";
 import { Chip, ScoreBadge, TierChip } from "@/components/ui/Chip";
-import { Timeline } from "@/components/Timeline";
+import { LeadDetailTabs } from "@/components/LeadDetailTabs";
 import { AiInsightsPanel } from "@/components/AiInsightsPanel";
 import { getLeadById } from "@/lib/supabase/queries";
 
@@ -117,21 +117,7 @@ export default async function LeadDetailPage({
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
           <section className="lg:col-span-2">
-            <div className="mb-4 flex items-center gap-1">
-              <button className="rounded-lg px-3 py-1.5 text-[13px] font-medium bg-subtle">
-                Timeline
-              </button>
-              <button className="rounded-lg px-3 py-1.5 text-[13px] text-muted hover:text-foreground">
-                Email
-              </button>
-              <button className="rounded-lg px-3 py-1.5 text-[13px] text-muted hover:text-foreground">
-                Chat
-              </button>
-              <button className="rounded-lg px-3 py-1.5 text-[13px] text-muted hover:text-foreground">
-                Thông tin
-              </button>
-            </div>
-            <Timeline touchpoints={lead.touchpoints} />
+            <LeadDetailTabs lead={lead} />
           </section>
 
           <aside className="lg:col-span-1">

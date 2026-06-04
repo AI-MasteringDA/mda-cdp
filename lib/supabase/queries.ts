@@ -507,59 +507,32 @@ export async function getDailyActivity(from: Date, to: Date) {
 
 /**
  * Conversion by source (for marketing dashboard)
+ * Use conversion_count column on dim_lead (already aggregated) — single fast query per source.
  */
 export async function getConversionBySource() {
   const supabase = await createClient();
-  // Get all conversion events with lead_id (paginated)
-  const convLeads = new Set<string>();
-  let fromRow = 0;
-  while (true) {
-    const { data } = await supabase
-      .from("fact_touchpoint")
-      .select("lead_id")
-      .eq("event_type", "conversion")
-      .range(fromRow, fromRow + 999);
-    if (!data || data.length === 0) break;
-    for (const t of data) convLeads.add(t.lead_id);
-    if (data.length < 1000) break;
-    fromRow += 1000;
-  }
-
-  // For each source, count leads with conversion vs total leads
   const sources = ["salesforce", "smax", "instantly", "web"];
-  const result: { source: string; converted: number; total: number; rate: number; color: string }[] = [];
   const colorMap: Record<string, string> = {
     salesforce: "#00a1e0", smax: "#7c3aed", instantly: "#f59e0b", web: "#10b981",
   };
-  for (const src of sources) {
-    const { count: totalCount } = await supabase
-      .from("dim_lead")
-      .select("*", { count: "exact", head: true })
-      .eq("source", src);
-    // Count leads in this source that have at least one conversion
-    let converted = 0;
-    if (convLeads.size > 0) {
-      const convArr = Array.from(convLeads);
-      // Paginate IN clause
-      for (let i = 0; i < convArr.length; i += 100) {
-        const batch = convArr.slice(i, i + 100);
-        const { count } = await supabase
-          .from("dim_lead")
-          .select("*", { count: "exact", head: true })
-          .eq("source", src)
-          .in("lead_id", batch);
-        converted += count ?? 0;
-      }
-    }
-    result.push({
-      source: src,
-      converted,
-      total: totalCount ?? 0,
-      rate: totalCount ? Number((converted / totalCount * 100).toFixed(2)) : 0,
-      color: colorMap[src],
-    });
-  }
-  return result;
+
+  // For each source, count total leads + leads with conversion_count > 0 — in parallel
+  const results = await Promise.all(
+    sources.map(async (src) => {
+      const [{ count: totalCount }, { count: convertedCount }] = await Promise.all([
+        supabase.from("dim_lead").select("*", { count: "exact", head: true }).eq("source", src),
+        supabase.from("dim_lead").select("*", { count: "exact", head: true }).eq("source", src).gt("conversion_count", 0),
+      ]);
+      return {
+        source: src,
+        converted: convertedCount ?? 0,
+        total: totalCount ?? 0,
+        rate: totalCount ? Number(((convertedCount ?? 0) / totalCount * 100).toFixed(2)) : 0,
+        color: colorMap[src],
+      };
+    })
+  );
+  return results;
 }
 
 /**
@@ -670,33 +643,32 @@ export async function getTvvPerformance() {
 }
 
 /**
- * Tier distribution for donut chart — single query using PostgreSQL CASE
+ * Tier distribution for donut chart — 4 parallel head counts.
  */
 export async function getTierDistribution() {
   const supabase = await createClient();
   const latestDate = await getLatestScoredAt(supabase);
-  // Use 4 sequential queries (fewer connections than parallel)
   const tiers = [
     { name: "NÓNG", min: 70, max: 100, color: "#ff3b30" },
     { name: "ẤM", min: 40, max: 69, color: "#ff9500" },
     { name: "MÁT", min: 20, max: 39, color: "#5ac8fa" },
     { name: "NGỦ ĐÔNG", min: 0, max: 19, color: "#3a3a3c" },
   ];
-  const results: { name: string; value: number; color: string }[] = [];
-  for (const t of tiers) {
-    const { count } = await supabase
-      .from("fact_lead_score")
-      .select("*", { count: "exact", head: true })
-      .eq("scored_at", latestDate)
-      .gte("hot_score", t.min)
-      .lte("hot_score", t.max);
-    results.push({ name: t.name, value: count ?? 0, color: t.color });
-  }
-  return results;
+  return Promise.all(
+    tiers.map(async (t) => {
+      const { count } = await supabase
+        .from("fact_lead_score")
+        .select("*", { count: "exact", head: true })
+        .eq("scored_at", latestDate)
+        .gte("hot_score", t.min)
+        .lte("hot_score", t.max);
+      return { name: t.name, value: count ?? 0, color: t.color };
+    })
+  );
 }
 
 /**
- * Source distribution — touchpoints + leads per source
+ * Source distribution — touchpoints + leads per source (parallel)
  */
 export async function getSourceDistribution() {
   const supabase = await createClient();
@@ -706,24 +678,20 @@ export async function getSourceDistribution() {
     { id: "instantly", name: "Instantly", color: "#f59e0b" },
     { id: "web", name: "Wix Website", color: "#10b981" },
   ];
-  const results: { name: string; touchpoints: number; leads: number; color: string }[] = [];
-  for (const s of sources) {
-    const { count: tpCount } = await supabase
-      .from("fact_touchpoint")
-      .select("*", { count: "exact", head: true })
-      .eq("source", s.id);
-    const { count: leadCount } = await supabase
-      .from("dim_lead")
-      .select("*", { count: "exact", head: true })
-      .eq("source", s.id);
-    results.push({
-      name: s.name,
-      touchpoints: tpCount ?? 0,
-      leads: leadCount ?? 0,
-      color: s.color,
-    });
-  }
-  return results;
+  return Promise.all(
+    sources.map(async (s) => {
+      const [{ count: tpCount }, { count: leadCount }] = await Promise.all([
+        supabase.from("fact_touchpoint").select("*", { count: "exact", head: true }).eq("source", s.id),
+        supabase.from("dim_lead").select("*", { count: "exact", head: true }).eq("source", s.id),
+      ]);
+      return {
+        name: s.name,
+        touchpoints: tpCount ?? 0,
+        leads: leadCount ?? 0,
+        color: s.color,
+      };
+    })
+  );
 }
 
 /**
@@ -1005,6 +973,265 @@ export async function getIdentityStats() {
     withBoth: withBoth ?? 0,
     unmergedCount: (total ?? 0) - (withBoth ?? 0),
   };
+}
+
+/**
+ * Stage distribution — count leads by SF stage (funnel view)
+ */
+export async function getStageDistribution() {
+  const supabase = await createClient();
+  const stages = [
+    { id: "Mới",           label: "Mới",           color: "#a1a1aa" },
+    { id: "Đang tư vấn",    label: "Đang tư vấn",    color: "#5ac8fa" },
+    { id: "Đang cân nhắc",  label: "Đang cân nhắc",  color: "#ff9500" },
+    { id: "Im lặng",        label: "Im lặng",        color: "#71717a" },
+    { id: "Đã chốt",        label: "Đã chốt",        color: "#22c55e" },
+  ];
+  return Promise.all(
+    stages.map(async (s) => {
+      const { count } = await supabase
+        .from("dim_lead")
+        .select("*", { count: "exact", head: true })
+        .eq("stage", s.id);
+      return { stage: s.label, count: count ?? 0, color: s.color };
+    })
+  );
+}
+
+/**
+ * Source × tier matrix — for segmentation page
+ * Strategy: parallel-paginate both tables, merge in JS. Two tables = O(N/1000) queries each.
+ */
+export async function getSourceTierMatrix() {
+  const supabase = await createClient();
+  const latestDate = await getLatestScoredAt(supabase);
+  const sources = ["salesforce", "smax", "instantly", "web"];
+  const tiers: { name: LeadTier; min: number; max: number }[] = [
+    { name: "NÓNG", min: 70, max: 100 },
+    { name: "ẤM", min: 40, max: 69 },
+    { name: "MÁT", min: 20, max: 39 },
+    { name: "NGỦ ĐÔNG", min: 0, max: 19 },
+  ];
+
+  // Get total count first to know how many pages
+  const [{ count: leadCount }, { count: scoreCount }] = await Promise.all([
+    supabase.from("dim_lead").select("*", { count: "exact", head: true }),
+    supabase.from("fact_lead_score").select("*", { count: "exact", head: true }).eq("scored_at", latestDate),
+  ]);
+
+  const PAGE = 1000;
+  const leadPages = Math.ceil((leadCount ?? 0) / PAGE);
+  const scorePages = Math.ceil((scoreCount ?? 0) / PAGE);
+
+  // Parallel fetch all pages
+  const [leadPagesData, scorePagesData] = await Promise.all([
+    Promise.all(
+      Array.from({ length: leadPages }, (_, i) =>
+        supabase
+          .from("dim_lead")
+          .select("lead_id, source")
+          .range(i * PAGE, i * PAGE + PAGE - 1)
+      )
+    ),
+    Promise.all(
+      Array.from({ length: scorePages }, (_, i) =>
+        supabase
+          .from("fact_lead_score")
+          .select("lead_id, hot_score")
+          .eq("scored_at", latestDate)
+          .range(i * PAGE, i * PAGE + PAGE - 1)
+      )
+    ),
+  ]);
+
+  const sourceByLead = new Map<string, string>();
+  for (const p of leadPagesData) {
+    for (const l of p.data ?? []) sourceByLead.set(l.lead_id, l.source);
+  }
+
+  const matrix: Record<string, Record<string, number>> = {};
+  for (const s of sources) {
+    matrix[s] = {};
+    for (const t of tiers) matrix[s][t.name] = 0;
+  }
+  for (const p of scorePagesData) {
+    for (const s of p.data ?? []) {
+      const src = sourceByLead.get(s.lead_id);
+      if (!src || !matrix[src]) continue;
+      const tier = tiers.find((t) => s.hot_score >= t.min && s.hot_score <= t.max);
+      if (tier) matrix[src][tier.name]++;
+    }
+  }
+
+  return { sources, tiers: tiers.map((t) => t.name), matrix };
+}
+
+/**
+ * Cohort by first_seen_at month — last 12 months only.
+ * Limits to ~12 months of data + parallel pagination.
+ */
+export async function getCohortByMonth() {
+  const supabase = await createClient();
+  // Only pull last 13 months of leads (one extra for partial-month edge)
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 13);
+  const cutoffIso = cutoff.toISOString();
+
+  // Get total in range
+  const { count: total } = await supabase
+    .from("dim_lead")
+    .select("*", { count: "exact", head: true })
+    .gte("first_seen_at", cutoffIso);
+
+  const PAGE = 1000;
+  const pages = Math.ceil((total ?? 0) / PAGE);
+
+  const pageResults = await Promise.all(
+    Array.from({ length: pages }, (_, i) =>
+      supabase
+        .from("dim_lead")
+        .select("first_seen_at, total_touchpoints, conversion_count")
+        .gte("first_seen_at", cutoffIso)
+        .order("first_seen_at", { ascending: true })
+        .range(i * PAGE, i * PAGE + PAGE - 1)
+    )
+  );
+
+  const cohortMap = new Map<string, { total: number; engaged: number; converted: number }>();
+  for (const p of pageResults) {
+    for (const l of p.data ?? []) {
+      if (!l.first_seen_at) continue;
+      const month = l.first_seen_at.slice(0, 7);
+      if (!cohortMap.has(month)) {
+        cohortMap.set(month, { total: 0, engaged: 0, converted: 0 });
+      }
+      const c = cohortMap.get(month)!;
+      c.total++;
+      if ((l.total_touchpoints ?? 0) > 1) c.engaged++;
+      if ((l.conversion_count ?? 0) > 0) c.converted++;
+    }
+  }
+
+  return [...cohortMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-12)
+    .map(([month, c]) => ({
+      month,
+      total: c.total,
+      engaged: c.engaged,
+      converted: c.converted,
+      engagementRate: c.total ? Number((c.engaged / c.total * 100).toFixed(1)) : 0,
+      conversionRate: c.total ? Number((c.converted / c.total * 100).toFixed(2)) : 0,
+    }));
+}
+
+/**
+ * SMAX channel breakdown by page_pid → human-readable platform
+ * Uses N parallel head:true counts (1 per known page_pid) instead of pulling all rows.
+ * Lookup of `uniqueLeads` is skipped — too expensive without a DB function.
+ */
+export async function getSmaxChannelBreakdown() {
+  const supabase = await createClient();
+  const CHANNELS = [
+    { pid: "fb102323788540150",     label: "Facebook Brand",      color: "#1877f2" },
+    { pid: "fb107203051058856",     label: "Facebook KOL",        color: "#0084ff" },
+    { pid: "zlw543187459113764384", label: "Zalo Main",           color: "#0068ff" },
+    { pid: "zl2235256473219383054", label: "Zalo Other",          color: "#0095f6" },
+    { pid: "ctm68188e11779d16c0779c018c", label: "Website Live Chat", color: "#22c55e" },
+    { pid: "ig17841446528067260",   label: "Instagram Brand",     color: "#E1306C" },
+    { pid: "ig17841460097450702",   label: "Instagram KOL",       color: "#06b6d4" },
+  ];
+
+  const counts = await Promise.all(
+    CHANNELS.map(async (c) => {
+      const { count } = await supabase
+        .from("fact_touchpoint")
+        .select("*", { count: "exact", head: true })
+        .eq("source", "smax")
+        .eq("payload->>page_pid", c.pid);
+      return { ...c, touchpoints: count ?? 0 };
+    })
+  );
+
+  return counts
+    .filter((c) => c.touchpoints > 0)
+    .sort((a, b) => b.touchpoints - a.touchpoints)
+    .map((c) => ({
+      label: c.label,
+      touchpoints: c.touchpoints,
+      uniqueLeads: 0, // skipped — would require pulling rows or DB function
+      color: c.color,
+    }));
+}
+
+/**
+ * Engagement segments — 4 parallel bucket counts.
+ */
+export async function getEngagementSegments() {
+  const supabase = await createClient();
+  const [lurkers, low, mid, high] = await Promise.all([
+    supabase.from("dim_lead").select("*", { count: "exact", head: true }).lte("total_touchpoints", 1),
+    supabase.from("dim_lead").select("*", { count: "exact", head: true }).gte("total_touchpoints", 2).lte("total_touchpoints", 4),
+    supabase.from("dim_lead").select("*", { count: "exact", head: true }).gte("total_touchpoints", 5).lte("total_touchpoints", 14),
+    supabase.from("dim_lead").select("*", { count: "exact", head: true }).gte("total_touchpoints", 15),
+  ]);
+  return [
+    { label: "Lurker (≤1 touch)",      count: lurkers.count ?? 0, color: "#a1a1aa" },
+    { label: "Low (2-4 touches)",      count: low.count ?? 0,     color: "#5ac8fa" },
+    { label: "Active (5-14 touches)",  count: mid.count ?? 0,     color: "#ff9500" },
+    { label: "Power (≥15 touches)",    count: high.count ?? 0,    color: "#ff3b30" },
+  ];
+}
+
+/**
+ * Top lead_source values (specific campaign/UTM)
+ * Parallel pagination over leads with non-null lead_source.
+ */
+export async function getTopLeadSources(limit = 12) {
+  const supabase = await createClient();
+  const { count: total } = await supabase
+    .from("dim_lead")
+    .select("*", { count: "exact", head: true })
+    .not("lead_source", "is", null);
+  const PAGE = 1000;
+  const pages = Math.ceil((total ?? 0) / PAGE);
+
+  const pageResults = await Promise.all(
+    Array.from({ length: pages }, (_, i) =>
+      supabase
+        .from("dim_lead")
+        .select("lead_source")
+        .not("lead_source", "is", null)
+        .range(i * PAGE, i * PAGE + PAGE - 1)
+    )
+  );
+
+  const counts = new Map<string, number>();
+  for (const p of pageResults) {
+    for (const l of p.data ?? []) {
+      const src = (l.lead_source || "—").trim();
+      if (!src) continue;
+      counts.set(src, (counts.get(src) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([label, count]) => ({ label, count }));
+}
+
+/**
+ * Stale leads — dormant >30 days, useful for AI Planner recommendation
+ */
+export async function getStaleLeadsCount(days = 30) {
+  const supabase = await createClient();
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const { count } = await supabase
+    .from("dim_lead")
+    .select("*", { count: "exact", head: true })
+    .lt("last_engagement_at", cutoff.toISOString());
+  return count ?? 0;
 }
 
 export async function getScoringRules() {

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Topbar } from "@/components/Topbar";
 import { LeadListItem } from "@/components/LeadListItem";
 import { getAllLeads, getAllLeadsCount } from "@/lib/supabase/queries";
@@ -80,23 +81,23 @@ export default async function AllLeadsPage({
         {totalPages > 1 && (
           <nav className="mt-6 flex items-center justify-center gap-2">
             {page > 1 && (
-              <a
+              <Link
                 href={buildPageUrl(page - 1)}
-                className="rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-[13px] hover:bg-subtle"
+                className="press rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-[13px] hover:bg-subtle"
               >
                 ← Trước
-              </a>
+              </Link>
             )}
             <span className="text-[13px] text-muted px-3">
               Trang {page} / {totalPages}
             </span>
             {page < totalPages && (
-              <a
+              <Link
                 href={buildPageUrl(page + 1)}
-                className="rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-[13px] hover:bg-subtle"
+                className="press rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-[13px] hover:bg-subtle"
               >
                 Sau →
-              </a>
+              </Link>
             )}
           </nav>
         )}

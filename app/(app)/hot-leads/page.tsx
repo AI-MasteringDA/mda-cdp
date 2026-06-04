@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Topbar } from "@/components/Topbar";
 import { LeadListItem } from "@/components/LeadListItem";
 import { getHotLeads, getHotLeadsCount } from "@/lib/supabase/queries";
@@ -46,11 +47,11 @@ export default async function HotLeadsPage({
         {totalPages > 1 && (
           <nav className="mt-6 flex items-center justify-center gap-2">
             {page > 1 && (
-              <a href={`/hot-leads${page - 1 > 1 ? `?page=${page - 1}` : ""}`} className="rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-[13px] hover:bg-subtle">← Trước</a>
+              <Link href={`/hot-leads${page - 1 > 1 ? `?page=${page - 1}` : ""}`} className="press rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-[13px] hover:bg-subtle">← Trước</Link>
             )}
             <span className="text-[13px] text-muted px-3">Trang {page} / {totalPages}</span>
             {page < totalPages && (
-              <a href={`/hot-leads?page=${page + 1}`} className="rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-[13px] hover:bg-subtle">Sau →</a>
+              <Link href={`/hot-leads?page=${page + 1}`} className="press rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-[13px] hover:bg-subtle">Sau →</Link>
             )}
           </nav>
         )}

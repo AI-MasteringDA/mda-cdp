@@ -184,12 +184,40 @@ async function saveInstantlyCursor(cursor: string | null): Promise<void> {
   if (cursor === null) {
     await admin.from("etl_state").delete()
       .eq("source", "instantly").eq("key", "emails_cursor");
+    // Reset failure counter when cursor cleared
+    await admin.from("etl_state").delete()
+      .eq("source", "instantly").eq("key", "cursor_fail_count");
   } else {
     await admin.from("etl_state").upsert(
       { source: "instantly", key: "emails_cursor", value: cursor, updated_at: new Date().toISOString() },
       { onConflict: "source,key" }
     );
   }
+}
+
+/**
+ * Persisted cross-run fail counter for the current saved cursor.
+ * After CURSOR_FAIL_GIVEUP failures, the next sync will clear cursor & start fresh
+ * — prevents the cron from looping forever on a single bad page.
+ */
+const CURSOR_FAIL_GIVEUP = 3;
+
+async function getCursorFailCount(): Promise<number> {
+  const { data } = await admin
+    .from("etl_state")
+    .select("value")
+    .eq("source", "instantly")
+    .eq("key", "cursor_fail_count")
+    .maybeSingle();
+  const v = data?.value;
+  return typeof v === "string" ? Number(v) || 0 : 0;
+}
+
+async function setCursorFailCount(n: number): Promise<void> {
+  await admin.from("etl_state").upsert(
+    { source: "instantly", key: "cursor_fail_count", value: String(n), updated_at: new Date().toISOString() },
+    { onConflict: "source,key" }
+  );
 }
 
 /**
@@ -340,6 +368,17 @@ export async function pullFromInstantlyReal() {
       console.log(`   ↻  Resuming from saved cursor (page ${page})`);
     }
 
+    // Before starting: if we've failed CURSOR_FAIL_GIVEUP times on this same cursor
+    // across previous runs, clear the cursor and start fresh.
+    if (cursor) {
+      const prevFails = await getCursorFailCount();
+      if (prevFails >= CURSOR_FAIL_GIVEUP) {
+        console.warn(`   ❌ Cursor ${cursor.slice(0, 12)} failed ${prevFails}× across previous runs — clearing & starting fresh`);
+        await saveInstantlyCursor(null);
+        cursor = undefined;
+      }
+    }
+
     while (page < MAX_PAGES) {
       const params: Record<string, string> = { limit: "100" };
       if (cursor) params.starting_after = cursor;
@@ -349,7 +388,7 @@ export async function pullFromInstantlyReal() {
         resp = await instantlyFetch("/emails", params);
       } catch (err) {
         const msg = (err as Error).message;
-        console.warn(`   ⚠️ Page ${page} failed after retries: ${msg.slice(0, 120)}`);
+        console.warn(`   ⚠️ Page ${page} (cursor ${cursor?.slice(0, 12) || "-"}) failed: ${msg.slice(0, 120)}`);
         failedAt = cursor;
         break;
       }
@@ -398,7 +437,14 @@ export async function pullFromInstantlyReal() {
 
     if (failedAt) {
       await saveInstantlyCursor(failedAt);
-      console.log(`   📍 Cursor saved at ${failedAt.slice(0, 8)}... — re-run ETL to resume`);
+      // Increment cross-run failure counter; auto-clear after CURSOR_FAIL_GIVEUP
+      const prevFails = await getCursorFailCount();
+      const nextFails = prevFails + 1;
+      await setCursorFailCount(nextFails);
+      console.log(`   📍 Cursor saved at ${failedAt} (fail ${nextFails}/${CURSOR_FAIL_GIVEUP}) — re-run ETL to resume`);
+    } else {
+      // Successful run — reset counter
+      await setCursorFailCount(0);
     }
 
     console.log(`📦 [Instantly] Pulled ${totalCollected} emails (${page} pages), inserted ${totalInserted} new touchpoints (+${totalCreated} leads)`);
@@ -406,11 +452,14 @@ export async function pullFromInstantlyReal() {
     await admin
       .from("sync_job")
       .update({
-        status: failedAt ? "failed" : "success",
+        // Partial success: if we inserted something, mark success even with leftover cursor
+        status: failedAt && totalInserted === 0 ? "failed" : "success",
         finished_at: new Date().toISOString(),
         records_in: totalCollected,
         records_merged: totalInserted,
-        error_message: failedAt ? `Cursor saved at ${failedAt.slice(0, 8)} — re-run to resume` : null,
+        error_message: failedAt
+          ? `Sync dừng tại cursor ${failedAt} — lần sau resume từ đây`
+          : null,
       })
       .eq("id", jobId);
 
