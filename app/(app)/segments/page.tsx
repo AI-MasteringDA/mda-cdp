@@ -2,11 +2,15 @@ import { Topbar } from "@/components/Topbar";
 import { KPICard } from "@/components/KPICard";
 import { TierDonut } from "@/components/charts/TierDonut";
 import { SimpleBar } from "@/components/charts/SimpleBar";
+import { OutlierSegmentsCard } from "@/components/OutlierSegmentsCard";
+import { MetricDefinitionBadge } from "@/components/MetricDefinitionBadge";
+import { ENROLLED_STUDENT } from "@/lib/metrics-config";
 import {
   getTierDistribution,
   getSourceTierMatrix,
   getEngagementSegments,
   getAllLeadsCount,
+  getOutlierSegments,
 } from "@/lib/supabase/queries";
 import { PieChart, Layers } from "lucide-react";
 import Link from "next/link";
@@ -35,11 +39,12 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 export default async function SegmentsPage() {
-  const [tiers, sourceTier, engagement, totalLeads] = await Promise.all([
+  const [tiers, sourceTier, engagement, totalLeads, outliers] = await Promise.all([
     getTierDistribution(),
     getSourceTierMatrix(),
     getEngagementSegments(),
     getAllLeadsCount(),
+    getOutlierSegments(),
   ]);
 
   const hotPct = totalLeads ? (tiers.find((t) => t.name === "NÓNG")?.value ?? 0) / totalLeads * 100 : 0;
@@ -176,10 +181,18 @@ export default async function SegmentsPage() {
           </div>
         </section>
 
+        {/* OUTLIER segments — high-value patterns for lookalike */}
+        <div className="mb-6">
+          <OutlierSegmentsCard data={outliers} />
+        </div>
+
         {/* Engagement segments */}
         <section className="hairline rounded-2xl bg-white">
           <div className="hairline-b px-6 py-4">
-            <h2 className="text-[15px] font-semibold tracking-tight">Phân khúc theo mức Engagement</h2>
+            <h2 className="text-[15px] font-semibold tracking-tight flex items-center gap-1.5">
+              Phân khúc theo mức Engagement
+              <MetricDefinitionBadge def={ENROLLED_STUDENT} />
+            </h2>
             <p className="mt-0.5 text-[12px] text-muted">
               Bucket theo số touchpoint mỗi lead. Lurker = chỉ mới có 1 touch (lead_created),
               Power = đã chat/email ≥15 lần.

@@ -2,10 +2,14 @@ import { Topbar } from "@/components/Topbar";
 import { KPICard } from "@/components/KPICard";
 import { FunnelBar } from "@/components/charts/FunnelBar";
 import { SimpleBar } from "@/components/charts/SimpleBar";
+import { CohortBySourceMatrix } from "@/components/CohortBySourceMatrix";
+import { MetricDefinitionBadge } from "@/components/MetricDefinitionBadge";
+import { CONVERSION_RATE, ENROLLED_STUDENT } from "@/lib/metrics-config";
 import {
   getConversionFunnel,
   getStageDistribution,
   getCohortByMonth,
+  getCohortBySourceMonth,
   getAllLeadsCount,
 } from "@/lib/supabase/queries";
 import { GitBranch, TrendingDown } from "lucide-react";
@@ -13,11 +17,12 @@ import { GitBranch, TrendingDown } from "lucide-react";
 export const dynamic = "force-dynamic";
 
 export default async function FunnelPage() {
-  const [funnel, stages, cohorts, totalLeads] = await Promise.all([
+  const [funnel, stages, cohorts, totalLeads, cohortBySource] = await Promise.all([
     getConversionFunnel(),
     getStageDistribution(),
     getCohortByMonth(),
     getAllLeadsCount(),
+    getCohortBySourceMonth(),
   ]);
 
   // Funnel drop analysis
@@ -126,10 +131,28 @@ export default async function FunnelPage() {
           </div>
         </section>
 
+        {/* Cohort × Source heatmap */}
+        <section className="hairline rounded-2xl bg-white mb-6">
+          <div className="hairline-b px-6 py-4">
+            <h2 className="text-[15px] font-semibold tracking-tight flex items-center gap-1.5">
+              Cohort × Source (heatmap conversion rate)
+              <MetricDefinitionBadge def={CONVERSION_RATE} />
+            </h2>
+            <p className="mt-0.5 text-[12px] text-muted">
+              Tỷ lệ chuyển đổi theo source × tháng nhập. Ô càng xanh = chốt càng tốt.
+              Phát hiện kênh nào hiệu quả theo từng giai đoạn.
+            </p>
+          </div>
+          <CohortBySourceMatrix data={cohortBySource} />
+        </section>
+
         {/* Cohort table */}
         <section className="hairline rounded-2xl bg-white">
           <div className="hairline-b px-6 py-4">
-            <h2 className="text-[15px] font-semibold tracking-tight">Cohort theo tháng nhập lead</h2>
+            <h2 className="text-[15px] font-semibold tracking-tight flex items-center gap-1.5">
+              Cohort theo tháng nhập lead
+              <MetricDefinitionBadge def={ENROLLED_STUDENT} />
+            </h2>
             <p className="mt-0.5 text-[12px] text-muted">
               Lead nhập tháng nào engage / chốt tốt nhất? Cohort gần đây có thể còn động.
             </p>

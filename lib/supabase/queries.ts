@@ -1250,6 +1250,174 @@ export async function getSmaxChannelBreakdown() {
 }
 
 /**
+ * Outlier segments — find combos (source × engagement bucket × stage) that
+ * convert at >= LIFT_THRESHOLD × baseline. These are "high-value patterns"
+ * to mine for lookalike audiences (spec ref 5.3).
+ *
+ * Strategy: Pull aggregate counts grouped by (source, engagement_bucket)
+ * from dim_lead, compute conversion rate per cell, compare to baseline.
+ */
+export async function getOutlierSegments(): Promise<{
+  baseline_conversion_rate_pct: number;
+  total_leads: number;
+  total_students: number;
+  segments: Array<{
+    source: string;
+    engagement_label: string;
+    engagement_min: number;
+    engagement_max: number | null;
+    leads: number;
+    students: number;
+    conversion_rate_pct: number;
+    lift: number;
+  }>;
+}> {
+  const supabase = await createClient();
+
+  // 1) Baseline counts
+  const { count: totalLeads } = await supabase
+    .from("dim_lead")
+    .select("*", { count: "exact", head: true });
+  const { count: totalStudents } = await supabase
+    .from("dim_lead")
+    .select("*", { count: "exact", head: true })
+    .gt("conversion_count", 0);
+
+  const baseline = totalLeads ? (totalStudents ?? 0) / totalLeads : 0;
+  const baselinePct = baseline * 100;
+
+  const sources = ["salesforce", "smax", "instantly", "web"];
+  const buckets = [
+    { label: "Lurker (1 touch)",       min: 0,  max: 1 },
+    { label: "Low (2-4 touches)",      min: 2,  max: 4 },
+    { label: "Active (5-14 touches)",  min: 5,  max: 14 },
+    { label: "Power (≥15 touches)",    min: 15, max: null as number | null },
+  ];
+
+  // Build query per (source, bucket) cell — get leads count + students count
+  type Cell = {
+    source: string;
+    engagement_label: string;
+    engagement_min: number;
+    engagement_max: number | null;
+    leads: number;
+    students: number;
+  };
+
+  const cells = await Promise.all(
+    sources.flatMap((src) =>
+      buckets.map(async (b): Promise<Cell> => {
+        let baseQ = supabase
+          .from("dim_lead")
+          .select("*", { count: "exact", head: true })
+          .eq("source", src)
+          .gte("total_touchpoints", b.min);
+        if (b.max !== null) baseQ = baseQ.lte("total_touchpoints", b.max);
+
+        let convQ = supabase
+          .from("dim_lead")
+          .select("*", { count: "exact", head: true })
+          .eq("source", src)
+          .gte("total_touchpoints", b.min)
+          .gt("conversion_count", 0);
+        if (b.max !== null) convQ = convQ.lte("total_touchpoints", b.max);
+
+        const [{ count: leads }, { count: students }] = await Promise.all([baseQ, convQ]);
+        return {
+          source: src,
+          engagement_label: b.label,
+          engagement_min: b.min,
+          engagement_max: b.max,
+          leads: leads ?? 0,
+          students: students ?? 0,
+        };
+      })
+    )
+  );
+
+  // Compute conversion rate + lift per cell
+  // Lift = (cell_conv_rate / baseline_conv_rate); >1 means outperforms baseline
+  const segments = cells
+    .filter((c) => c.leads >= 5) // need minimum sample
+    .map((c) => {
+      const rate = c.leads > 0 ? c.students / c.leads : 0;
+      const lift = baseline > 0 ? rate / baseline : 0;
+      return {
+        ...c,
+        conversion_rate_pct: Number((rate * 100).toFixed(2)),
+        lift: Number(lift.toFixed(2)),
+      };
+    })
+    .sort((a, b) => b.lift - a.lift);
+
+  return {
+    baseline_conversion_rate_pct: Number(baselinePct.toFixed(2)),
+    total_leads: totalLeads ?? 0,
+    total_students: totalStudents ?? 0,
+    segments,
+  };
+}
+
+/**
+ * Cohort by month × source — for funnel page enrichment
+ */
+export async function getCohortBySourceMonth(): Promise<{
+  sources: string[];
+  months: string[];
+  matrix: Record<string, Record<string, { total: number; converted: number; conv_rate_pct: number }>>;
+}> {
+  const supabase = await createClient();
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 13);
+
+  // Fetch all leads with first_seen_at + source + conversion_count
+  const { count: total } = await supabase
+    .from("dim_lead")
+    .select("*", { count: "exact", head: true })
+    .gte("first_seen_at", cutoff.toISOString());
+  const PAGE = 1000;
+  const pages = Math.ceil((total ?? 0) / PAGE);
+
+  const pageResults = await Promise.all(
+    Array.from({ length: pages }, (_, i) =>
+      supabase
+        .from("dim_lead")
+        .select("first_seen_at, source, conversion_count")
+        .gte("first_seen_at", cutoff.toISOString())
+        .range(i * PAGE, i * PAGE + PAGE - 1)
+    )
+  );
+
+  const sources = ["salesforce", "smax", "instantly", "web"];
+  const matrix: Record<string, Record<string, { total: number; converted: number; conv_rate_pct: number }>> = {};
+
+  for (const p of pageResults) {
+    for (const l of p.data ?? []) {
+      if (!l.first_seen_at) continue;
+      const month = l.first_seen_at.slice(0, 7);
+      const src = sources.includes(l.source) ? l.source : "other";
+      if (!matrix[src]) matrix[src] = {};
+      if (!matrix[src][month]) matrix[src][month] = { total: 0, converted: 0, conv_rate_pct: 0 };
+      matrix[src][month].total++;
+      if ((l.conversion_count ?? 0) > 0) matrix[src][month].converted++;
+    }
+  }
+
+  // Compute conversion rates + collect month list
+  const monthSet = new Set<string>();
+  for (const src of Object.keys(matrix)) {
+    for (const month of Object.keys(matrix[src])) {
+      monthSet.add(month);
+      const cell = matrix[src][month];
+      cell.conv_rate_pct = cell.total > 0 ? Number(((cell.converted / cell.total) * 100).toFixed(2)) : 0;
+    }
+  }
+  const months = [...monthSet].sort().slice(-12);
+
+  return { sources, months, matrix };
+}
+
+/**
  * Engagement segments — 4 parallel bucket counts.
  */
 export async function getEngagementSegments() {
