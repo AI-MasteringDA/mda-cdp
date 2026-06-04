@@ -100,19 +100,26 @@ export function AiInsightsPanel({
   async function analyze(force = false) {
     setLoading(true);
     setError(null);
+    // Hard timeout 45s — Haiku usually < 10s, anything longer means stuck.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
     try {
       const url = force
         ? `/api/ai/lead-insights/${leadId}?force=true`
         : `/api/ai/lead-insights/${leadId}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
       setInsight(data.insight);
       setGeneratedAt(data.generated_at ?? new Date().toISOString());
       setCached(!!data.cached);
     } catch (e) {
-      setError((e as Error).message);
+      const msg = (e as Error).name === "AbortError"
+        ? "Timeout 45s — Haiku đáng lẽ phải xong sau 10s. Check Anthropic key có valid không."
+        : (e as Error).message;
+      setError(msg);
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   }
@@ -135,7 +142,7 @@ export function AiInsightsPanel({
           <Sparkles className="h-4 w-4 text-foreground" strokeWidth={1.75} />
           <h3 className="text-[14px] font-semibold tracking-tight">AI Insights</h3>
           <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-2 font-medium">
-            Claude Sonnet 4.6
+            Claude Haiku 4.5
           </span>
         </div>
 
@@ -153,7 +160,7 @@ export function AiInsightsPanel({
         </button>
 
         <div className="mt-3 text-[10px] text-muted-2 text-center leading-relaxed">
-          ~10-15 giây · chi phí ~1000đ / lần · cache vĩnh viễn cho đến khi click Refresh
+          ~5 giây · chi phí ~50đ / lần · cache vĩnh viễn cho đến khi click Refresh
         </div>
       </div>
     );
@@ -197,7 +204,7 @@ export function AiInsightsPanel({
         <Sparkles className="h-4 w-4 text-foreground" strokeWidth={1.75} />
         <h3 className="text-[14px] font-semibold tracking-tight">AI Insights</h3>
         <span className="text-[10px] uppercase tracking-wider text-muted-2 font-medium">
-          Sonnet 4.6
+          Haiku 4.5
         </span>
         <button
           onClick={() => analyze(true)}
@@ -371,7 +378,7 @@ export function AiInsightsPanel({
       )}
 
       <div className="text-[10px] text-muted-2 text-right pt-2 border-t border-[var(--border-subtle)]">
-        Powered by Claude Sonnet 4.6
+        Powered by Claude Haiku 4.5
       </div>
     </div>
   );
@@ -406,7 +413,7 @@ function LoadingState() {
     <div className="sticky top-20 rounded-2xl bg-surface p-5">
       <div className="flex items-center gap-2">
         <Sparkles className="h-4 w-4 text-foreground animate-pulse" strokeWidth={1.75} />
-        <h3 className="text-[14px] font-semibold tracking-tight">Claude Sonnet 4.6 đang phân tích...</h3>
+        <h3 className="text-[14px] font-semibold tracking-tight">Claude Haiku 4.5 đang phân tích...</h3>
         <span className="ml-auto text-[10px] font-mono tabular-nums text-muted-2">
           {elapsed}s
         </span>
@@ -437,7 +444,7 @@ function LoadingState() {
       </div>
 
       <div className="mt-4 text-[10px] text-muted-2 text-center leading-relaxed">
-        Sonnet 4.6 deep analysis · thường mất 15-20s
+        Haiku 4.5 deep analysis · thường mất 15-20s
         {elapsed > 25 && (
           <div className="mt-1 text-[var(--warm)]">⚠️ Chậm hơn bình thường — đợi hoặc refresh sau</div>
         )}

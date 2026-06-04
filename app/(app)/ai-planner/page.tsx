@@ -28,7 +28,7 @@ export default async function AIPlannerPage() {
               AI Growth Planner
             </h1>
             <p className="mt-1 text-[14px] text-muted">
-              Claude Sonnet 4.6 đọc toàn bộ growth data → đề xuất giả thuyết tăng trưởng + action plan dựa trên evidence.
+              Claude Haiku 4.5 đọc toàn bộ growth data → đề xuất giả thuyết tăng trưởng + action plan dựa trên evidence.
               <strong> AI đề xuất, người quyết.</strong>
             </p>
           </div>

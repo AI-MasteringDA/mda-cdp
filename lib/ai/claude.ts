@@ -11,14 +11,14 @@ async function getClient(): Promise<Anthropic> {
   return new Anthropic({ apiKey });
 }
 
-// Sonnet for deep analysis. Haiku for quick mode.
-export const AI_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
+// Default Haiku 4.5 — fast (3-5s), cheap, đủ xài cho Lead Insights.
+// Sonnet chỉ dùng khi override env.
+export const AI_MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
 
 const FALLBACK_MODELS = [
-  "claude-sonnet-4-6",
-  "claude-sonnet-4-5",
   "claude-haiku-4-5",
-  "claude-3-5-sonnet-latest",
+  "claude-haiku-4-5-20251001",
+  "claude-3-5-haiku-latest",
 ];
 
 export type LeadInsight = {

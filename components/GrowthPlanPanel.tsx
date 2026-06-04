@@ -84,9 +84,12 @@ export function GrowthPlanPanel({
   async function analyze(force = false) {
     setLoading(true);
     setError(null);
+    // Hard timeout 60s — Haiku 4.5 with 11 queries usually < 15s.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
       const url = force ? "/api/ai/growth-plan?force=true" : "/api/ai/growth-plan";
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
       const text = await res.text();
       let data: { plan?: GrowthPlan; error?: string; cached?: boolean; generated_at?: string };
       try {
@@ -94,8 +97,7 @@ export function GrowthPlanPanel({
       } catch {
         if (text.toLowerCase().includes("timeout") || text.toLowerCase().includes("an error occurred")) {
           throw new Error(
-            `Vercel function timeout (Sonnet 4.6 mất quá lâu). HTTP ${res.status}. ` +
-            `Try: refresh sau 30s, hoặc fallback sang Haiku qua env var ANTHROPIC_GROWTH_MODEL=claude-haiku-4-5`
+            `Vercel function timeout. HTTP ${res.status}. Check Anthropic key valid không.`
           );
         }
         throw new Error(`Server trả về non-JSON (HTTP ${res.status}). First 200: ${text.slice(0, 200)}`);
@@ -106,8 +108,12 @@ export function GrowthPlanPanel({
       setGeneratedAt(data.generated_at ?? new Date().toISOString());
       setCached(!!data.cached);
     } catch (e) {
-      setError((e as Error).message);
+      const msg = (e as Error).name === "AbortError"
+        ? "Timeout 60s — Haiku đáng lẽ phải xong sau 15s. Check Anthropic key có valid + balance không."
+        : (e as Error).message;
+      setError(msg);
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   }
@@ -133,7 +139,7 @@ export function GrowthPlanPanel({
           <div className="flex-1">
             <h2 className="text-[16px] font-semibold tracking-tight">Growth Plan AI</h2>
             <p className="mt-1 text-[13px] text-muted leading-relaxed">
-              Claude Sonnet 4.6 sẽ đọc <strong>toàn bộ growth data thật</strong> (attribution, funnel, cohorts, segments, TVV performance) → đề xuất:
+              Claude Haiku 4.5 sẽ đọc <strong>toàn bộ growth data thật</strong> (attribution, funnel, cohorts, segments, TVV performance) → đề xuất:
             </p>
             <ul className="mt-3 space-y-1 text-[13px] text-muted">
               <li>· 📊 Findings về Attribution / Funnel / Segments (có evidence)</li>
@@ -193,7 +199,7 @@ export function GrowthPlanPanel({
             <div className="min-w-0 flex-1">
               <h2 className="text-[16px] font-semibold tracking-tight">Growth Plan AI</h2>
               <p className="mt-0.5 text-[11px] text-muted-2">
-                Claude Sonnet 4.6 · đọc data thật
+                Claude Haiku 4.5 · đọc data thật
                 {generatedAt && (
                   <>
                     {" "}·{" "}
@@ -376,7 +382,7 @@ export function GrowthPlanPanel({
         )}
       </div>
 
-      <div className="text-[10px] text-muted-2 text-right">Powered by Claude Sonnet 4.6 · neo vào data thật</div>
+      <div className="text-[10px] text-muted-2 text-right">Powered by Claude Haiku 4.5 · neo vào data thật</div>
     </div>
   );
 }
@@ -436,7 +442,7 @@ function LoadingState() {
     <section className="hairline rounded-2xl bg-white p-6">
       <div className="flex items-center gap-2 mb-4">
         <Sparkles className="h-4 w-4 text-foreground animate-pulse" strokeWidth={1.75} />
-        <h3 className="text-[14px] font-semibold tracking-tight">Claude Sonnet 4.6 đang phân tích...</h3>
+        <h3 className="text-[14px] font-semibold tracking-tight">Claude Haiku 4.5 đang phân tích...</h3>
         <span className="ml-auto text-[11px] font-mono tabular-nums text-muted-2">{elapsed}s</span>
       </div>
 
@@ -461,7 +467,7 @@ function LoadingState() {
       </div>
 
       <p className="mt-5 text-[10px] text-muted-2 text-center">
-        Sonnet 4.6 deep analysis · thường mất 20-30s
+        Haiku 4.5 deep analysis · thường mất 20-30s
         {elapsed > 40 && (
           <span className="block mt-1 text-[var(--warm)]">⚠️ Chậm hơn bình thường — Sonnet có thể đang load nặng</span>
         )}

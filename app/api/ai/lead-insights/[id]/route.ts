@@ -201,7 +201,7 @@ export async function GET(
 
     // Cache for next time
     await setCached(key, insight, {
-      model: "claude-sonnet-4-6",
+      model: "claude-haiku-4-5",
       elapsed_seconds: elapsed,
       lead_id: id,
     });

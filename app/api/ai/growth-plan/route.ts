@@ -17,8 +17,8 @@ import {
 } from "@/lib/supabase/queries";
 
 export const dynamic = "force-dynamic";
-// Vercel Pro allows up to 300s. Sonnet 4.6 deep analysis can take 30-90s.
-export const maxDuration = 300;
+// Haiku 4.5 usually < 20s; bump to 60s for safety.
+export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
@@ -149,7 +149,7 @@ export async function GET(req: NextRequest) {
 
     // Cache the result for next time (until user clicks refresh)
     await setCached(key, plan, {
-      model: "claude-sonnet-4-6",
+      model: "claude-haiku-4-5",
       elapsed_seconds: elapsed,
       context_summary: { total_leads: ctx.total_leads, total_students: ctx.total_students },
     });

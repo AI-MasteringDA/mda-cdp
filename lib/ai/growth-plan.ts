@@ -21,12 +21,12 @@ async function getClient(): Promise<Anthropic> {
   return new Anthropic({ apiKey });
 }
 
-export const GROWTH_AI_MODEL = process.env.ANTHROPIC_GROWTH_MODEL || "claude-sonnet-4-6";
+export const GROWTH_AI_MODEL = process.env.ANTHROPIC_GROWTH_MODEL || "claude-haiku-4-5";
 
 const FALLBACK_MODELS = [
-  "claude-sonnet-4-6",
-  "claude-sonnet-4-5",
   "claude-haiku-4-5",
+  "claude-haiku-4-5-20251001",
+  "claude-3-5-haiku-latest",
 ];
 
 export type GrowthPlan = {
