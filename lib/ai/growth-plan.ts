@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { getAnthropicKey } from "@/lib/secrets";
 import {
   ENROLLED_STUDENT,
   LEAD,
@@ -10,15 +11,14 @@ import {
   SOURCE_CHANNELS,
 } from "@/lib/metrics-config";
 
-let _client: Anthropic | null = null;
-function getClient(): Anthropic {
-  if (_client) return _client;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+async function getClient(): Promise<Anthropic> {
+  const apiKey = await getAnthropicKey();
   if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY chưa được set.");
+    throw new Error(
+      "Anthropic API key chưa được set. Click nút 🔑 trên Topbar để paste key."
+    );
   }
-  _client = new Anthropic({ apiKey });
-  return _client;
+  return new Anthropic({ apiKey });
 }
 
 export const GROWTH_AI_MODEL = process.env.ANTHROPIC_GROWTH_MODEL || "claude-sonnet-4-6";
@@ -298,9 +298,10 @@ async function tryModels(
   params: Anthropic.MessageCreateParamsNonStreaming
 ): Promise<Anthropic.Message> {
   const tried: string[] = [];
+  const client = await getClient();
   for (const model of FALLBACK_MODELS) {
     try {
-      return await getClient().messages.create({ ...params, model });
+      return await client.messages.create({ ...params, model });
     } catch (e) {
       const err = e as Error & { status?: number };
       tried.push(`${model}: ${err.message.slice(0, 80)}`);

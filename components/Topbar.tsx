@@ -4,6 +4,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useState, useEffect, useTransition } from "react";
 import { Search, Loader2 } from "lucide-react";
 import { NotificationsBell } from "./NotificationsBell";
+import { ApiKeyButton } from "./ApiKeyButton";
 
 export function Topbar({ title }: { title: string }) {
   const router = useRouter();
@@ -66,6 +67,7 @@ export function Topbar({ title }: { title: string }) {
               className="h-10 w-80 rounded-xl border border-[var(--border-subtle)] bg-[var(--subtle)] pl-10 pr-3 text-[13px] outline-none transition-all duration-300 placeholder:text-muted-2 focus:border-foreground focus:bg-white focus:w-96"
             />
           </div>
+          <ApiKeyButton />
           <NotificationsBell />
         </div>
       </div>

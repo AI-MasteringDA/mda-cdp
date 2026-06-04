@@ -1,16 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { getAnthropicKey } from "@/lib/secrets";
 
-let _client: Anthropic | null = null;
-function getClient(): Anthropic {
-  if (_client) return _client;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+async function getClient(): Promise<Anthropic> {
+  const apiKey = await getAnthropicKey();
   if (!apiKey) {
     throw new Error(
-      "ANTHROPIC_API_KEY chưa được set. Add vào Vercel → Settings → Environment Variables → Production/Preview/Development → Redeploy."
+      "Anthropic API key chưa được set. Click nút 🔑 trên Topbar để paste key, hoặc set ANTHROPIC_API_KEY env var trên Vercel."
     );
   }
-  _client = new Anthropic({ apiKey });
-  return _client;
+  return new Anthropic({ apiKey });
 }
 
 // Sonnet for deep analysis. Haiku for quick mode.
@@ -252,9 +250,10 @@ function formatLeadContext(ctx: LeadContext): string {
 
 async function tryModels(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> {
   const tried: string[] = [];
+  const client = await getClient();
   for (const model of FALLBACK_MODELS) {
     try {
-      return await getClient().messages.create({ ...params, model });
+      return await client.messages.create({ ...params, model });
     } catch (e) {
       const err = e as Error & { status?: number };
       tried.push(`${model}: ${err.message.slice(0, 80)}`);
