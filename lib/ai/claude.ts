@@ -13,52 +13,149 @@ function getClient(): Anthropic {
   return _client;
 }
 
-export const AI_MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
+// Sonnet for deep analysis. Haiku for quick mode.
+export const AI_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
 
 const FALLBACK_MODELS = [
+  "claude-sonnet-4-6",
+  "claude-sonnet-4-5",
   "claude-haiku-4-5",
-  "claude-3-5-haiku-latest",
-  "claude-3-5-haiku-20241022",
+  "claude-3-5-sonnet-latest",
 ];
 
 export type LeadInsight = {
   summary: string;
-  insights: string[];
+  engagement_metrics: {
+    emails_sent_by_mda: number;
+    emails_opened: number;
+    open_rate_pct: number;
+    emails_clicked: number;
+    chats_from_lead: number;
+    chats_from_tvv: number;
+    attachments_from_lead: number;
+    attachments_from_tvv: number;
+    calls_logged: number;
+    days_since_first_touch: number | null;
+    days_since_last_lead_action: number | null;
+    days_since_last_mda_action: number | null;
+  };
+  key_moments: Array<{
+    date: string;
+    event: string;
+    significance: string;
+  }>;
+  lead_voice: {
+    topics_interested: string[];
+    concerns_raised: string[];
+    buying_signals: string[];
+  };
+  mda_nurture: {
+    channels_used: string[];
+    recent_campaigns: string[];
+    responsiveness: "fast" | "moderate" | "slow" | "ignored";
+    quality_assessment: string;
+  };
+  intent_score: "high" | "medium" | "low" | "unclear";
+  intent_reasoning: string;
+  risk_signals: string[];
+  opportunity: string;
   action: "GỌI NGAY" | "EMAIL CÁ NHÂN HÓA" | "GỬI VOUCHER" | "FOLLOW-UP NHẸ" | "ARCHIVE";
   action_reason: string;
-  talking_points: string[];
+  talking_points: Array<{
+    hook: string;
+    followup: string;
+  }>;
 };
 
-const SYSTEM_PROMPT = `Bạn là AI assistant cho MDA Platform — CDP cho công ty đào tạo Data Analytics MDA (Mastering Data Analytics).
-Khách hàng MDA là người muốn học các khóa: BI (Power BI/Tableau), FA (Financial Analytics), AGENTIC AI ANALYTICS, Excel nâng cao, Python/SQL.
+const SYSTEM_PROMPT = `Bạn là Senior Sales Analyst cho MDA Platform — CDP của Mastering Data Analytics (công ty đào tạo BI/Data/AI tại Việt Nam).
 
-TVV (telesales/tư vấn viên) đang chuẩn bị liên hệ lead. Bạn nhận hồ sơ lead 360° gồm metadata + timeline events từ nhiều nguồn (Salesforce/SMAX chat/Instantly email/Wix Web).
+KHÁCH HÀNG MDA: Người muốn học các khóa BI (Power BI/Tableau), FA (Financial Analytics), AGENTIC AI ANALYTICS, Excel nâng cao, Python/SQL — chủ yếu là analyst, kế toán, kỹ sư, nhân viên văn phòng đang upskill.
 
-NHIỆM VỤ: Trả về 1 JSON object (không có markdown wrap, không có text khác) với schema:
+CONTEXT: TVV (telesales/tư vấn viên) chuẩn bị liên hệ lead này. Bạn nhận hồ sơ 360° từ Salesforce + SMAX chat + Instantly email + Wix Web. **Phân tích sâu, dựa bằng chứng cụ thể**, không nói chung chung.
 
+NHIỆM VỤ: Trả về 1 JSON object (không có markdown wrap, không text khác) đúng schema dưới đây. Phân tích phải:
+1. **Trích dẫn timeline cụ thể** — ngày, nội dung, ai gửi (LEAD vs TVV)
+2. **Nhận diện pattern** — lead chủ đề gì, hesitation gì, tăng/giảm engagement theo thời gian
+3. **Đánh giá nỗ lực MDA** — TVV đã chăm tốt chưa, có gap follow-up không
+4. **Quote tin nhắn thật** trong talking_points — không bịa, không generic
+
+SCHEMA:
 {
-  "summary": "1 câu mô tả tình trạng lead (15-25 từ)",
-  "insights": ["Insight 1 (≤20 từ)", "Insight 2", "Insight 3"],
+  "summary": "2-3 câu mô tả tổng quan — TÌNH TRẠNG hiện tại + nguyên nhân điểm cao/thấp + bottleneck chính (60-80 từ)",
+
+  "engagement_metrics": {
+    "emails_sent_by_mda": number (đếm email_sent),
+    "emails_opened": number (đếm email_open),
+    "open_rate_pct": number (open / sent * 100, làm tròn 1 chữ số),
+    "emails_clicked": number,
+    "chats_from_lead": number (đếm event 'chat' do LEAD gửi - check sender khi có),
+    "chats_from_tvv": number (đếm event 'chat_staff'),
+    "attachments_from_lead": number,
+    "attachments_from_tvv": number,
+    "calls_logged": number,
+    "days_since_first_touch": number | null,
+    "days_since_last_lead_action": number | null (LEAD chat/click/open mới nhất, null nếu chưa từng),
+    "days_since_last_mda_action": number | null (TVV chat/email mới nhất)
+  },
+
+  "key_moments": [
+    {
+      "date": "YYYY-MM-DD",
+      "event": "Mô tả ngắn (1 câu)",
+      "significance": "Ý nghĩa với sales (1 câu)"
+    }
+    // 3-6 sự kiện quan trọng nhất theo thứ tự thời gian, ưu tiên: lead chủ động + conversion + drop engagement
+  ],
+
+  "lead_voice": {
+    "topics_interested": ["chủ đề lead quan tâm — bắt từ title/detail tin nhắn của LEAD"],
+    "concerns_raised": ["concern/hesitation/câu hỏi LEAD đặt ra"],
+    "buying_signals": ["dấu hiệu mua hàng cụ thể: hỏi giá, hỏi lịch khai giảng, xin email/SĐT tư vấn, etc."]
+  },
+
+  "mda_nurture": {
+    "channels_used": ["smax","instantly","salesforce", ...],
+    "recent_campaigns": ["subject email gần đây + title TVV chat broadcast — 3-5 cái"],
+    "responsiveness": "fast" (TVV reply trong vài giờ) | "moderate" (1-2 ngày) | "slow" (>3 ngày) | "ignored" (lead chat nhưng TVV chưa rep),
+    "quality_assessment": "1-2 câu đánh giá honest: TVV chăm tốt chưa, có miss cơ hội không"
+  },
+
+  "intent_score": "high" | "medium" | "low" | "unclear",
+  "intent_reasoning": "1-2 câu giải thích vì sao chọn level đó — dựa trên buying signals + recency",
+
+  "risk_signals": [
+    "Rủi ro 1 (vd: 'Lead đã im lặng 14 ngày sau khi hỏi giá')",
+    "..."
+    // Liệt kê rủi ro thật, max 3
+  ],
+
+  "opportunity": "1-2 câu — góc tiếp cận lớn nhất hiện tại để chốt deal",
+
   "action": "GỌI NGAY" | "EMAIL CÁ NHÂN HÓA" | "GỬI VOUCHER" | "FOLLOW-UP NHẸ" | "ARCHIVE",
-  "action_reason": "1 câu giải thích vì sao chọn action đó (≤25 từ)",
-  "talking_points": ["Điểm 1 để mở đầu cuộc gọi/email (≤20 từ)", "Điểm 2", "Điểm 3"]
+  "action_reason": "1 câu giải thích vì sao action này phù hợp NOW (≤30 từ)",
+
+  "talking_points": [
+    {
+      "hook": "Câu mở đầu cụ thể — REFERENCE tin nhắn/email thật của lead (vd: 'Em thấy chị đã hỏi về lịch khai giảng FA K58 ngày 2/6, hiện vẫn còn voucher 5% cho 6 ngày nữa...')",
+      "followup": "Câu chuyển tiếp tự nhiên dẫn tới close (vd: 'Em xin 10p call để demo dashboard FA chị muốn build')"
+    }
+    // 3 cặp hook+followup, mỗi cái dựa trên 1 fact thật từ timeline
+  ]
 }
 
-QUY TẮC:
-- Tiếng Việt, ngắn gọn, action-oriented
-- Insights phải DỰA TRÊN TIMELINE THẬT — phát hiện pattern (course quan tâm? đa kênh? recency? burnout vì spam email?)
-- Talking points = câu cụ thể TVV nói khi gọi, dựa trên event thật (ví dụ "Em thấy anh đã chat về AGENTIC AI ANALYTICS ngày 2/6...")
-- KHÔNG BỊA thông tin không có trong hồ sơ
-- Action ưu tiên theo tier:
-  * NÓNG → GỌI NGAY hoặc GỬI VOUCHER
-  * ẤM → EMAIL CÁ NHÂN HÓA hoặc GỌI NGAY
+NGUYÊN TẮC:
+- **Tiếng Việt tự nhiên, sales-y** — không hành chính cứng
+- **KHÔNG BỊA** — chỉ nói điều có trong timeline. Nếu thiếu data, ghi rõ "chưa rõ"
+- **Specific > Generic** — "Lead hỏi về AGENTIC AI K60 ngày 2/6" tốt hơn "Lead quan tâm AI"
+- **Action ưu tiên theo tier**:
+  * NÓNG (70-100) + lead vừa chat → GỌI NGAY
+  * NÓNG nhưng lead silent → EMAIL CÁ NHÂN HÓA
+  * NÓNG + buying signal mạnh → GỬI VOUCHER + GỌI NGAY
+  * ẤM → EMAIL CÁ NHÂN HÓA
   * MÁT → FOLLOW-UP NHẸ
-  * NGỦ ĐÔNG → ARCHIVE
-- Nếu lead đã chat gần đây nhưng TVV chưa reply → GỌI NGAY
-- Nếu lead chỉ nhận email không tương tác → FOLLOW-UP NHẸ
-- Nếu lead có conversion event → GỬI VOUCHER cho khóa khác (upsell)
+  * NGỦ ĐÔNG → ARCHIVE (trừ khi có signal mới)
 
-TRẢ VỀ CHỈ JSON, KHÔNG có \`\`\`json hoặc text trước/sau.`;
+TRẢ VỀ CHỈ JSON object, KHÔNG có \`\`\`json wrap hoặc text bên ngoài.`;
 
 export type LeadContext = {
   name: string;
@@ -71,34 +168,77 @@ export type LeadContext = {
   company: string | null;
   leadSource: string | null;
   source: string;
+  // Pre-computed exact metrics — feed to model so it doesn't have to count
+  precomputed: {
+    total_touchpoints: number;
+    emails_sent_by_mda: number;
+    emails_opened: number;
+    emails_clicked: number;
+    emails_replied: number;
+    chats_from_lead: number;
+    chats_from_tvv: number;
+    attachments_from_lead: number;
+    attachments_from_tvv: number;
+    attachments_unknown: number;
+    calls_logged: number;
+    days_since_first_touch: number | null;
+    days_since_last_lead_action: number | null;
+    days_since_last_mda_action: number | null;
+  };
   timeline: Array<{
     date: string;
     source: string;
     type: string;
+    sender: "LEAD" | "TVV" | "MDA" | "—";
     title: string;
     detail?: string;
   }>;
 };
 
 function formatLeadContext(ctx: LeadContext): string {
+  const m = ctx.precomputed;
+  const openRate = m.emails_sent_by_mda > 0
+    ? ((m.emails_opened / m.emails_sent_by_mda) * 100).toFixed(1)
+    : "0";
   const lines: string[] = [
-    `Lead: ${ctx.name}`,
-    `Email: ${ctx.email || "—"}`,
-    `Phone: ${ctx.phone || "—"}`,
-    `Company: ${ctx.company || "—"}`,
-    `Stage: ${ctx.stage}`,
-    `Score: ${ctx.score}/100 (Tier: ${ctx.tier})`,
-    `Source: ${ctx.source}${ctx.leadSource ? ` (${ctx.leadSource})` : ""}`,
-    `Reasons (cấu thành điểm):`,
+    `=== HỒ SƠ LEAD ===`,
+    `Tên:       ${ctx.name}`,
+    `Email:     ${ctx.email || "—"}`,
+    `Phone:     ${ctx.phone || "—"}`,
+    `Công ty:   ${ctx.company || "—"}`,
+    `Stage SF:  ${ctx.stage}`,
+    `Score:     ${ctx.score}/100 (${ctx.tier})`,
+    `Nguồn:     ${ctx.source}${ctx.leadSource ? ` (${ctx.leadSource})` : ""}`,
+    ``,
+    `=== CẤU THÀNH ĐIỂM ===`,
     ...ctx.reasons.map((r) => `  ${r.sign}${r.points} ${r.label}`),
-    "",
-    `Timeline (${ctx.timeline.length} events, mới → cũ):`,
-    ...ctx.timeline.slice(0, 30).map(
-      (t) => `  [${t.date}] (${t.source}/${t.type}) ${t.title}${t.detail ? ` — ${t.detail}` : ""}`
-    ),
+    ``,
+    `=== METRICS (đã đếm sẵn từ DB) ===`,
+    `Tổng touchpoints:            ${m.total_touchpoints}`,
+    `MDA email gửi:               ${m.emails_sent_by_mda}`,
+    `Lead mở email:               ${m.emails_opened}  (open rate ${openRate}%)`,
+    `Lead click email:            ${m.emails_clicked}`,
+    `Lead reply email:            ${m.emails_replied}`,
+    `LEAD chat (text):            ${m.chats_from_lead}`,
+    `TVV chat (text):             ${m.chats_from_tvv}`,
+    `LEAD gửi file:               ${m.attachments_from_lead}`,
+    `TVV gửi file:                ${m.attachments_from_tvv}`,
+    `File không rõ ai gửi:        ${m.attachments_unknown}`,
+    `Calls:                       ${m.calls_logged}`,
+    `Ngày kể từ touch đầu:        ${m.days_since_first_touch ?? "—"}`,
+    `Ngày kể từ LEAD action cuối: ${m.days_since_last_lead_action ?? "—"}`,
+    `Ngày kể từ MDA action cuối:  ${m.days_since_last_mda_action ?? "—"}`,
+    ``,
+    `=== TIMELINE (${ctx.timeline.length} events, mới → cũ) ===`,
+    ...ctx.timeline.slice(0, 40).map((t) => {
+      const senderTag = t.sender === "—" ? "" : ` [${t.sender}]`;
+      return `  [${t.date}] (${t.source}/${t.type})${senderTag} ${t.title}${
+        t.detail ? `\n      DETAIL: ${t.detail.slice(0, 200)}` : ""
+      }`;
+    }),
   ];
-  if (ctx.timeline.length > 30) {
-    lines.push(`  ...và ${ctx.timeline.length - 30} events cũ hơn`);
+  if (ctx.timeline.length > 40) {
+    lines.push(`  ...và ${ctx.timeline.length - 40} events cũ hơn không hiển thị`);
   }
   return lines.join("\n");
 }
@@ -111,21 +251,21 @@ async function tryModels(params: Anthropic.MessageCreateParamsNonStreaming): Pro
     } catch (e) {
       const err = e as Error & { status?: number };
       tried.push(`${model}: ${err.message.slice(0, 80)}`);
-      if (err.status !== 404) throw e; // re-throw non-404 errors immediately
+      if (err.status !== 404) throw e;
     }
   }
-  throw new Error(`All Haiku models failed:\n${tried.join("\n")}`);
+  throw new Error(`All models failed:\n${tried.join("\n")}`);
 }
 
 export async function generateLeadInsight(ctx: LeadContext): Promise<LeadInsight> {
   const message = await tryModels({
     model: AI_MODEL,
-    max_tokens: 800,
+    max_tokens: 3000,
     system: [
       {
         type: "text",
         text: SYSTEM_PROMPT,
-        cache_control: { type: "ephemeral" }, // prompt cache for cost
+        cache_control: { type: "ephemeral" },
       },
     ],
     messages: [
@@ -141,7 +281,6 @@ export async function generateLeadInsight(ctx: LeadContext): Promise<LeadInsight
     .map((b) => b.text)
     .join("");
 
-  // Strip potential ```json wrapping in case model adds it
   const cleaned = text.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
 
   try {
@@ -149,7 +288,7 @@ export async function generateLeadInsight(ctx: LeadContext): Promise<LeadInsight
     return parsed;
   } catch (e) {
     throw new Error(
-      `Failed to parse AI response as JSON: ${(e as Error).message}\nRaw: ${cleaned.slice(0, 200)}`
+      `Failed to parse AI response as JSON: ${(e as Error).message}\nRaw: ${cleaned.slice(0, 500)}`
     );
   }
 }
