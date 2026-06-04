@@ -185,7 +185,21 @@ export function GrowthPlanPanel({
   }
 
   if (!plan) return null;
-  const health = HEALTH_META[plan.health_status];
+  // Defensive normalization — cached plans from earlier schema may be missing fields.
+  const p = plan as Partial<GrowthPlan>;
+  const safePlan = {
+    executive_summary: p.executive_summary ?? "",
+    health_status: (p.health_status ?? "concerning") as GrowthPlan["health_status"],
+    health_reasoning: p.health_reasoning ?? "",
+    attribution_findings: p.attribution_findings ?? [],
+    funnel_findings: p.funnel_findings ?? [],
+    segment_findings: p.segment_findings ?? [],
+    hypotheses: p.hypotheses ?? [],
+    action_items: p.action_items ?? [],
+    risks: p.risks ?? [],
+    data_infrastructure_gaps: p.data_infrastructure_gaps ?? [],
+  };
+  const health = HEALTH_META[safePlan.health_status] ?? HEALTH_META.concerning;
 
   return (
     <div className="space-y-5">
@@ -227,7 +241,7 @@ export function GrowthPlanPanel({
             <div className="text-[13px] font-bold uppercase tracking-wider" style={{ color: health.color }}>
               {health.label}
             </div>
-            <p className="mt-1 text-[12px] text-foreground leading-relaxed">{plan.health_reasoning}</p>
+            <p className="mt-1 text-[12px] text-foreground leading-relaxed">{safePlan.health_reasoning}</p>
           </div>
         </div>
 
@@ -236,7 +250,7 @@ export function GrowthPlanPanel({
           <div className="text-[10px] uppercase tracking-wider text-muted-2 font-semibold mb-2">
             Executive Summary
           </div>
-          <p className="text-[13px] text-foreground leading-relaxed">{plan.executive_summary}</p>
+          <p className="text-[13px] text-foreground leading-relaxed">{safePlan.executive_summary}</p>
         </div>
       </section>
 
@@ -245,17 +259,17 @@ export function GrowthPlanPanel({
         <FindingsCard
           title="📊 Attribution Findings"
           icon={BarChart3}
-          findings={plan.attribution_findings}
+          findings={safePlan.attribution_findings}
         />
         <FindingsCard
           title="📈 Funnel Findings"
           icon={TrendingDown}
-          findings={plan.funnel_findings}
+          findings={safePlan.funnel_findings}
         />
         <FindingsCard
           title="👥 Segment Findings"
           icon={Users}
-          findings={plan.segment_findings}
+          findings={safePlan.segment_findings}
         />
       </div>
 
@@ -269,7 +283,7 @@ export function GrowthPlanPanel({
           Hypothesis-driven growth. Không phải fact — là giả thuyết để bàn + thử nghiệm.
         </p>
         <div className="space-y-3">
-          {plan.hypotheses.map((h, i) => (
+          {safePlan.hypotheses.map((h, i) => (
             <div key={i} className="hairline rounded-xl p-4">
               <div className="flex items-start gap-3">
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-foreground text-white text-[11px] font-bold">
@@ -318,7 +332,7 @@ export function GrowthPlanPanel({
           AI đề xuất, người quyết. Không tự execute — review rồi assign cho owner.
         </p>
         <div className="space-y-2">
-          {plan.action_items.map((a, i) => (
+          {safePlan.action_items.map((a, i) => (
             <div key={i} className="hairline flex items-start gap-3 rounded-xl p-3">
               <span
                 className="inline-flex h-6 shrink-0 items-center justify-center rounded-md px-2 text-[10px] font-bold uppercase text-white tracking-wider"
@@ -347,14 +361,14 @@ export function GrowthPlanPanel({
 
       {/* RISKS + DATA GAPS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {plan.risks.length > 0 && (
+        {safePlan.risks.length > 0 && (
           <section className="hairline rounded-2xl bg-[#fef2f2] p-6">
             <h3 className="text-[14px] font-semibold tracking-tight mb-3 flex items-center gap-2 text-[var(--hot)]">
               <AlertTriangle className="h-4 w-4" strokeWidth={1.75} />
               Rủi ro
             </h3>
             <ul className="space-y-2">
-              {plan.risks.map((r, i) => (
+              {safePlan.risks.map((r, i) => (
                 <li key={i} className="flex gap-2 text-[12px] text-foreground leading-relaxed">
                   <span className="text-[var(--hot)] shrink-0">·</span>
                   <span>{r}</span>
@@ -364,14 +378,14 @@ export function GrowthPlanPanel({
           </section>
         )}
 
-        {plan.data_infrastructure_gaps.length > 0 && (
+        {safePlan.data_infrastructure_gaps.length > 0 && (
           <section className="hairline rounded-2xl bg-[#eff6ff] p-6">
             <h3 className="text-[14px] font-semibold tracking-tight mb-3 flex items-center gap-2 text-[#0064d0]">
               <Database className="h-4 w-4" strokeWidth={1.75} />
               Data infrastructure cần fix
             </h3>
             <ul className="space-y-2">
-              {plan.data_infrastructure_gaps.map((g, i) => (
+              {safePlan.data_infrastructure_gaps.map((g, i) => (
                 <li key={i} className="flex gap-2 text-[12px] text-foreground leading-relaxed">
                   <span className="text-[#0064d0] shrink-0">·</span>
                   <span>{g}</span>
