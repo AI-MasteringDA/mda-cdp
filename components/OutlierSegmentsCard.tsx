@@ -164,7 +164,7 @@ export function OutlierSegmentsCard({ data }: { data: Data }) {
         <div className="hairline-t px-6 py-3 bg-[#f0fdf4]">
           <p className="text-[12px] text-[#15803d] leading-relaxed">
             🎯 <strong>{outliers.length} phân khúc có lift ≥ 1.5x</strong> — đó là những combo
-            "Source × Engagement bucket" chốt tốt hơn average. Export làm lookalike → đẩy lên ads platform
+            &ldquo;Source × Engagement bucket&rdquo; chốt tốt hơn average. Export làm lookalike → đẩy lên ads platform
             để tìm thêm người giống vậy.
           </p>
         </div>

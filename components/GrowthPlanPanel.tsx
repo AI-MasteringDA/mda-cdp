@@ -78,8 +78,26 @@ export function GrowthPlanPanel() {
     setError(null);
     try {
       const res = await fetch("/api/ai/growth-plan");
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed");
+      const text = await res.text();
+      // Try to parse as JSON, but if it's not JSON (e.g., Vercel timeout returns HTML/text)
+      // surface a clearer error message
+      let data: { plan?: GrowthPlan; error?: string };
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // Likely Vercel function error page / timeout / runtime crash
+        if (text.toLowerCase().includes("timeout") || text.toLowerCase().includes("an error occurred")) {
+          throw new Error(
+            `Vercel function timeout (Sonnet 4.6 mất quá lâu). HTTP ${res.status}. ` +
+            `Try: refresh sau 30s, hoặc fallback sang Haiku qua env var ANTHROPIC_GROWTH_MODEL=claude-haiku-4-5`
+          );
+        }
+        throw new Error(
+          `Server trả về non-JSON (HTTP ${res.status}). First 200 chars: ${text.slice(0, 200)}`
+        );
+      }
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (!data.plan) throw new Error("Missing plan in response");
       setPlan(data.plan);
     } catch (e) {
       setError((e as Error).message);

@@ -336,7 +336,9 @@ function repairTruncatedJson(s: string): string {
 export async function generateGrowthPlan(ctx: GrowthContext): Promise<GrowthPlan> {
   const message = await tryModels({
     model: GROWTH_AI_MODEL,
-    max_tokens: 12000,
+    // Reduced from 12000 → 6000 to fit in Vercel function budget faster.
+    // Schema is dense — 6K tokens enough for valid output.
+    max_tokens: 6000,
     system: [
       {
         type: "text",

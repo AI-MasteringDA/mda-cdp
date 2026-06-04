@@ -16,7 +16,8 @@ import {
 } from "@/lib/supabase/queries";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Vercel Pro allows up to 300s. Sonnet 4.6 deep analysis can take 30-90s.
+export const maxDuration = 300;
 
 export async function GET(_req: NextRequest) {
   const supabase = await createClient();
@@ -122,8 +123,16 @@ export async function GET(_req: NextRequest) {
       recent_new_leads: recentNewLeads ?? 0,
     };
 
+    const startTime = Date.now();
+    console.log(`[Growth Plan] Starting Claude analysis...`);
     const plan = await generateGrowthPlan(ctx);
-    return NextResponse.json({ plan, context_summary: { total_leads: ctx.total_leads, total_students: ctx.total_students } });
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`[Growth Plan] ✅ Completed in ${elapsed}s`);
+    return NextResponse.json({
+      plan,
+      context_summary: { total_leads: ctx.total_leads, total_students: ctx.total_students },
+      elapsed_seconds: Number(elapsed),
+    });
   } catch (e) {
     const msg = (e as Error).message;
     console.error("[Growth Plan] Error:", msg);
