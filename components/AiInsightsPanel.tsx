@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+// useEffect kept for hooks used in loading state component
 import {
   Sparkles,
   Phone,
@@ -81,38 +82,20 @@ const RESPONSIVENESS_META: Record<Insight["mda_nurture"]["responsiveness"], { co
   ignored:  { color: "#dc2626", label: "❌ Bỏ rơi" },
 };
 
-export function AiInsightsPanel({ leadId }: { leadId: string }) {
-  const [insight, setInsight] = useState<Insight | null>(null);
+export function AiInsightsPanel({
+  leadId,
+  initialInsight,
+  initialGeneratedAt,
+}: {
+  leadId: string;
+  initialInsight?: Insight | null;
+  initialGeneratedAt?: string | null;
+}) {
+  const [insight, setInsight] = useState<Insight | null>(initialInsight ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
-  const [cached, setCached] = useState(false);
-  const [checkingCache, setCheckingCache] = useState(true);
-
-  // On mount: try cache
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`/api/ai/lead-insights/${leadId}`);
-        if (!res.ok) {
-          setCheckingCache(false);
-          return;
-        }
-        const data = await res.json().catch(() => null);
-        if (cancelled || !data?.cached || !data.insight) {
-          setCheckingCache(false);
-          return;
-        }
-        setInsight(data.insight);
-        setGeneratedAt(data.generated_at);
-        setCached(true);
-      } finally {
-        if (!cancelled) setCheckingCache(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [leadId]);
+  const [generatedAt, setGeneratedAt] = useState<string | null>(initialGeneratedAt ?? null);
+  const [cached, setCached] = useState(!!initialInsight);
 
   async function analyze(force = false) {
     setLoading(true);
@@ -142,18 +125,6 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
     if (diffMin < 60) return `${diffMin}m trước`;
     if (diffMin < 60 * 24) return `${Math.floor(diffMin / 60)}h trước`;
     return `${Math.floor(diffMin / (60 * 24))}d trước`;
-  }
-
-  // Brief mount check
-  if (checkingCache) {
-    return (
-      <div className="sticky top-20 rounded-2xl bg-surface p-5">
-        <div className="flex items-center gap-2 text-[12px] text-muted-2">
-          <Sparkles className="h-3.5 w-3.5 animate-pulse" strokeWidth={1.75} />
-          Đang tải cached insight...
-        </div>
-      </div>
-    );
   }
 
   // EMPTY STATE

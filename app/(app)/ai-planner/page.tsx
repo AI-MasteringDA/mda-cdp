@@ -2,12 +2,19 @@ import { Topbar } from "@/components/Topbar";
 import { GrowthPlanPanel } from "@/components/GrowthPlanPanel";
 import { MetricDefinitionBadge } from "@/components/MetricDefinitionBadge";
 import { ATTRIBUTION_RULE, ENROLLED_STUDENT, CAC, LTV } from "@/lib/metrics-config";
+import { getCached, cacheKey } from "@/lib/ai/cache";
+import type { GrowthPlan } from "@/lib/ai/growth-plan";
 import { Sparkles, Database } from "lucide-react";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-export default function AIPlannerPage() {
+export default async function AIPlannerPage() {
+  // SSR-fetch cached plan so client gets it on first paint (no extra round-trip).
+  const cached = await getCached<GrowthPlan>(cacheKey.growthPlan());
+  const initialPlan = cached?.payload ?? null;
+  const initialGeneratedAt = (cached?.metadata?.generated_at as string | undefined) ?? null;
+
   return (
     <>
       <Topbar title="AI Planner" />
@@ -66,8 +73,8 @@ export default function AIPlannerPage() {
           </div>
         </section>
 
-        {/* The real AI panel */}
-        <GrowthPlanPanel />
+        {/* The real AI panel — initial cached state passed from SSR for instant load */}
+        <GrowthPlanPanel initialPlan={initialPlan} initialGeneratedAt={initialGeneratedAt} />
       </main>
     </>
   );

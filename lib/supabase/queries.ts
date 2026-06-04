@@ -1,6 +1,19 @@
+import { unstable_cache } from "next/cache";
 import { createClient } from "./server";
+import { getAnalyticsClient } from "./analytics";
 import type { Lead, LeadTier, ScoreReason, Touchpoint } from "@/types/lead";
 import { scoreToTier } from "@/types/lead";
+
+/**
+ * Wrap heavy analytics queries with Next.js unstable_cache (5-min revalidate).
+ * Uses analytics client (service role, no cookies) so it works inside cache.
+ *
+ * IMPORTANT: heavy analytics functions that use unstable_cache must NOT call
+ * createClient() (which uses cookies). They must use getAnalyticsClient() directly.
+ *
+ * Single-tenant assumption (MDA): all users share the same workspace data.
+ */
+const CACHE_REVALIDATE_SECONDS = 300;
 
 // Map UI tier label to (minScore, maxScore inclusive)
 export const TIER_RANGE: Record<LeadTier, [number, number]> = {
@@ -569,8 +582,14 @@ export async function getDailyActivity(from: Date, to: Date) {
  * Conversion by source (for marketing dashboard)
  * Use conversion_count column on dim_lead (already aggregated) — single fast query per source.
  */
-export async function getConversionBySource() {
-  const supabase = await createClient();
+export const getConversionBySource = unstable_cache(
+  async () => _getConversionBySourceImpl(),
+  ["conversion-by-source"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getConversionBySourceImpl() {
+  const supabase = getAnalyticsClient();
   const sources = ["salesforce", "smax", "instantly", "web"];
   const colorMap: Record<string, string> = {
     salesforce: "#00a1e0", smax: "#7c3aed", instantly: "#f59e0b", web: "#10b981",
@@ -598,8 +617,14 @@ export async function getConversionBySource() {
 /**
  * Conversion funnel: total leads → engaged → emailed → opened → converted
  */
-export async function getConversionFunnel() {
-  const supabase = await createClient();
+export const getConversionFunnel = unstable_cache(
+  async () => _getConversionFunnelImpl(),
+  ["conversion-funnel"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getConversionFunnelImpl() {
+  const supabase = getAnalyticsClient();
 
   const { count: totalLeads } = await supabase
     .from("dim_lead")
@@ -670,8 +695,14 @@ export async function getTopCampaigns(limit = 10) {
 /**
  * TVV (assignee) performance
  */
-export async function getTvvPerformance() {
-  const supabase = await createClient();
+export const getTvvPerformance = unstable_cache(
+  async () => _getTvvPerformanceImpl(),
+  ["tvv-performance"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getTvvPerformanceImpl() {
+  const supabase = getAnalyticsClient();
   // Top assignees by lead count + their conversion count
   const { data: leads } = await supabase
     .from("dim_lead")
@@ -705,8 +736,14 @@ export async function getTvvPerformance() {
 /**
  * Tier distribution for donut chart — 4 parallel head counts.
  */
-export async function getTierDistribution() {
-  const supabase = await createClient();
+export const getTierDistribution = unstable_cache(
+  async () => _getTierDistributionImpl(),
+  ["tier-distribution"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getTierDistributionImpl() {
+  const supabase = getAnalyticsClient();
   const latestDate = await getLatestScoredAt(supabase);
   const tiers = [
     { name: "NÓNG", min: 70, max: 100, color: "#ff3b30" },
@@ -730,8 +767,14 @@ export async function getTierDistribution() {
 /**
  * Source distribution — touchpoints + leads per source (parallel)
  */
-export async function getSourceDistribution() {
-  const supabase = await createClient();
+export const getSourceDistribution = unstable_cache(
+  async () => _getSourceDistributionImpl(),
+  ["source-distribution"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getSourceDistributionImpl() {
+  const supabase = getAnalyticsClient();
   const sources = [
     { id: "salesforce", name: "Salesforce", color: "#00a1e0" },
     { id: "smax", name: "SMAX", color: "#7c3aed" },
@@ -1063,8 +1106,14 @@ export async function getAvailableStages(): Promise<{ value: string; label: stri
   return counts.filter((s) => s.count > 0);
 }
 
-export async function getStageDistribution() {
-  const supabase = await createClient();
+export const getStageDistribution = unstable_cache(
+  async () => _getStageDistributionImpl(),
+  ["stage-distribution"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getStageDistributionImpl() {
+  const supabase = getAnalyticsClient();
   const stages = [
     { id: "Mới",           label: "Mới",           color: "#a1a1aa" },
     { id: "Đang tư vấn",    label: "Đang tư vấn",    color: "#5ac8fa" },
@@ -1087,8 +1136,14 @@ export async function getStageDistribution() {
  * Source × tier matrix — for segmentation page
  * Strategy: parallel-paginate both tables, merge in JS. Two tables = O(N/1000) queries each.
  */
-export async function getSourceTierMatrix() {
-  const supabase = await createClient();
+export const getSourceTierMatrix = unstable_cache(
+  async () => _getSourceTierMatrixImpl(),
+  ["source-tier-matrix"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getSourceTierMatrixImpl() {
+  const supabase = getAnalyticsClient();
   const latestDate = await getLatestScoredAt(supabase);
   const sources = ["salesforce", "smax", "instantly", "web"];
   const tiers: { name: LeadTier; min: number; max: number }[] = [
@@ -1155,8 +1210,14 @@ export async function getSourceTierMatrix() {
  * Cohort by first_seen_at month — last 12 months only.
  * Limits to ~12 months of data + parallel pagination.
  */
-export async function getCohortByMonth() {
-  const supabase = await createClient();
+export const getCohortByMonth = unstable_cache(
+  async () => _getCohortByMonthImpl(),
+  ["cohort-by-month"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getCohortByMonthImpl() {
+  const supabase = getAnalyticsClient();
   // Only pull last 13 months of leads (one extra for partial-month edge)
   const cutoff = new Date();
   cutoff.setMonth(cutoff.getMonth() - 13);
@@ -1215,8 +1276,14 @@ export async function getCohortByMonth() {
  * Uses N parallel head:true counts (1 per known page_pid) instead of pulling all rows.
  * Lookup of `uniqueLeads` is skipped — too expensive without a DB function.
  */
-export async function getSmaxChannelBreakdown() {
-  const supabase = await createClient();
+export const getSmaxChannelBreakdown = unstable_cache(
+  async () => _getSmaxChannelBreakdownImpl(),
+  ["smax-channel-breakdown"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getSmaxChannelBreakdownImpl() {
+  const supabase = getAnalyticsClient();
   const CHANNELS = [
     { pid: "fb102323788540150",     label: "Facebook Brand",      color: "#1877f2" },
     { pid: "fb107203051058856",     label: "Facebook KOL",        color: "#0084ff" },
@@ -1257,7 +1324,7 @@ export async function getSmaxChannelBreakdown() {
  * Strategy: Pull aggregate counts grouped by (source, engagement_bucket)
  * from dim_lead, compute conversion rate per cell, compare to baseline.
  */
-export async function getOutlierSegments(): Promise<{
+type OutlierSegmentsResult = {
   baseline_conversion_rate_pct: number;
   total_leads: number;
   total_students: number;
@@ -1271,8 +1338,16 @@ export async function getOutlierSegments(): Promise<{
     conversion_rate_pct: number;
     lift: number;
   }>;
-}> {
-  const supabase = await createClient();
+};
+
+export const getOutlierSegments = unstable_cache(
+  async (): Promise<OutlierSegmentsResult> => _getOutlierSegmentsImpl(),
+  ["outlier-segments"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getOutlierSegmentsImpl(): Promise<OutlierSegmentsResult> {
+  const supabase = getAnalyticsClient();
 
   // 1) Baseline counts
   const { count: totalLeads } = await supabase
@@ -1361,12 +1436,20 @@ export async function getOutlierSegments(): Promise<{
 /**
  * Cohort by month × source — for funnel page enrichment
  */
-export async function getCohortBySourceMonth(): Promise<{
+type CohortBySourceMonthResult = {
   sources: string[];
   months: string[];
   matrix: Record<string, Record<string, { total: number; converted: number; conv_rate_pct: number }>>;
-}> {
-  const supabase = await createClient();
+};
+
+export const getCohortBySourceMonth = unstable_cache(
+  async (): Promise<CohortBySourceMonthResult> => _getCohortBySourceMonthImpl(),
+  ["cohort-by-source-month"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getCohortBySourceMonthImpl(): Promise<CohortBySourceMonthResult> {
+  const supabase = getAnalyticsClient();
   const cutoff = new Date();
   cutoff.setMonth(cutoff.getMonth() - 13);
 
@@ -1420,8 +1503,14 @@ export async function getCohortBySourceMonth(): Promise<{
 /**
  * Engagement segments — 4 parallel bucket counts.
  */
-export async function getEngagementSegments() {
-  const supabase = await createClient();
+export const getEngagementSegments = unstable_cache(
+  async () => _getEngagementSegmentsImpl(),
+  ["engagement-segments"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getEngagementSegmentsImpl() {
+  const supabase = getAnalyticsClient();
   const [lurkers, low, mid, high] = await Promise.all([
     supabase.from("dim_lead").select("*", { count: "exact", head: true }).lte("total_touchpoints", 1),
     supabase.from("dim_lead").select("*", { count: "exact", head: true }).gte("total_touchpoints", 2).lte("total_touchpoints", 4),
@@ -1440,8 +1529,14 @@ export async function getEngagementSegments() {
  * Top lead_source values (specific campaign/UTM)
  * Parallel pagination over leads with non-null lead_source.
  */
-export async function getTopLeadSources(limit = 12) {
-  const supabase = await createClient();
+export const getTopLeadSources = unstable_cache(
+  async (limit = 12) => _getTopLeadSourcesImpl(limit),
+  ["top-lead-sources"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getTopLeadSourcesImpl(limit = 12) {
+  const supabase = getAnalyticsClient();
   const { count: total } = await supabase
     .from("dim_lead")
     .select("*", { count: "exact", head: true })
@@ -1476,8 +1571,14 @@ export async function getTopLeadSources(limit = 12) {
 /**
  * Stale leads — dormant >30 days, useful for AI Planner recommendation
  */
-export async function getStaleLeadsCount(days = 30) {
-  const supabase = await createClient();
+export const getStaleLeadsCount = unstable_cache(
+  async (days = 30) => _getStaleLeadsCountImpl(days),
+  ["stale-leads-count"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ["analytics"] }
+);
+
+async function _getStaleLeadsCountImpl(days = 30) {
+  const supabase = getAnalyticsClient();
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
   const { count } = await supabase

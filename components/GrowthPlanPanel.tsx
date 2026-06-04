@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Sparkles,
   Wand2,
@@ -68,38 +68,18 @@ const LOADING_STEPS = [
   "📋 Lập kế hoạch hành động...",
 ];
 
-export function GrowthPlanPanel() {
-  const [plan, setPlan] = useState<GrowthPlan | null>(null);
+export function GrowthPlanPanel({
+  initialPlan,
+  initialGeneratedAt,
+}: {
+  initialPlan?: GrowthPlan | null;
+  initialGeneratedAt?: string | null;
+} = {}) {
+  const [plan, setPlan] = useState<GrowthPlan | null>(initialPlan ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
-  const [cached, setCached] = useState(false);
-  const [checkingCache, setCheckingCache] = useState(true);
-
-  // On mount: try cache first
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/ai/growth-plan");
-        if (!res.ok) {
-          setCheckingCache(false);
-          return;
-        }
-        const data = await res.json().catch(() => null);
-        if (cancelled || !data?.cached || !data.plan) {
-          setCheckingCache(false);
-          return;
-        }
-        setPlan(data.plan);
-        setGeneratedAt(data.generated_at);
-        setCached(true);
-      } finally {
-        if (!cancelled) setCheckingCache(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  const [generatedAt, setGeneratedAt] = useState<string | null>(initialGeneratedAt ?? null);
+  const [cached, setCached] = useState(!!initialPlan);
 
   async function analyze(force = false) {
     setLoading(true);
@@ -140,18 +120,6 @@ export function GrowthPlanPanel() {
     if (diffMin < 60) return `${diffMin} phút trước`;
     if (diffMin < 60 * 24) return `${Math.floor(diffMin / 60)} giờ trước`;
     return `${Math.floor(diffMin / (60 * 24))} ngày trước`;
-  }
-
-  // CHECKING CACHE — brief loading on mount
-  if (checkingCache) {
-    return (
-      <section className="hairline rounded-2xl bg-white p-6">
-        <div className="flex items-center gap-2 text-[12px] text-muted-2">
-          <Sparkles className="h-3.5 w-3.5 animate-pulse" strokeWidth={1.75} />
-          Đang tải cached growth plan...
-        </div>
-      </section>
-    );
   }
 
   // EMPTY

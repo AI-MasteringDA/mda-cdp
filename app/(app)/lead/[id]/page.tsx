@@ -8,6 +8,8 @@ import { LeadDetailTabs } from "@/components/LeadDetailTabs";
 import { LeadActionBar } from "@/components/LeadActionBar";
 import { AiInsightsPanel } from "@/components/AiInsightsPanel";
 import { getLeadById } from "@/lib/supabase/queries";
+import { getCached, cacheKey } from "@/lib/ai/cache";
+import type { LeadInsight } from "@/lib/ai/claude";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +19,13 @@ export default async function LeadDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const lead = await getLeadById(id);
+  const [lead, cachedInsight] = await Promise.all([
+    getLeadById(id),
+    getCached<LeadInsight>(cacheKey.leadInsights(id)),
+  ]);
   if (!lead) notFound();
+  const initialInsight = cachedInsight?.payload ?? null;
+  const initialGeneratedAt = (cachedInsight?.metadata?.generated_at as string | undefined) ?? null;
 
   return (
     <>
@@ -124,7 +131,11 @@ export default async function LeadDetailPage({
           </section>
 
           <aside className="lg:col-span-1" id="ai-insights">
-            <AiInsightsPanel leadId={lead.id} />
+            <AiInsightsPanel
+              leadId={lead.id}
+              initialInsight={initialInsight}
+              initialGeneratedAt={initialGeneratedAt}
+            />
           </aside>
         </div>
       </main>
