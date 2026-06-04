@@ -72,38 +72,86 @@ export function GrowthPlanPanel() {
   const [plan, setPlan] = useState<GrowthPlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+  const [cached, setCached] = useState(false);
+  const [checkingCache, setCheckingCache] = useState(true);
 
-  async function analyze() {
+  // On mount: try cache first
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/ai/growth-plan");
+        if (!res.ok) {
+          setCheckingCache(false);
+          return;
+        }
+        const data = await res.json().catch(() => null);
+        if (cancelled || !data?.cached || !data.plan) {
+          setCheckingCache(false);
+          return;
+        }
+        setPlan(data.plan);
+        setGeneratedAt(data.generated_at);
+        setCached(true);
+      } finally {
+        if (!cancelled) setCheckingCache(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function analyze(force = false) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/ai/growth-plan");
+      const url = force ? "/api/ai/growth-plan?force=true" : "/api/ai/growth-plan";
+      const res = await fetch(url);
       const text = await res.text();
-      // Try to parse as JSON, but if it's not JSON (e.g., Vercel timeout returns HTML/text)
-      // surface a clearer error message
-      let data: { plan?: GrowthPlan; error?: string };
+      let data: { plan?: GrowthPlan; error?: string; cached?: boolean; generated_at?: string };
       try {
         data = JSON.parse(text);
       } catch {
-        // Likely Vercel function error page / timeout / runtime crash
         if (text.toLowerCase().includes("timeout") || text.toLowerCase().includes("an error occurred")) {
           throw new Error(
             `Vercel function timeout (Sonnet 4.6 mất quá lâu). HTTP ${res.status}. ` +
             `Try: refresh sau 30s, hoặc fallback sang Haiku qua env var ANTHROPIC_GROWTH_MODEL=claude-haiku-4-5`
           );
         }
-        throw new Error(
-          `Server trả về non-JSON (HTTP ${res.status}). First 200 chars: ${text.slice(0, 200)}`
-        );
+        throw new Error(`Server trả về non-JSON (HTTP ${res.status}). First 200: ${text.slice(0, 200)}`);
       }
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       if (!data.plan) throw new Error("Missing plan in response");
       setPlan(data.plan);
+      setGeneratedAt(data.generated_at ?? new Date().toISOString());
+      setCached(!!data.cached);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
+  }
+
+  function formatGeneratedAt(iso: string | null): string {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const diffMin = Math.floor((Date.now() - d.getTime()) / 60000);
+    if (diffMin < 1) return "vừa xong";
+    if (diffMin < 60) return `${diffMin} phút trước`;
+    if (diffMin < 60 * 24) return `${Math.floor(diffMin / 60)} giờ trước`;
+    return `${Math.floor(diffMin / (60 * 24))} ngày trước`;
+  }
+
+  // CHECKING CACHE — brief loading on mount
+  if (checkingCache) {
+    return (
+      <section className="hairline rounded-2xl bg-white p-6">
+        <div className="flex items-center gap-2 text-[12px] text-muted-2">
+          <Sparkles className="h-3.5 w-3.5 animate-pulse" strokeWidth={1.75} />
+          Đang tải cached growth plan...
+        </div>
+      </section>
+    );
   }
 
   // EMPTY
@@ -126,14 +174,14 @@ export function GrowthPlanPanel() {
               <li>· ⚠️ Risks + data gaps cần fix</li>
             </ul>
             <button
-              onClick={analyze}
+              onClick={() => analyze(false)}
               className="mt-5 inline-flex items-center gap-2 rounded-lg bg-foreground px-4 py-2.5 text-[13px] font-medium text-white hover:opacity-90"
             >
               <Wand2 className="h-4 w-4" strokeWidth={2} />
               Tạo Growth Plan
             </button>
             <p className="mt-3 text-[11px] text-muted-2">
-              ~20-30 giây · chi phí ~3000đ / lần (deep analysis, nhiều context)
+              ~20-30 giây · chi phí ~3000đ / lần · cache vĩnh viễn cho đến khi bạn click Refresh
             </p>
           </div>
         </div>
@@ -152,7 +200,7 @@ export function GrowthPlanPanel() {
         </div>
         <p className="text-[12px] text-muted leading-relaxed break-words">{error}</p>
         <button
-          onClick={analyze}
+          onClick={() => analyze(false)}
           className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-medium text-[var(--accent)] hover:underline"
         >
           <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.75} />
@@ -176,15 +224,25 @@ export function GrowthPlanPanel() {
             </div>
             <div className="min-w-0 flex-1">
               <h2 className="text-[16px] font-semibold tracking-tight">Growth Plan AI</h2>
-              <p className="mt-0.5 text-[11px] text-muted-2">Claude Sonnet 4.6 · đọc data thật, neo vào số</p>
+              <p className="mt-0.5 text-[11px] text-muted-2">
+                Claude Sonnet 4.6 · đọc data thật
+                {generatedAt && (
+                  <>
+                    {" "}·{" "}
+                    {cached ? "💾 cached" : "✨ vừa gen"}{" "}
+                    {formatGeneratedAt(generatedAt)}
+                  </>
+                )}
+              </p>
             </div>
           </div>
           <button
-            onClick={analyze}
-            title="Phân tích lại"
-            className="press rounded-lg p-2 text-muted-2 hover:bg-subtle hover:text-foreground"
+            onClick={() => analyze(true)}
+            title="Phân tích lại (regen, tốn token)"
+            className="press inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-subtle"
           >
-            <RefreshCw className="h-4 w-4" strokeWidth={1.75} />
+            <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Refresh
           </button>
         </div>
 

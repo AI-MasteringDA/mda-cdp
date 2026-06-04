@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { generateGrowthPlan, type GrowthContext } from "@/lib/ai/growth-plan";
+import { generateGrowthPlan, type GrowthContext, type GrowthPlan } from "@/lib/ai/growth-plan";
+import { getCached, setCached, clearCached, cacheKey } from "@/lib/ai/cache";
 import {
   getAllLeadsCount,
   getConversionBySource,
@@ -19,11 +20,28 @@ export const dynamic = "force-dynamic";
 // Vercel Pro allows up to 300s. Sonnet 4.6 deep analysis can take 30-90s.
 export const maxDuration = 300;
 
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const url = new URL(req.url);
+  const force = url.searchParams.get("force") === "true";
+  const key = cacheKey.growthPlan();
+
+  // Try cache unless force=true
+  if (!force) {
+    const cached = await getCached<GrowthPlan>(key);
+    if (cached) {
+      return NextResponse.json({
+        plan: cached.payload,
+        cached: true,
+        generated_at: cached.metadata.generated_at,
+        elapsed_seconds: cached.metadata.elapsed_seconds,
+      });
+    }
   }
 
   try {
@@ -124,18 +142,37 @@ export async function GET(_req: NextRequest) {
     };
 
     const startTime = Date.now();
-    console.log(`[Growth Plan] Starting Claude analysis...`);
+    console.log(`[Growth Plan] Starting Claude analysis (force=${force})...`);
     const plan = await generateGrowthPlan(ctx);
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    const elapsed = Number(((Date.now() - startTime) / 1000).toFixed(1));
     console.log(`[Growth Plan] ✅ Completed in ${elapsed}s`);
+
+    // Cache the result for next time (until user clicks refresh)
+    await setCached(key, plan, {
+      model: "claude-sonnet-4-6",
+      elapsed_seconds: elapsed,
+      context_summary: { total_leads: ctx.total_leads, total_students: ctx.total_students },
+    });
+
     return NextResponse.json({
       plan,
+      cached: false,
+      generated_at: new Date().toISOString(),
       context_summary: { total_leads: ctx.total_leads, total_students: ctx.total_students },
-      elapsed_seconds: Number(elapsed),
+      elapsed_seconds: elapsed,
     });
   } catch (e) {
     const msg = (e as Error).message;
     console.error("[Growth Plan] Error:", msg);
     return NextResponse.json({ error: msg.slice(0, 500) }, { status: 500 });
   }
+}
+
+// DELETE → clear cache (force fresh on next GET)
+export async function DELETE() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  await clearCached(cacheKey.growthPlan());
+  return NextResponse.json({ ok: true });
 }

@@ -85,20 +85,75 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
   const [insight, setInsight] = useState<Insight | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+  const [cached, setCached] = useState(false);
+  const [checkingCache, setCheckingCache] = useState(true);
 
-  async function analyze() {
+  // On mount: try cache
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/ai/lead-insights/${leadId}`);
+        if (!res.ok) {
+          setCheckingCache(false);
+          return;
+        }
+        const data = await res.json().catch(() => null);
+        if (cancelled || !data?.cached || !data.insight) {
+          setCheckingCache(false);
+          return;
+        }
+        setInsight(data.insight);
+        setGeneratedAt(data.generated_at);
+        setCached(true);
+      } finally {
+        if (!cancelled) setCheckingCache(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [leadId]);
+
+  async function analyze(force = false) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/ai/lead-insights/${leadId}`);
+      const url = force
+        ? `/api/ai/lead-insights/${leadId}?force=true`
+        : `/api/ai/lead-insights/${leadId}`;
+      const res = await fetch(url);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
       setInsight(data.insight);
+      setGeneratedAt(data.generated_at ?? new Date().toISOString());
+      setCached(!!data.cached);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
+  }
+
+  function formatGeneratedAt(iso: string | null): string {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const diffMin = Math.floor((Date.now() - d.getTime()) / 60000);
+    if (diffMin < 1) return "vừa xong";
+    if (diffMin < 60) return `${diffMin}m trước`;
+    if (diffMin < 60 * 24) return `${Math.floor(diffMin / 60)}h trước`;
+    return `${Math.floor(diffMin / (60 * 24))}d trước`;
+  }
+
+  // Brief mount check
+  if (checkingCache) {
+    return (
+      <div className="sticky top-20 rounded-2xl bg-surface p-5">
+        <div className="flex items-center gap-2 text-[12px] text-muted-2">
+          <Sparkles className="h-3.5 w-3.5 animate-pulse" strokeWidth={1.75} />
+          Đang tải cached insight...
+        </div>
+      </div>
+    );
   }
 
   // EMPTY STATE
@@ -119,7 +174,7 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
         </p>
 
         <button
-          onClick={analyze}
+          onClick={() => analyze(false)}
           className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-foreground text-[13px] font-medium text-white transition-opacity hover:opacity-90"
         >
           <Wand2 className="h-4 w-4" strokeWidth={2} />
@@ -127,7 +182,7 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
         </button>
 
         <div className="mt-3 text-[10px] text-muted-2 text-center leading-relaxed">
-          ~10-15 giây · chi phí ~1000đ / lần (Sonnet 4.6 deep analysis)
+          ~10-15 giây · chi phí ~1000đ / lần · cache vĩnh viễn cho đến khi click Refresh
         </div>
       </div>
     );
@@ -148,7 +203,7 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
         </div>
         <p className="mt-3 text-[12px] text-muted leading-relaxed break-words">{error}</p>
         <button
-          onClick={analyze}
+          onClick={() => analyze(false)}
           className="mt-3 flex items-center gap-1.5 text-[12px] font-medium text-[var(--accent)] hover:underline"
         >
           <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.75} />
@@ -174,13 +229,18 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
           Sonnet 4.6
         </span>
         <button
-          onClick={analyze}
-          title="Phân tích lại"
+          onClick={() => analyze(true)}
+          title="Phân tích lại (regen, tốn token)"
           className="ml-auto rounded p-1 text-muted-2 hover:bg-white hover:text-foreground"
         >
           <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.75} />
         </button>
       </div>
+      {generatedAt && (
+        <div className="text-[10px] text-muted-2 -mt-3">
+          {cached ? "💾 cached" : "✨ vừa gen"} · {formatGeneratedAt(generatedAt)}
+        </div>
+      )}
 
       {/* Summary */}
       <p className="text-[13px] leading-relaxed text-foreground">{insight.summary}</p>

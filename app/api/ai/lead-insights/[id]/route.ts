@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { generateLeadInsight, type LeadContext } from "@/lib/ai/claude";
+import { generateLeadInsight, type LeadContext, type LeadInsight } from "@/lib/ai/claude";
+import { getCached, setCached, clearCached, cacheKey } from "@/lib/ai/cache";
 import { scoreToTier } from "@/types/lead";
 
 export const dynamic = "force-dynamic";
@@ -50,7 +51,7 @@ function daysSince(iso: string | null | undefined): number | null {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
@@ -59,6 +60,22 @@ export async function GET(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const url = new URL(request.url);
+  const force = url.searchParams.get("force") === "true";
+  const key = cacheKey.leadInsights(id);
+
+  // Try cache unless force=true
+  if (!force) {
+    const cached = await getCached<LeadInsight>(key);
+    if (cached) {
+      return NextResponse.json({
+        insight: cached.payload,
+        cached: true,
+        generated_at: cached.metadata.generated_at,
+      });
+    }
   }
 
   const { data: lead } = await supabase
@@ -178,8 +195,23 @@ export async function GET(
   };
 
   try {
+    const startTime = Date.now();
     const insight = await generateLeadInsight(ctx);
-    return NextResponse.json({ insight });
+    const elapsed = Number(((Date.now() - startTime) / 1000).toFixed(1));
+
+    // Cache for next time
+    await setCached(key, insight, {
+      model: "claude-sonnet-4-6",
+      elapsed_seconds: elapsed,
+      lead_id: id,
+    });
+
+    return NextResponse.json({
+      insight,
+      cached: false,
+      generated_at: new Date().toISOString(),
+      elapsed_seconds: elapsed,
+    });
   } catch (e) {
     const msg = (e as Error).message;
     console.error(`[AI Insights] Error for lead ${id}:`, msg);
@@ -188,4 +220,17 @@ export async function GET(
       { status: 500 }
     );
   }
+}
+
+// DELETE → clear cache for this lead
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  await clearCached(cacheKey.leadInsights(id));
+  return NextResponse.json({ ok: true });
 }
