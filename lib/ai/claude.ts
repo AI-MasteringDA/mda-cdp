@@ -256,6 +256,18 @@ async function tryModels(params: Anthropic.MessageCreateParamsNonStreaming): Pro
       return await client.messages.create({ ...params, model });
     } catch (e) {
       const err = e as Error & { status?: number };
+      if (err.status === 429) {
+        throw new Error(
+          `Anthropic rate limit (tier 1: 4000 tokens/phút). ` +
+          `Đợi 1 phút rồi retry, hoặc upgrade tier tại console.anthropic.com`
+        );
+      }
+      if (err.status === 401) {
+        throw new Error(`Anthropic key invalid. Paste lại vào nút 🔑 Topbar`);
+      }
+      if (err.status === 400 && err.message?.toLowerCase().includes("credit")) {
+        throw new Error(`Anthropic balance = 0. Nạp tiền tại console.anthropic.com`);
+      }
       tried.push(`${model}: ${err.message.slice(0, 80)}`);
       if (err.status !== 404) throw e;
     }
@@ -266,7 +278,8 @@ async function tryModels(params: Anthropic.MessageCreateParamsNonStreaming): Pro
 export async function generateLeadInsight(ctx: LeadContext): Promise<LeadInsight> {
   const message = await tryModels({
     model: AI_MODEL,
-    max_tokens: 8000,
+    // Anthropic Haiku tier-1: 4000 output tokens/min. Stay safely below.
+    max_tokens: 3500,
     system: [
       {
         type: "text",

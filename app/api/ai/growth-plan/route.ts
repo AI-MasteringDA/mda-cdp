@@ -17,8 +17,9 @@ import {
 } from "@/lib/supabase/queries";
 
 export const dynamic = "force-dynamic";
-// Haiku 4.5 usually < 20s; bump to 60s for safety.
-export const maxDuration = 60;
+// Vercel Pro allows up to 300s. Haiku is fast but 11 Supabase queries +
+// Claude call can total 30-90s on cold start. Give breathing room.
+export const maxDuration = 300;
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
@@ -45,6 +46,9 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const tStart = Date.now();
+    console.log(`[Growth Plan] Step 1: Fetching analytics data...`);
+
     // Fetch all required data in parallel
     const [
       totalLeads,
@@ -71,6 +75,9 @@ export async function GET(req: NextRequest) {
       getConversionFunnel(),
       getStaleLeadsCount(30),
     ]);
+
+    const tDataFetched = Date.now();
+    console.log(`[Growth Plan] Step 1 done in ${((tDataFetched - tStart) / 1000).toFixed(1)}s`);
 
     // Compute funnel with drop-rate
     const funnelWithDrop = funnel.map((f, i) => ({
@@ -141,11 +148,23 @@ export async function GET(req: NextRequest) {
       recent_new_leads: recentNewLeads ?? 0,
     };
 
-    const startTime = Date.now();
-    console.log(`[Growth Plan] Starting Claude analysis (force=${force})...`);
-    const plan = await generateGrowthPlan(ctx);
-    const elapsed = Number(((Date.now() - startTime) / 1000).toFixed(1));
-    console.log(`[Growth Plan] ✅ Completed in ${elapsed}s`);
+    const tClaudeStart = Date.now();
+    console.log(`[Growth Plan] Step 2: Calling Claude (force=${force})...`);
+
+    // Server-side timeout on Claude call (90s) — fails fast instead of hanging
+    const plan = await Promise.race([
+      generateGrowthPlan(ctx),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("Claude call timeout 90s — key might be invalid, rate-limited, or balance empty")),
+          90_000
+        )
+      ),
+    ]);
+
+    const elapsed = Number(((Date.now() - tClaudeStart) / 1000).toFixed(1));
+    const totalElapsed = Number(((Date.now() - tStart) / 1000).toFixed(1));
+    console.log(`[Growth Plan] ✅ Step 2 done in ${elapsed}s (total ${totalElapsed}s)`);
 
     // Cache the result for next time (until user clicks refresh)
     await setCached(key, plan, {

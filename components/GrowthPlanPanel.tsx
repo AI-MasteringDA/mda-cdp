@@ -84,9 +84,9 @@ export function GrowthPlanPanel({
   async function analyze(force = false) {
     setLoading(true);
     setError(null);
-    // Hard timeout 60s — Haiku 4.5 with 11 queries usually < 15s.
+    // Hard timeout 120s — gives server (max 300s) time but cuts off if truly hung.
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
     try {
       const url = force ? "/api/ai/growth-plan?force=true" : "/api/ai/growth-plan";
       const res = await fetch(url, { signal: controller.signal });
@@ -109,7 +109,7 @@ export function GrowthPlanPanel({
       setCached(!!data.cached);
     } catch (e) {
       const msg = (e as Error).name === "AbortError"
-        ? "Timeout 60s — Haiku đáng lẽ phải xong sau 15s. Check Anthropic key có valid + balance không."
+        ? "Timeout 120s — server không response. Khả năng cao key Anthropic invalid hoặc balance 0. Check Vercel logs để xem error chính xác."
         : (e as Error).message;
       setError(msg);
     } finally {

@@ -106,20 +106,22 @@ OUTPUT (NGHIÊM NGẶT):
 - Tất cả strings escape đúng JSON
 - Bắt đầu bằng '{' kết thúc bằng '}'
 
+⚠️ SÚC TÍCH: max 3500 output tokens. Cắt mọi chữ thừa, đi thẳng vào điểm. Mỗi finding/hypothesis 1-2 câu, KHÔNG dài dòng.
+
 SCHEMA:
 {
-  "executive_summary": "2-3 câu tóm tắt tình trạng growth hiện tại + bottleneck chính + cơ hội lớn nhất (80-100 từ)",
+  "executive_summary": "2 câu — bottleneck chính + cơ hội lớn nhất (max 50 từ)",
 
   "health_status": "healthy" | "growing" | "concerning" | "critical",
   "health_reasoning": "1-2 câu giải thích status đó dựa trên metrics",
 
   "attribution_findings": [
     {
-      "insight": "1 câu finding cụ thể (vd: 'SMAX Brand chốt 8.4% vs SMAX KOL 2.1% — chênh 4x')",
-      "evidence": "Số cụ thể từ context (vd: 'SMAX Brand: 21/250 leads chốt; KOL: 4/190 chốt')",
-      "business_impact": "Nghĩa cho business (vd: 'Đầu tư Brand fanpage tạo ra học viên thật, KOL fanpage chỉ tạo lead noise')"
+      "insight": "1 câu ngắn (max 20 từ)",
+      "evidence": "Số cụ thể (max 15 từ)",
+      "business_impact": "Hành động/ý nghĩa (max 15 từ)"
     }
-    // 2-4 findings
+    // 2-3 findings only
   ],
 
   "funnel_findings": [/* same shape */],
@@ -128,32 +130,32 @@ SCHEMA:
 
   "hypotheses": [
     {
-      "hypothesis": "If [action] then [outcome] because [reasoning]",
-      "rationale": "Tại sao tin hypothesis này dựa trên data — quote số",
-      "test_plan": "Cách test: cohort size, duration, success metric, control",
+      "hypothesis": "If X then Y because Z (max 25 từ)",
+      "rationale": "Quote số liệu (max 15 từ)",
+      "test_plan": "Cách test ngắn gọn (max 20 từ)",
       "expected_impact": "high" | "medium" | "low",
       "confidence": "high" | "medium" | "low"
     }
-    // 3-5 hypotheses, ưu tiên impact + feasibility
+    // 3 hypotheses chỉ (không hơn)
   ],
 
   "action_items": [
     {
       "priority": "P0" | "P1" | "P2",
-      "action": "Hành động cụ thể (vd: 'Tăng 30% spend vào FB Brand fanpage trong 4 tuần')",
+      "action": "Action cụ thể (max 20 từ)",
       "owner": "Marketing" | "Sales/TVV" | "Data" | "Leadership",
-      "timeline": "Tuần này" | "2-4 tuần" | "1 tháng" | "Quý sau",
-      "expected_outcome": "Kết quả dự kiến + cách đo"
+      "timeline": "Tuần này" | "2-4 tuần" | "1 tháng",
+      "expected_outcome": "Kết quả + cách đo (max 15 từ)"
     }
-    // 3-6 actions, sắp xếp theo priority
+    // 3-4 actions chỉ
   ],
 
-  "risks": ["Rủi ro 1", "Rủi ro 2", "..."],
+  "risks": ["Rủi ro 1 ngắn", "Rủi ro 2", "..."],  // max 3, mỗi cái 1 câu
 
   "data_infrastructure_gaps": [
-    "Gap 1 mà MDA nên fix để insights chính xác hơn (vd: 'Ingest ad spend data từ Google/FB/TikTok Ads để tính CAC')",
+    "Gap 1 (max 15 từ)",
     "..."
-  ]
+  ]  // max 3
 }
 
 TRẢ VỀ CHỈ JSON object hợp lệ.`;
@@ -303,7 +305,22 @@ async function tryModels(
     try {
       return await client.messages.create({ ...params, model });
     } catch (e) {
-      const err = e as Error & { status?: number };
+      const err = e as Error & { status?: number; error?: { type?: string; message?: string } };
+      // 429 rate limit — provide specific actionable error, do NOT fallback
+      if (err.status === 429) {
+        throw new Error(
+          `Anthropic rate limit (tier 1 — chỉ 4000 output tokens/phút). ` +
+          `Đợi 1 phút rồi thử lại, hoặc upgrade tier tại console.anthropic.com/settings/billing`
+        );
+      }
+      // 401 invalid key
+      if (err.status === 401) {
+        throw new Error(`Anthropic API key invalid (401). Paste lại key đúng vào nút 🔑 Topbar`);
+      }
+      // 400 with credit message → no balance
+      if (err.status === 400 && err.message?.toLowerCase().includes("credit")) {
+        throw new Error(`Anthropic balance = 0. Nạp tiền tại console.anthropic.com/settings/billing`);
+      }
       tried.push(`${model}: ${err.message.slice(0, 80)}`);
       if (err.status !== 404) throw e;
     }
@@ -337,9 +354,10 @@ function repairTruncatedJson(s: string): string {
 export async function generateGrowthPlan(ctx: GrowthContext): Promise<GrowthPlan> {
   const message = await tryModels({
     model: GROWTH_AI_MODEL,
-    // Reduced from 12000 → 6000 to fit in Vercel function budget faster.
-    // Schema is dense — 6K tokens enough for valid output.
-    max_tokens: 6000,
+    // Anthropic Haiku tier-1 cap: 4000 output tokens/minute.
+    // Stay UNDER 4000 to avoid 429 rate_limit_error on first call.
+    // Prompt now also tells model to write CONCISE (no verbose findings).
+    max_tokens: 3500,
     system: [
       {
         type: "text",
