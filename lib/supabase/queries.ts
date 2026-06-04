@@ -41,6 +41,7 @@ type TouchRow = {
   title: string;
   detail: string | null;
   occurred_at: string;
+  payload?: { sender_is_staff?: boolean } | null;
 };
 
 function parseReasons(raw: unknown): ScoreReason[] {
@@ -88,6 +89,9 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
       title: t.title,
       detail: t.detail ?? undefined,
       occurredAt: new Date(t.occurred_at),
+      senderIsStaff: t.source === "smax"
+        ? (t.payload?.sender_is_staff ?? (t.event_type === "chat_staff" ? true : t.event_type === "chat" ? false : null))
+        : undefined,
     })),
   };
 }

@@ -178,6 +178,8 @@ export async function pullSmaxMessages() {
               page_pid: sanitize(m.page_pid),
               platform: sanitize(m.platform),
               sender_pid: sanitize(m.sender_pid),
+              // True when sender == page (staff/bot), false when from customer
+              sender_is_staff: !!(m.sender_pid && m.page_pid && m.sender_pid === m.page_pid),
               has_attachments: hasAttach,
               real: true,
             },

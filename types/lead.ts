@@ -24,6 +24,11 @@ export interface Touchpoint {
   title: string;
   detail?: string;
   occurredAt: Date;
+  /**
+   * For SMAX events: true=TVV/MDA staff, false=Lead, null=unknown (legacy data)
+   * For non-SMAX events: undefined (sender concept doesn't apply)
+   */
+  senderIsStaff?: boolean | null;
 }
 
 export type LeadTier = "NÓNG" | "ẤM" | "MÁT" | "NGỦ ĐÔNG";

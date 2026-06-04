@@ -177,16 +177,54 @@ function EmailGroupRow({ items }: { items: Touchpoint[] }) {
   );
 }
 
+function SenderBadge({ senderIsStaff }: { senderIsStaff: boolean | null | undefined }) {
+  if (senderIsStaff === undefined) return null;
+  if (senderIsStaff === null) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full bg-[#f4f4f5] px-1.5 py-0.5 text-[10px] font-medium text-muted-2"
+        title="Không xác định được người gửi (data cũ)"
+      >
+        ❓ Không rõ
+      </span>
+    );
+  }
+  return senderIsStaff ? (
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-[#eff6ff] px-1.5 py-0.5 text-[10px] font-semibold text-[#0064d0]"
+      title="MDA staff/TVV gửi"
+    >
+      💼 TVV
+    </span>
+  ) : (
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-[#f0fdf4] px-1.5 py-0.5 text-[10px] font-semibold text-[#15803d]"
+      title="Lead/khách hàng gửi — tín hiệu engagement!"
+    >
+      👤 LEAD
+    </span>
+  );
+}
+
 function SingleRow({ t }: { t: Touchpoint }) {
   const Icon = ICONS[t.type] ?? MessageCircle;
+  // Highlight LEAD-sent attachments — they're high-value engagement signal
+  const isLeadAttachment = t.type === "attachment" && t.senderIsStaff === false;
   return (
-    <div className="hairline flex gap-4 rounded-xl bg-white p-4 transition-colors hover:border-[var(--border)]">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-subtle">
-        <Icon className="h-4 w-4 text-muted" strokeWidth={1.75} />
+    <div
+      className={`hairline flex gap-4 rounded-xl p-4 transition-colors hover:border-[var(--border)] ${
+        isLeadAttachment ? "bg-[#f0fdf4]/40 ring-1 ring-[#bbf7d0]" : "bg-white"
+      }`}
+    >
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+        isLeadAttachment ? "bg-[#bbf7d0]" : "bg-subtle"
+      }`}>
+        <Icon className={`h-4 w-4 ${isLeadAttachment ? "text-[#15803d]" : "text-muted"}`} strokeWidth={1.75} />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Chip variant="outline">{SOURCE_LABEL[t.source]}</Chip>
+          <SenderBadge senderIsStaff={t.senderIsStaff} />
           <span className="ml-auto text-[11px] text-muted-2">{formatRelativeVi(t.occurredAt)}</span>
         </div>
         <div className="mt-1.5 text-[14px] font-medium">{t.title}</div>
