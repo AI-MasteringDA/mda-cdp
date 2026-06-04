@@ -1038,6 +1038,31 @@ export async function getIdentityStats() {
 /**
  * Stage distribution — count leads by SF stage (funnel view)
  */
+/**
+ * List of distinct stages that exist in dim_lead (for filter dropdowns).
+ * Only returns stages with at least 1 lead.
+ */
+export async function getAvailableStages(): Promise<{ value: string; label: string; count: number }[]> {
+  const supabase = await createClient();
+  const KNOWN = [
+    { value: "Mới",            label: "Mới" },
+    { value: "Đang tư vấn",    label: "Đang tư vấn" },
+    { value: "Đang cân nhắc",  label: "Đang cân nhắc" },
+    { value: "Im lặng",        label: "Im lặng" },
+    { value: "Đã chốt",        label: "Đã chốt" },
+  ];
+  const counts = await Promise.all(
+    KNOWN.map(async (s) => {
+      const { count } = await supabase
+        .from("dim_lead")
+        .select("*", { count: "exact", head: true })
+        .eq("stage", s.value);
+      return { ...s, count: count ?? 0 };
+    })
+  );
+  return counts.filter((s) => s.count > 0);
+}
+
 export async function getStageDistribution() {
   const supabase = await createClient();
   const stages = [

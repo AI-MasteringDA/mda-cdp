@@ -13,13 +13,10 @@ const SOURCE_OPTIONS = [
   { value: "web", label: "Wix" },
 ];
 
-const STAGE_OPTIONS = [
+type StageOption = { value: string; label: string; count?: number };
+
+const DEFAULT_STAGE_OPTIONS: StageOption[] = [
   { value: "", label: "Tất cả stage" },
-  { value: "Mới", label: "Mới" },
-  { value: "Đang tư vấn", label: "Đang tư vấn" },
-  { value: "Đang cân nhắc", label: "Đang cân nhắc" },
-  { value: "Im lặng", label: "Im lặng" },
-  { value: "Đã chốt", label: "Đã chốt" },
 ];
 
 const SORT_OPTIONS = [
@@ -35,12 +32,22 @@ export function LeadListToolbar({
   total,
   source,
   exportFilename,
+  availableStages,
 }: {
   leads: Lead[];
   total: number;
   source?: string;
   exportFilename?: string;
+  availableStages?: StageOption[];
 }) {
+  const STAGE_OPTIONS = [
+    ...DEFAULT_STAGE_OPTIONS,
+    ...(availableStages ?? []).map((s) => ({
+      value: s.value,
+      label: s.count !== undefined ? `${s.label} (${s.count.toLocaleString("vi-VN")})` : s.label,
+    })),
+  ];
+
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();

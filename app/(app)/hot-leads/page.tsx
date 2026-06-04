@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Topbar } from "@/components/Topbar";
 import { LeadListItem } from "@/components/LeadListItem";
 import { LeadListToolbar } from "@/components/LeadListToolbar";
-import { getHotLeads, getHotLeadsCount, type LeadListFilter } from "@/lib/supabase/queries";
+import { getHotLeads, getHotLeadsCount, getAvailableStages, type LeadListFilter } from "@/lib/supabase/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -21,9 +21,10 @@ export default async function HotLeadsPage({
     stage: params.stage,
     sort: (params.sort as LeadListFilter["sort"]) || "score-desc",
   };
-  const [hotLeads, total] = await Promise.all([
+  const [hotLeads, total, stages] = await Promise.all([
     getHotLeads(PAGE_SIZE, offset, filter),
     getHotLeadsCount(filter),
+    getAvailableStages(),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -50,7 +51,7 @@ export default async function HotLeadsPage({
           </p>
         </div>
 
-        <LeadListToolbar leads={hotLeads} total={total} exportFilename="hot-leads.csv" />
+        <LeadListToolbar leads={hotLeads} total={total} availableStages={stages} exportFilename="hot-leads.csv" />
 
         <div className="hairline rounded-2xl bg-white px-3 py-2">
           {hotLeads.length === 0 ? (
