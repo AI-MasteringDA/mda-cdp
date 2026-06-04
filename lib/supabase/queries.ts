@@ -31,7 +31,13 @@ type LeadRow = {
   source: string;
   avatar_color: string;
   stage: string;
-  last_touch_at: string;
+  /** DEPRECATED — no ETL maintains this column. Use last_engagement_at instead. */
+  last_touch_at: string | null;
+  /** Real "last activity" — set by recompute_lead_aggregates() from any meaningful event */
+  last_engagement_at: string | null;
+  last_chat_at?: string | null;
+  last_chat_staff_at?: string | null;
+  last_email_at?: string | null;
   first_seen_at: string;
   company?: string | null;
   assignee?: string | null;
@@ -89,7 +95,16 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
     coldScore: score?.cold_score ?? 0,
     hotReasons: reasons.map((r) => `${r.sign}${r.points} ${r.label}`),
     coldReasons: [],
-    lastContactAt: new Date(row.last_touch_at ?? row.first_seen_at),
+    // Priority chain: last_engagement_at (any real signal) → last_chat_at → last_chat_staff_at
+    //                 → last_email_at → last_touch_at (legacy null) → first_seen_at (creation)
+    lastContactAt: new Date(
+      row.last_engagement_at ??
+      row.last_chat_at ??
+      row.last_chat_staff_at ??
+      row.last_email_at ??
+      row.last_touch_at ??
+      row.first_seen_at
+    ),
     firstSeenAt: new Date(row.first_seen_at),
     stage: row.stage as Lead["stage"],
     assignee: row.assignee || "—",
