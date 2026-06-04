@@ -142,6 +142,7 @@ SCHEMA:
 }
 
 NGUYÊN TẮC:
+- **VIẾT 100% TIẾNG VIỆT** — KHÔNG mix tiếng Anh. Chỉ giữ nguyên tên riêng (Salesforce, SMAX, AGENTIC AI) + thuật ngữ kỹ thuật (CRM, CTA, KPI). Mọi câu chữ khác phải tiếng Việt thuần.
 - **Tiếng Việt tự nhiên, sales-y** — không hành chính cứng
 - **KHÔNG BỊA** — chỉ nói điều có trong timeline. Nếu thiếu data, ghi rõ "chưa rõ"
 - **Specific > Generic** — "Lead hỏi về AGENTIC AI K60 ngày 2/6" tốt hơn "Lead quan tâm AI"
