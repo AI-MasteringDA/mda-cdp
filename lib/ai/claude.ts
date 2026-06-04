@@ -155,7 +155,14 @@ NGUYÊN TẮC:
   * MÁT → FOLLOW-UP NHẸ
   * NGỦ ĐÔNG → ARCHIVE (trừ khi có signal mới)
 
-TRẢ VỀ CHỈ JSON object, KHÔNG có \`\`\`json wrap hoặc text bên ngoài.`;
+QUY TẮC OUTPUT (NGHIÊM NGẶT):
+- Output PHẢI bắt đầu bằng ký tự '{' và kết thúc bằng '}'.
+- KHÔNG có \`\`\`json hoặc text trước/sau JSON.
+- KHÔNG có giải thích, KHÔNG có markdown.
+- Tất cả strings phải được escape đúng JSON (\\n, \\", \\\\).
+- Token budget có hạn — viết SÚC TÍCH, không lặp ý, prioritize quality > quantity.
+
+CHỈ TRẢ VỀ 1 JSON object hợp lệ.`;
 
 export type LeadContext = {
   name: string;
@@ -271,12 +278,7 @@ export async function generateLeadInsight(ctx: LeadContext): Promise<LeadInsight
     messages: [
       {
         role: "user",
-        content: formatLeadContext(ctx),
-      },
-      // Prefill assistant turn to FORCE clean JSON start without ```json wrap
-      {
-        role: "assistant",
-        content: "{",
+        content: formatLeadContext(ctx) + "\n\nTrả về JSON object đúng schema, bắt đầu bằng '{' và kết thúc bằng '}'. KHÔNG có text khác.",
       },
     ],
   });
@@ -286,23 +288,28 @@ export async function generateLeadInsight(ctx: LeadContext): Promise<LeadInsight
     .map((b) => b.text)
     .join("");
 
-  // Reconstruct JSON: we prefilled "{" so prepend it
-  let raw = "{" + text;
-  // Strip any trailing markdown if present
-  raw = raw.replace(/```\s*$/i, "").trim();
+  // Extract JSON: find first '{' and last '}' if model adds extra text
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  let raw = firstBrace >= 0 && lastBrace > firstBrace
+    ? text.slice(firstBrace, lastBrace + 1)
+    : text;
+  // Strip any markdown wrap fragments
+  raw = raw.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
 
   // Try direct parse first
   try {
     return JSON.parse(raw) as LeadInsight;
   } catch {
-    // Recovery: if hit stop_reason==max_tokens, output is truncated.
-    // Try to repair by closing open strings/arrays/objects.
-    const repaired = repairTruncatedJson(raw);
+    // Recovery: truncated by max_tokens? Repair structure.
+    // If no last '}' found, work with everything from first '{'
+    const toRepair = firstBrace >= 0 ? text.slice(firstBrace) : text;
+    const repaired = repairTruncatedJson(toRepair);
     try {
       return JSON.parse(repaired) as LeadInsight;
     } catch (e2) {
       throw new Error(
-        `Failed to parse AI response as JSON (stop_reason=${message.stop_reason}): ${(e2 as Error).message}\nRaw start: ${raw.slice(0, 300)}\nRaw end: ${raw.slice(-300)}`
+        `Failed to parse AI response (stop_reason=${message.stop_reason}): ${(e2 as Error).message}\nRaw start: ${text.slice(0, 250)}\nRaw end: ${text.slice(-250)}`
       );
     }
   }
