@@ -2,7 +2,8 @@
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useState, useEffect, useTransition } from "react";
-import { Search, Bell, Loader2 } from "lucide-react";
+import { Search, Loader2 } from "lucide-react";
+import { NotificationsBell } from "./NotificationsBell";
 
 export function Topbar({ title }: { title: string }) {
   const router = useRouter();
@@ -22,10 +23,15 @@ export function Topbar({ title }: { title: string }) {
       else params.delete("q");
       params.delete("page");
 
-      const supportedRoutes = ["/leads", "/hot-leads", "/cold-leads"];
+      // Search works on /leads (with q param). Tier pages don't support text search
+      // → redirect to /leads when query is set so user can find leads across tiers.
+      const tierPages = ["/hot-leads", "/warm-leads", "/cool-leads", "/cold-leads", "/dormant-leads"];
+      const isTierPage = tierPages.some((r) => pathname.startsWith(r));
+      const targetPath = isTierPage && query.trim() ? "/leads" : pathname;
+      const supportedRoutes = ["/leads", ...tierPages];
       if (!supportedRoutes.some((r) => pathname.startsWith(r))) return;
 
-      const newUrl = `${pathname}${params.toString() ? "?" + params.toString() : ""}`;
+      const newUrl = `${targetPath}${params.toString() ? "?" + params.toString() : ""}`;
       startTransition(() => {
         router.push(newUrl, { scroll: false });
       });
@@ -60,9 +66,7 @@ export function Topbar({ title }: { title: string }) {
               className="h-10 w-80 rounded-xl border border-[var(--border-subtle)] bg-[var(--subtle)] pl-10 pr-3 text-[13px] outline-none transition-all duration-300 placeholder:text-muted-2 focus:border-foreground focus:bg-white focus:w-96"
             />
           </div>
-          <button className="press flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--border-subtle)] text-muted transition-all hover:bg-[var(--subtle)] hover:text-foreground">
-            <Bell className="h-4 w-4" strokeWidth={1.75} />
-          </button>
+          <NotificationsBell />
         </div>
       </div>
     </header>

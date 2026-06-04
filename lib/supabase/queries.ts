@@ -102,12 +102,19 @@ async function getLatestScoredAt(supabase: Awaited<ReturnType<typeof createClien
   return data?.scored_at || new Date().toISOString().slice(0, 10);
 }
 
+export type LeadListFilter = {
+  source?: string;
+  stage?: string;
+  sort?: "score-desc" | "score-asc" | "recent" | "oldest" | "name";
+};
+
 async function fetchLeadsByScoreRange(
   minScore: number,
   maxScore: number,
   limit: number,
   offset: number,
-  scoreAsc = false // for cold/dormant, ascending = "most dormant first"
+  scoreAsc = false, // for cold/dormant, ascending = "most dormant first"
+  filter?: LeadListFilter
 ): Promise<Lead[]> {
   const supabase = await createClient();
   const latestDate = await getLatestScoredAt(supabase);
@@ -117,55 +124,104 @@ async function fetchLeadsByScoreRange(
     .eq("scored_at", latestDate)
     .gte("hot_score", minScore)
     .lte("hot_score", maxScore);
-  query = scoreAsc
-    ? query.order("hot_score", { ascending: true })
-    : query.order("hot_score", { ascending: false });
-  const { data: scores } = await query.range(offset, offset + limit - 1);
+
+  // Apply sort to score query (only for score-based sort)
+  const sort = filter?.sort ?? (scoreAsc ? "score-asc" : "score-desc");
+  if (sort === "score-asc") query = query.order("hot_score", { ascending: true });
+  else query = query.order("hot_score", { ascending: false });
+
+  // If no source/stage filter, paginate at SQL level
+  const hasMetaFilter = !!(filter?.source || filter?.stage);
+  if (!hasMetaFilter) {
+    const { data: scores } = await query.range(offset, offset + limit - 1);
+    if (!scores || scores.length === 0) return [];
+    return joinLeads(supabase, scores, sort);
+  }
+
+  // Else: pull more scores then filter in JS
+  const { data: scores } = await query.range(0, Math.min(2000, offset + limit) - 1);
   if (!scores || scores.length === 0) return [];
-
-  const leadIds = scores.map((s) => s.lead_id);
-  const { data: leads } = await supabase
-    .from("dim_lead")
-    .select("*")
-    .in("lead_id", leadIds);
-  if (!leads) return [];
-
-  const leadMap = new Map(leads.map((l) => [l.lead_id, l]));
-  return scores
-    .map((s) => {
-      const lead = leadMap.get(s.lead_id);
-      return lead ? mergeToLead(lead, s) : null;
-    })
-    .filter((x): x is Lead => x !== null);
+  const all = await joinLeads(supabase, scores, sort);
+  const filtered = all.filter((l) => {
+    if (filter?.source && l.source !== filter.source) return false;
+    if (filter?.stage && l.stage !== filter.stage) return false;
+    return true;
+  });
+  return filtered.slice(offset, offset + limit);
 }
 
-async function countLeadsByScoreRange(min: number, max: number): Promise<number> {
+async function joinLeads(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  scores: { lead_id: string; hot_score: number; cold_score: number; hot_reasons: unknown; cold_reasons: unknown }[],
+  sort: LeadListFilter["sort"]
+): Promise<Lead[]> {
+  const leadIds = scores.map((s) => s.lead_id);
+  const { data: leads } = await supabase.from("dim_lead").select("*").in("lead_id", leadIds);
+  if (!leads) return [];
+  const leadMap = new Map(leads.map((l) => [l.lead_id, l]));
+  const merged = scores
+    .map((s) => {
+      const lead = leadMap.get(s.lead_id);
+      return lead ? mergeToLead(lead, s as Parameters<typeof mergeToLead>[1]) : null;
+    })
+    .filter((x): x is Lead => x !== null);
+
+  // Apply non-score sorts in JS
+  if (sort === "recent") merged.sort((a, b) => b.lastContactAt.getTime() - a.lastContactAt.getTime());
+  else if (sort === "oldest") merged.sort((a, b) => a.firstSeenAt.getTime() - b.firstSeenAt.getTime());
+  else if (sort === "name") merged.sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  return merged;
+}
+
+async function countLeadsByScoreRange(min: number, max: number, filter?: LeadListFilter): Promise<number> {
   const supabase = await createClient();
   const latestDate = await getLatestScoredAt(supabase);
-  const { count } = await supabase
+  // No meta filter → exact count fast
+  if (!filter?.source && !filter?.stage) {
+    const { count } = await supabase
+      .from("fact_lead_score")
+      .select("*", { count: "exact", head: true })
+      .eq("scored_at", latestDate)
+      .gte("hot_score", min)
+      .lte("hot_score", max);
+    return count ?? 0;
+  }
+  // With meta filter, pull score lead_ids then count via dim_lead with .in()
+  const { data: scores } = await supabase
     .from("fact_lead_score")
-    .select("*", { count: "exact", head: true })
+    .select("lead_id")
     .eq("scored_at", latestDate)
     .gte("hot_score", min)
     .lte("hot_score", max);
-  return count ?? 0;
+  if (!scores || scores.length === 0) return 0;
+  const leadIds = scores.map((s) => s.lead_id);
+  let total = 0;
+  for (let i = 0; i < leadIds.length; i += 500) {
+    const batch = leadIds.slice(i, i + 500);
+    let q = supabase.from("dim_lead").select("*", { count: "exact", head: true }).in("lead_id", batch);
+    if (filter?.source) q = q.eq("source", filter.source);
+    if (filter?.stage) q = q.eq("stage", filter.stage);
+    const { count } = await q;
+    total += count ?? 0;
+  }
+  return total;
 }
 
-export const getHotLeads = (limit = 50, offset = 0) =>
-  fetchLeadsByScoreRange(70, 100, limit, offset);
-export const getHotLeadsCount = () => countLeadsByScoreRange(70, 100);
+export const getHotLeads = (limit = 50, offset = 0, filter?: LeadListFilter) =>
+  fetchLeadsByScoreRange(70, 100, limit, offset, false, filter);
+export const getHotLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(70, 100, filter);
 
-export const getWarmLeads = (limit = 100, offset = 0) =>
-  fetchLeadsByScoreRange(40, 69, limit, offset);
-export const getWarmLeadsCount = () => countLeadsByScoreRange(40, 69);
+export const getWarmLeads = (limit = 100, offset = 0, filter?: LeadListFilter) =>
+  fetchLeadsByScoreRange(40, 69, limit, offset, false, filter);
+export const getWarmLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(40, 69, filter);
 
-export const getCoolLeads = (limit = 100, offset = 0) =>
-  fetchLeadsByScoreRange(20, 39, limit, offset);
-export const getCoolLeadsCount = () => countLeadsByScoreRange(20, 39);
+export const getCoolLeads = (limit = 100, offset = 0, filter?: LeadListFilter) =>
+  fetchLeadsByScoreRange(20, 39, limit, offset, false, filter);
+export const getCoolLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(20, 39, filter);
 
-export const getDormantLeads = (limit = 100, offset = 0) =>
-  fetchLeadsByScoreRange(0, 19, limit, offset, true); // ascending so 0 first = most dormant
-export const getDormantLeadsCount = () => countLeadsByScoreRange(0, 19);
+export const getDormantLeads = (limit = 100, offset = 0, filter?: LeadListFilter) =>
+  fetchLeadsByScoreRange(0, 19, limit, offset, true, filter);
+export const getDormantLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(0, 19, filter);
 
 // Deprecated aliases — old /cold-leads route still uses these
 export const getColdLeads = (limit = 100, offset = 0) =>

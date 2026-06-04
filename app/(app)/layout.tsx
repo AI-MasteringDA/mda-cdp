@@ -1,5 +1,7 @@
 import { Sidebar } from "@/components/Sidebar";
 import { NavProgress } from "@/components/NavProgress";
+import { KeyboardNav } from "@/components/KeyboardNav";
+import { ToastProvider } from "@/components/Toast";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -20,10 +22,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex min-h-screen">
-      <NavProgress />
-      <Sidebar user={user ? { email: user.email } : undefined} workspaceName={workspaceName} />
-      <div className="flex-1 min-w-0">{children}</div>
-    </div>
+    <ToastProvider>
+      <div className="flex min-h-screen">
+        <NavProgress />
+        <KeyboardNav />
+        <Sidebar user={user ? { email: user.email } : undefined} workspaceName={workspaceName} />
+        <div className="flex-1 min-w-0">{children}</div>
+      </div>
+    </ToastProvider>
   );
 }

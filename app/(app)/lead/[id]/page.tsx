@@ -5,6 +5,7 @@ import { Topbar } from "@/components/Topbar";
 import { Avatar } from "@/components/ui/Avatar";
 import { Chip, ScoreBadge, TierChip } from "@/components/ui/Chip";
 import { LeadDetailTabs } from "@/components/LeadDetailTabs";
+import { LeadActionBar } from "@/components/LeadActionBar";
 import { AiInsightsPanel } from "@/components/AiInsightsPanel";
 import { getLeadById } from "@/lib/supabase/queries";
 
@@ -113,6 +114,8 @@ export default async function LeadDetailPage({
               </div>
             </div>
           )}
+
+          <LeadActionBar lead={lead} />
         </header>
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -120,7 +123,7 @@ export default async function LeadDetailPage({
             <LeadDetailTabs lead={lead} />
           </section>
 
-          <aside className="lg:col-span-1">
+          <aside className="lg:col-span-1" id="ai-insights">
             <AiInsightsPanel leadId={lead.id} />
           </aside>
         </div>
