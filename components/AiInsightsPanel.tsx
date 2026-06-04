@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Sparkles,
   Phone,
@@ -135,29 +135,7 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
 
   // LOADING STATE
   if (loading) {
-    return (
-      <div className="sticky top-20 rounded-2xl bg-surface p-5">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-foreground animate-pulse" strokeWidth={1.75} />
-          <h3 className="text-[14px] font-semibold tracking-tight">Claude đang phân tích sâu...</h3>
-        </div>
-        <div className="mt-5 space-y-2.5">
-          <div className="h-3 w-3/4 rounded bg-white/70 animate-pulse"></div>
-          <div className="h-3 w-full rounded bg-white/70 animate-pulse"></div>
-          <div className="h-3 w-2/3 rounded bg-white/70 animate-pulse"></div>
-          <div className="grid grid-cols-2 gap-2 mt-4">
-            <div className="h-12 rounded-lg bg-white/70 animate-pulse"></div>
-            <div className="h-12 rounded-lg bg-white/70 animate-pulse"></div>
-            <div className="h-12 rounded-lg bg-white/70 animate-pulse"></div>
-            <div className="h-12 rounded-lg bg-white/70 animate-pulse"></div>
-          </div>
-          <div className="mt-4 h-9 w-full rounded-lg bg-white/70 animate-pulse"></div>
-        </div>
-        <div className="mt-4 text-[10px] text-muted-2 text-center">
-          Đang đọc timeline + metrics + suy luận sâu... mất khoảng 10-15 giây.
-        </div>
-      </div>
-    );
+    return <LoadingState />;
   }
 
   // ERROR
@@ -363,6 +341,75 @@ export function AiInsightsPanel({ leadId }: { leadId: string }) {
 
       <div className="text-[10px] text-muted-2 text-right pt-2 border-t border-[var(--border-subtle)]">
         Powered by Claude Sonnet 4.6
+      </div>
+    </div>
+  );
+}
+
+const LOADING_STEPS = [
+  "📥 Đọc timeline + metrics...",
+  "🔍 Phân tích buying signals...",
+  "🎯 Đánh giá intent & risks...",
+  "💡 Sinh talking points cụ thể...",
+  "✨ Tổng hợp insights...",
+];
+
+function LoadingState() {
+  const [stepIdx, setStepIdx] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const stepTimer = setInterval(() => {
+      setStepIdx((i) => (i + 1) % LOADING_STEPS.length);
+    }, 2500);
+    const elapsedTimer = setInterval(() => {
+      setElapsed((e) => e + 1);
+    }, 1000);
+    return () => {
+      clearInterval(stepTimer);
+      clearInterval(elapsedTimer);
+    };
+  }, []);
+
+  return (
+    <div className="sticky top-20 rounded-2xl bg-surface p-5">
+      <div className="flex items-center gap-2">
+        <Sparkles className="h-4 w-4 text-foreground animate-pulse" strokeWidth={1.75} />
+        <h3 className="text-[14px] font-semibold tracking-tight">Claude Sonnet 4.6 đang phân tích...</h3>
+        <span className="ml-auto text-[10px] font-mono tabular-nums text-muted-2">
+          {elapsed}s
+        </span>
+      </div>
+
+      <div className="mt-3 text-[12px] text-foreground font-medium">
+        {LOADING_STEPS[stepIdx]}
+      </div>
+
+      <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-white/50">
+        <div
+          className="h-full rounded-full bg-foreground transition-all duration-500"
+          style={{ width: `${Math.min((elapsed / 18) * 100, 95)}%` }}
+        />
+      </div>
+
+      <div className="mt-5 space-y-2.5">
+        <div className="h-3 w-3/4 rounded bg-white/70 animate-pulse"></div>
+        <div className="h-3 w-full rounded bg-white/70 animate-pulse"></div>
+        <div className="h-3 w-2/3 rounded bg-white/70 animate-pulse"></div>
+        <div className="grid grid-cols-2 gap-2 mt-4">
+          <div className="h-12 rounded-lg bg-white/70 animate-pulse"></div>
+          <div className="h-12 rounded-lg bg-white/70 animate-pulse" style={{ animationDelay: "150ms" }}></div>
+          <div className="h-12 rounded-lg bg-white/70 animate-pulse" style={{ animationDelay: "300ms" }}></div>
+          <div className="h-12 rounded-lg bg-white/70 animate-pulse" style={{ animationDelay: "450ms" }}></div>
+        </div>
+        <div className="mt-4 h-9 w-full rounded-lg bg-white/70 animate-pulse"></div>
+      </div>
+
+      <div className="mt-4 text-[10px] text-muted-2 text-center leading-relaxed">
+        Sonnet 4.6 deep analysis · thường mất 15-20s
+        {elapsed > 25 && (
+          <div className="mt-1 text-[var(--warm)]">⚠️ Chậm hơn bình thường — đợi hoặc refresh sau</div>
+        )}
       </div>
     </div>
   );

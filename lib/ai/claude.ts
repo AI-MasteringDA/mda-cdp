@@ -260,7 +260,7 @@ async function tryModels(params: Anthropic.MessageCreateParamsNonStreaming): Pro
 export async function generateLeadInsight(ctx: LeadContext): Promise<LeadInsight> {
   const message = await tryModels({
     model: AI_MODEL,
-    max_tokens: 3000,
+    max_tokens: 8000,
     system: [
       {
         type: "text",
@@ -273,6 +273,11 @@ export async function generateLeadInsight(ctx: LeadContext): Promise<LeadInsight
         role: "user",
         content: formatLeadContext(ctx),
       },
+      // Prefill assistant turn to FORCE clean JSON start without ```json wrap
+      {
+        role: "assistant",
+        content: "{",
+      },
     ],
   });
 
@@ -281,14 +286,55 @@ export async function generateLeadInsight(ctx: LeadContext): Promise<LeadInsight
     .map((b) => b.text)
     .join("");
 
-  const cleaned = text.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
+  // Reconstruct JSON: we prefilled "{" so prepend it
+  let raw = "{" + text;
+  // Strip any trailing markdown if present
+  raw = raw.replace(/```\s*$/i, "").trim();
 
+  // Try direct parse first
   try {
-    const parsed = JSON.parse(cleaned) as LeadInsight;
-    return parsed;
-  } catch (e) {
-    throw new Error(
-      `Failed to parse AI response as JSON: ${(e as Error).message}\nRaw: ${cleaned.slice(0, 500)}`
-    );
+    return JSON.parse(raw) as LeadInsight;
+  } catch {
+    // Recovery: if hit stop_reason==max_tokens, output is truncated.
+    // Try to repair by closing open strings/arrays/objects.
+    const repaired = repairTruncatedJson(raw);
+    try {
+      return JSON.parse(repaired) as LeadInsight;
+    } catch (e2) {
+      throw new Error(
+        `Failed to parse AI response as JSON (stop_reason=${message.stop_reason}): ${(e2 as Error).message}\nRaw start: ${raw.slice(0, 300)}\nRaw end: ${raw.slice(-300)}`
+      );
+    }
   }
+}
+
+/**
+ * Best-effort repair for JSON truncated by max_tokens.
+ * Walks the string tracking string/array/object nesting and closes them.
+ */
+function repairTruncatedJson(s: string): string {
+  let out = s;
+  let inString = false;
+  let escaped = false;
+  const stack: string[] = []; // tracks open '{' and '['
+  for (let i = 0; i < out.length; i++) {
+    const c = out[i];
+    if (escaped) { escaped = false; continue; }
+    if (c === "\\" && inString) { escaped = true; continue; }
+    if (c === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (c === "{" || c === "[") stack.push(c);
+    else if (c === "}" || c === "]") stack.pop();
+  }
+
+  // If we ended inside a string, close it
+  if (inString) out += '"';
+  // Trim trailing comma if present at the tail (illegal JSON)
+  out = out.replace(/,\s*$/, "");
+  // Close brackets in reverse order
+  while (stack.length > 0) {
+    const open = stack.pop();
+    out += open === "{" ? "}" : "]";
+  }
+  return out;
 }
