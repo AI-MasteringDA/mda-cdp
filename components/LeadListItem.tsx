@@ -32,8 +32,11 @@ export function LeadListItem({ lead }: { lead: Lead }) {
               {r.points} {r.label}
             </Chip>
           ))}
-          <span className="text-[11px] text-muted-2">
-            · {formatRelativeVi(lead.lastContactAt)}
+          <span
+            className="text-[11px] text-muted-2"
+            title={`Lần cuối engage: ${lead.lastContactAt.toLocaleString("vi-VN")}\n(chat, mở email, click, reply, call — KHÔNG tính email MDA gửi đi)`}
+          >
+            · 👤 {formatRelativeVi(lead.lastContactAt)}
           </span>
         </div>
       </div>
