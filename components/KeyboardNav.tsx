@@ -13,7 +13,6 @@ const ROUTES: Record<string, { path: string; label: string }> = {
   g: { path: "/growth",        label: "Growth" },
   s: { path: "/sync-jobs",     label: "Sync Jobs" },
   i: { path: "/integrations",  label: "Integrations" },
-  t: { path: "/team",          label: "Team" },
   "?": { path: "", label: "" }, // help
 };
 
@@ -131,7 +130,6 @@ export function KeyboardNav() {
                 <Row keys={["g", "g"]} label="Growth" />
                 <Row keys={["g", "s"]} label="Sync Jobs" />
                 <Row keys={["g", "i"]} label="Integrations" />
-                <Row keys={["g", "t"]} label="Team" />
               </Section>
 
               <Section title="Sidebar">

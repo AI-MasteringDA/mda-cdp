@@ -46,8 +46,6 @@ export default async function AuditPage() {
             icon={Sparkles}
             title="Chưa có bản nháp AI nào"
             description="Bảng audit sẽ điền tự động khi user bấm 'Tạo bản nháp' trong hồ sơ lead. Cần cấu hình Claude API trước."
-            ctaLabel="Đến Templates AI"
-            ctaHref="/templates"
           />
         ) : (
           <>

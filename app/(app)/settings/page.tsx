@@ -135,9 +135,6 @@ export default async function SettingsPage() {
                 <Link href="/sync-jobs" className="block text-[13px] text-muted hover:text-foreground hover:underline">
                   → Lịch sử sync
                 </Link>
-                <Link href="/team" className="block text-[13px] text-muted hover:text-foreground hover:underline">
-                  → Quản lý nhân sự
-                </Link>
               </div>
             </div>
 

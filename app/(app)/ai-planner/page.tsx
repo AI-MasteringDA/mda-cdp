@@ -146,8 +146,6 @@ function generateInsights(args: {
       finding: `${topTvv.name} chuyển đổi ${topTvv.conversionRate.toFixed(1)}% — cao nhất nhóm.`,
       evidence: `${topTvv.converted}/${topTvv.leadCount} lead chốt. Có thể có script/cách tiếp cận khác biệt.`,
       action: "Phỏng vấn để rút playbook, training lại nhóm. Record cuộc gọi để team học.",
-      ctaLabel: "Xem performance team",
-      ctaHref: "/team",
     });
   }
 

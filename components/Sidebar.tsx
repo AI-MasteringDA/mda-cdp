@@ -13,14 +13,10 @@ import {
   Settings,
   Sparkles,
   Plug,
-  Fingerprint,
   Target,
-  ArrowLeftRight,
   Bell,
   ListChecks,
   History,
-  FileText,
-  UserCog,
   TrendingUp,
   GitBranch,
   PieChart,
@@ -59,11 +55,7 @@ const OPERATIONS: NavItem[] = [
 
 const CONFIG: NavItem[] = [
   { href: "/integrations",  label: "Nguồn data",     icon: Plug },
-  { href: "/identity",      label: "Định danh",      icon: Fingerprint },
   { href: "/scoring",       label: "Điểm số",        icon: Target },
-  { href: "/reverse-sync",  label: "Đồng bộ ngược",  icon: ArrowLeftRight },
-  { href: "/templates",     label: "Templates AI",   icon: FileText },
-  { href: "/team",          label: "Nhân sự",        icon: UserCog },
   { href: "/settings",      label: "Tài khoản",      icon: Settings },
 ];
 
