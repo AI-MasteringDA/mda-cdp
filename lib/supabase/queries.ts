@@ -240,12 +240,12 @@ async function countLeadsByScoreRange(min: number, max: number, filter?: LeadLis
 }
 
 export const getHotLeads = (limit = 50, offset = 0, filter?: LeadListFilter) =>
-  fetchLeadsByScoreRange(70, 100, limit, offset, false, filter);
-export const getHotLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(70, 100, filter);
+  fetchLeadsByScoreRange(60, 100, limit, offset, false, filter);
+export const getHotLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(60, 100, filter);
 
 export const getWarmLeads = (limit = 100, offset = 0, filter?: LeadListFilter) =>
-  fetchLeadsByScoreRange(40, 69, limit, offset, false, filter);
-export const getWarmLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(40, 69, filter);
+  fetchLeadsByScoreRange(40, 59, limit, offset, false, filter);
+export const getWarmLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(40, 59, filter);
 
 export const getCoolLeads = (limit = 100, offset = 0, filter?: LeadListFilter) =>
   fetchLeadsByScoreRange(20, 39, limit, offset, false, filter);
