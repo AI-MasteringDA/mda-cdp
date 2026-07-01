@@ -143,8 +143,11 @@ export default async function DashboardPage() {
   const recent = await getRecentTouchpoints(10);
 
   const convRate = totalLeads ? Number((conversions / totalLeads * 100).toFixed(2)) : 0;
-  const openRate = emailsSent ? Number((emailOpens / emailsSent * 100).toFixed(1)) : 0;
-  const replyRate = chats ? Number((chatStaff / chats * 100).toFixed(0)) : 0;
+  // NOTE: Can't compute email open rate because email_sent tracks only SF (~590)
+  // while email_open tracks only Instantly (~50k). Different systems, apples-vs-oranges.
+  // Show absolute counts instead of misleading percentage.
+  // TODO: pull Instantly sends too → compute Instantly open rate properly per source.
+  const chatResponseRate = chats && chatStaff ? Math.min(100, Number(((chatStaff / chats) * 100).toFixed(0))) : 0;
 
   const tierData = [
     { name: "🔥 NÓNG", value: hot, color: "#ff3b30" },
@@ -192,10 +195,10 @@ export default async function DashboardPage() {
           <div className="anim-fade-up delay-2"><KPICard label="Conversion" value={conversions} deltaLabel={`${won} đã chốt`} accent="success" /></div>
           <div className="anim-fade-up delay-3"><KPICard label="Conv Rate" value={convRate} unit="%" deltaLabel="conv / total" accent="success" /></div>
           <div className="anim-fade-up delay-4"><KPICard label="Tổng Lead" value={totalLeads.toLocaleString("vi-VN")} deltaLabel="lifetime" /></div>
-          <div className="anim-fade-up delay-5"><KPICard label="Lead Chat" value={chats} deltaLabel={`${chatStaff} TVV reply`} accent="cool" /></div>
-          <div className="anim-fade-up delay-6"><KPICard label="Reply Rate" value={replyRate} unit="%" deltaLabel="reply / chat" accent="cool" /></div>
-          <div className="anim-fade-up delay-7"><KPICard label="Email Sent" value={emailsSent} deltaLabel={`${emailOpens} opens`} accent="warm" /></div>
-          <div className="anim-fade-up delay-8"><KPICard label="Open Rate" value={openRate} unit="%" deltaLabel="opens / sent" accent="warm" /></div>
+          <div className="anim-fade-up delay-5"><KPICard label="Lead Chat" value={chats} deltaLabel={`${chatStaff} TVV chat`} accent="cool" /></div>
+          <div className="anim-fade-up delay-6"><KPICard label="Chat Response" value={chatResponseRate} unit="%" deltaLabel="TVV reply / lead chat" accent="cool" /></div>
+          <div className="anim-fade-up delay-7"><KPICard label="Email Sent (SF)" value={emailsSent} deltaLabel="Salesforce outbound" accent="warm" /></div>
+          <div className="anim-fade-up delay-8"><KPICard label="Email Opens (Instantly)" value={emailOpens.toLocaleString('vi-VN')} deltaLabel="Instantly opens" accent="warm" /></div>
         </div>
 
         {/* Section: Lead distribution */}
