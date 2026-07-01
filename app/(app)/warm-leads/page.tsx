@@ -47,7 +47,7 @@ export default async function WarmLeadsPage({
             🌡 {total.toLocaleString("vi-VN")} lead ẤM — follow-up tuần này
           </h1>
           <p className="mt-1 text-[14px] text-muted">
-            Điểm 40-69 · có engagement, đang cân nhắc. Tỉ lệ chốt 8-15% nếu chăm đúng cách.
+            Điểm 40-59 · có engagement, đang cân nhắc. Tỉ lệ chốt 8-15% nếu chăm đúng cách.
           </p>
         </div>
 

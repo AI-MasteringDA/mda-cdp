@@ -17,8 +17,8 @@ const CACHE_REVALIDATE_SECONDS = 300;
 
 // Map UI tier label to (minScore, maxScore inclusive)
 export const TIER_RANGE: Record<LeadTier, [number, number]> = {
-  "NÓNG": [70, 100],
-  "ẤM": [40, 69],
+  "NÓNG": [60, 100],
+  "ẤM": [40, 59],
   "MÁT": [20, 39],
   "NGỦ ĐÔNG": [0, 19],
 };
@@ -387,7 +387,7 @@ export async function getDashboardKPI() {
     .from("fact_lead_score")
     .select("*", { count: "exact", head: true })
     .eq("scored_at", today)
-    .gte("hot_score", 70);
+    .gte("hot_score", 60);
 
   // Conversions tuần này vs tuần trước
   const convThisWeek = await countEvent("conversion", weekAgo);
@@ -761,8 +761,8 @@ async function _getTierDistributionImpl() {
   const supabase = getAnalyticsClient();
   const latestDate = await getLatestScoredAt(supabase);
   const tiers = [
-    { name: "NÓNG", min: 70, max: 100, color: "#ff3b30" },
-    { name: "ẤM", min: 40, max: 69, color: "#ff9500" },
+    { name: "NÓNG", min: 60, max: 100, color: "#ff3b30" },
+    { name: "ẤM", min: 40, max: 59, color: "#ff9500" },
     { name: "MÁT", min: 20, max: 39, color: "#5ac8fa" },
     { name: "NGỦ ĐÔNG", min: 0, max: 19, color: "#3a3a3c" },
   ];
@@ -1162,8 +1162,8 @@ async function _getSourceTierMatrixImpl() {
   const latestDate = await getLatestScoredAt(supabase);
   const sources = ["salesforce", "smax", "instantly", "web"];
   const tiers: { name: LeadTier; min: number; max: number }[] = [
-    { name: "NÓNG", min: 70, max: 100 },
-    { name: "ẤM", min: 40, max: 69 },
+    { name: "NÓNG", min: 60, max: 100 },
+    { name: "ẤM", min: 40, max: 59 },
     { name: "MÁT", min: 20, max: 39 },
     { name: "NGỦ ĐÔNG", min: 0, max: 19 },
   ];

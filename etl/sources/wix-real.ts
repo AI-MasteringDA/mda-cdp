@@ -251,13 +251,64 @@ export async function pullFromWixReal() {
     }
   }
 
-  console.log(`   ↳ Generated ${touchpoints.length} touchpoints`);
+  console.log(`   ↳ Generated ${touchpoints.length} touchpoints (before dedup)`);
 
-  // 5. Insert touchpoints (batched, skip dup)
+  // 5a. IN-BATCH DEDUP — same lead can produce same event_type from
+  // contact+member, or Wix pagination overlap. Key: lead::event::source_id.
+  const seenKeys = new Set<string>();
+  const dedupedTouchpoints: typeof touchpoints = [];
+  for (const t of touchpoints) {
+    const p = t.payload as Record<string, unknown>;
+    const sourceId = p?.wix_contact_id || p?.wix_member_id || "";
+    const key = `${t.lead_id}::${t.event_type}::${sourceId}::${t.occurred_at}`;
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    dedupedTouchpoints.push(t);
+  }
+  const inBatchDups = touchpoints.length - dedupedTouchpoints.length;
+  if (inBatchDups > 0) {
+    console.log(`   ↳ De-duped ${inBatchDups} in-batch dups → ${dedupedTouchpoints.length} unique`);
+  }
+
+  // 5b. DB DEDUP — skip rows already in DB (paginated check)
+  console.log("   ↳ Loading existing Wix source IDs for dedupe (paginated)...");
+  const existingWixIds = new Set<string>();
+  {
+    let from = 0;
+    while (true) {
+      const { data } = await admin
+        .from("fact_touchpoint")
+        .select("event_type, lead_id, payload")
+        .eq("source", "web")
+        .range(from, from + 999);
+      if (!data || data.length === 0) break;
+      for (const r of data) {
+        const p = r.payload as Record<string, unknown> | null;
+        const sid = p?.wix_contact_id || p?.wix_member_id;
+        if (sid) existingWixIds.add(`${r.lead_id}::${r.event_type}::${sid}`);
+      }
+      if (data.length < 1000) break;
+      from += 1000;
+    }
+  }
+  console.log(`   ↳ Cached ${existingWixIds.size} existing Wix touchpoints`);
+
+  const newTouchpoints = dedupedTouchpoints.filter((t) => {
+    const p = t.payload as Record<string, unknown>;
+    const sid = p?.wix_contact_id || p?.wix_member_id;
+    if (!sid) return true;
+    return !existingWixIds.has(`${t.lead_id}::${t.event_type}::${sid}`);
+  });
+  const skippedFromDb = dedupedTouchpoints.length - newTouchpoints.length;
+  if (skippedFromDb > 0) {
+    console.log(`   ↳ Skip ${skippedFromDb} touchpoints đã có trong DB`);
+  }
+
+  // 5c. Insert (batched)
   const BATCH = 100;
   let inserted = 0;
-  for (let i = 0; i < touchpoints.length; i += BATCH) {
-    const batch = touchpoints.slice(i, i + BATCH);
+  for (let i = 0; i < newTouchpoints.length; i += BATCH) {
+    const batch = newTouchpoints.slice(i, i + BATCH);
     const { error } = await admin.from("fact_touchpoint").insert(batch);
     if (error) {
       // Fallback one-by-one
@@ -269,7 +320,7 @@ export async function pullFromWixReal() {
       inserted += batch.length;
     }
   }
-  console.log(`   ✓ Inserted ${inserted}/${touchpoints.length} touchpoints`);
+  console.log(`   ✓ Inserted ${inserted}/${newTouchpoints.length} new touchpoints`);
 
   // 6. Update lead metadata (company, lead_source) from Wix
   console.log("   ↳ Updating lead metadata from Wix...");

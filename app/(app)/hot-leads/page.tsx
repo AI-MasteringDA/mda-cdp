@@ -47,7 +47,7 @@ export default async function HotLeadsPage({
             🔥 {total.toLocaleString("vi-VN")} lead NÓNG — gọi NGAY hôm nay
           </h1>
           <p className="mt-1 text-[14px] text-muted">
-            Điểm 70-100 · có signal mạnh trong 3-7 ngày qua. Tỉ lệ chốt 30-40%.
+            Điểm 60-100 · có signal engagement trong 30 ngày qua. Ưu tiên follow-up.
           </p>
         </div>
 

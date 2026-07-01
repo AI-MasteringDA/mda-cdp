@@ -274,8 +274,10 @@ async function processBatch(
   const matchMap = new Map(matches.map((m) => [m.rawId, m.leadId]));
   const created = matches.filter((m) => m.matchedBy === "created").length;
 
+  // Skip `email_sent` (ue_type=1): outbound action, no engagement signal.
+  // Keep: opens (2), replies (3), clicks (4), bounces (5) — actual lead activity.
   const touchpoints = inRange
-    .filter((e) => matchMap.get(e.id) && !existingRawIds.has(e.id))
+    .filter((e) => matchMap.get(e.id) && !existingRawIds.has(e.id) && e.ue_type !== 1)
     .map((e) => ({
       lead_id: matchMap.get(e.id)!,
       source: "instantly",

@@ -367,7 +367,7 @@ export async function pullFromSalesforceReal() {
              ActivityDate, CallDurationInSeconds, Description,
              CreatedDate, TaskSubtype, Owner.Name
       FROM Task
-      WHERE WhoId != null AND CreatedDate = LAST_N_DAYS:90
+      WHERE WhoId != null AND CreatedDate = LAST_N_DAYS:30
       ORDER BY CreatedDate DESC
       LIMIT 10000
     `.replace(/\s+/g, " ").trim();
@@ -441,20 +441,29 @@ export async function pullFromSalesforceReal() {
     const allTouchpoints = [...leadCreatedTouchpoints, ...taskTouchpoints, ...oppTouchpoints];
     console.log(`📦 [Salesforce] Touchpoints: ${allTouchpoints.length} (${leadCreatedTouchpoints.length} created + ${taskTouchpoints.length} tasks + ${oppTouchpoints.length} won/lost)`);
 
-    // Dedupe by source-specific ID
-    const { data: existing } = await admin
-      .from("fact_touchpoint")
-      .select("payload")
-      .eq("source", "salesforce");
-    const existingIds = new Set(
-      (existing || [])
-        .map((e) => {
-          const p = e.payload as Record<string, unknown>;
-          return (p?.task_id as string) || (p?.opportunity_id as string) ||
-                 (p?.sf_contact_id as string) || (p?.sf_lead_id as string);
-        })
-        .filter(Boolean)
-    );
+    // Dedupe by source-specific ID — PAGINATED (was bug: default 1000 row cap
+    // meant only first 1000 SF rows were checked → all subsequent runs inserted
+    // duplicates. Fixed by paginating through ALL rows.)
+    console.log("   ↳ Loading existing SF IDs for dedupe (paginated)...");
+    const existingIds = new Set<string>();
+    let fromRow = 0;
+    while (true) {
+      const { data, error } = await admin
+        .from("fact_touchpoint")
+        .select("payload")
+        .eq("source", "salesforce")
+        .range(fromRow, fromRow + 999);
+      if (error || !data || data.length === 0) break;
+      for (const e of data) {
+        const p = e.payload as Record<string, unknown>;
+        const id = (p?.task_id as string) || (p?.opportunity_id as string) ||
+                   (p?.sf_contact_id as string) || (p?.sf_lead_id as string);
+        if (id) existingIds.add(id);
+      }
+      if (data.length < 1000) break;
+      fromRow += 1000;
+    }
+    console.log(`   ↳ Cached ${existingIds.size} existing SF IDs`);
 
     const newTouchpoints = allTouchpoints.filter((t) => {
       const id = (t.payload.task_id as string) || (t.payload.opportunity_id as string) ||

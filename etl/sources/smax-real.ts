@@ -141,6 +141,22 @@ export async function pullFromSmaxReal() {
       console.log(`   ⚠️  Hit MAX_PAGES=${MAX_PAGES} (~${MAX_PAGES * LIMIT} threads)`);
     }
 
+    // DEDUPE allThreads by t.id — SMAX API có thể trả cùng thread qua nhiều
+    // page_pids/pages (overlap bug bên SMAX side). Bỏ dup ngay để tránh insert 200x.
+    const beforeDedup = allThreads.length;
+    const seenIds = new Set<string>();
+    const dedupedThreads: SmaxThread[] = [];
+    for (const t of allThreads) {
+      if (seenIds.has(t.id)) continue;
+      seenIds.add(t.id);
+      dedupedThreads.push(t);
+    }
+    allThreads.length = 0;
+    allThreads.push(...dedupedThreads);
+    if (beforeDedup !== allThreads.length) {
+      console.log(`   ↳ De-duped ${beforeDedup - allThreads.length} threads (in-batch dup) → ${allThreads.length} unique`);
+    }
+
     const channelStats: Record<string, number> = {};
     for (const t of allThreads) {
       const key = t.platform || "unknown";
