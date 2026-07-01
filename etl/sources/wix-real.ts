@@ -253,14 +253,14 @@ export async function pullFromWixReal() {
 
   console.log(`   ↳ Generated ${touchpoints.length} touchpoints (before dedup)`);
 
-  // 5a. IN-BATCH DEDUP — same lead can produce same event_type from
-  // contact+member, or Wix pagination overlap. Key: lead::event::source_id.
+  // 5a. IN-BATCH DEDUP — key = (lead_id, event_type, DATE).
+  //   Wix API returns MULTIPLE contact_ids for same person → dedup by
+  //   wix_contact_id misses same-person dups. Date-only key catches all.
   const seenKeys = new Set<string>();
   const dedupedTouchpoints: typeof touchpoints = [];
   for (const t of touchpoints) {
-    const p = t.payload as Record<string, unknown>;
-    const sourceId = p?.wix_contact_id || p?.wix_member_id || "";
-    const key = `${t.lead_id}::${t.event_type}::${sourceId}::${t.occurred_at}`;
+    const date = t.occurred_at.slice(0, 10);
+    const key = `${t.lead_id}::${t.event_type}::${date}`;
     if (seenKeys.has(key)) continue;
     seenKeys.add(key);
     dedupedTouchpoints.push(t);
@@ -270,34 +270,31 @@ export async function pullFromWixReal() {
     console.log(`   ↳ De-duped ${inBatchDups} in-batch dups → ${dedupedTouchpoints.length} unique`);
   }
 
-  // 5b. DB DEDUP — skip rows already in DB (paginated check)
-  console.log("   ↳ Loading existing Wix source IDs for dedupe (paginated)...");
-  const existingWixIds = new Set<string>();
+  // 5b. DB DEDUP — skip rows already in DB with same (lead, event, date)
+  console.log("   ↳ Loading existing Wix touchpoints for dedupe (paginated)...");
+  const existingWixKeys = new Set<string>();
   {
     let from = 0;
     while (true) {
       const { data } = await admin
         .from("fact_touchpoint")
-        .select("event_type, lead_id, payload")
+        .select("event_type, lead_id, occurred_at")
         .eq("source", "web")
         .range(from, from + 999);
       if (!data || data.length === 0) break;
       for (const r of data) {
-        const p = r.payload as Record<string, unknown> | null;
-        const sid = p?.wix_contact_id || p?.wix_member_id;
-        if (sid) existingWixIds.add(`${r.lead_id}::${r.event_type}::${sid}`);
+        const date = r.occurred_at.slice(0, 10);
+        existingWixKeys.add(`${r.lead_id}::${r.event_type}::${date}`);
       }
       if (data.length < 1000) break;
       from += 1000;
     }
   }
-  console.log(`   ↳ Cached ${existingWixIds.size} existing Wix touchpoints`);
+  console.log(`   ↳ Cached ${existingWixKeys.size} existing Wix (lead, event, date) keys`);
 
   const newTouchpoints = dedupedTouchpoints.filter((t) => {
-    const p = t.payload as Record<string, unknown>;
-    const sid = p?.wix_contact_id || p?.wix_member_id;
-    if (!sid) return true;
-    return !existingWixIds.has(`${t.lead_id}::${t.event_type}::${sid}`);
+    const date = t.occurred_at.slice(0, 10);
+    return !existingWixKeys.has(`${t.lead_id}::${t.event_type}::${date}`);
   });
   const skippedFromDb = dedupedTouchpoints.length - newTouchpoints.length;
   if (skippedFromDb > 0) {
