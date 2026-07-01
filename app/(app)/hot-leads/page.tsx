@@ -47,7 +47,7 @@ export default async function HotLeadsPage({
             🔥 {total.toLocaleString("vi-VN")} lead NÓNG — gọi NGAY hôm nay
           </h1>
           <p className="mt-1 text-[14px] text-muted">
-            Điểm 60-100 · có signal engagement trong 30 ngày qua. Ưu tiên follow-up.
+            Điểm 70-100 · có LEAD-INITIATED signal (chat, reply, click, form) trong 30 ngày qua. Actionable close deal.
           </p>
         </div>
 
