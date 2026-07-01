@@ -243,6 +243,73 @@ export const getHotLeads = (limit = 50, offset = 0, filter?: LeadListFilter) =>
   fetchLeadsByScoreRange(60, 100, limit, offset, false, filter);
 export const getHotLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(60, 100, filter);
 
+// Cross-sell READY: existing customers with intent for next course
+export type CrossSellRow = {
+  lead_id: string;
+  full_name: string | null;
+  email: string | null;
+  customer_lifecycle_stage: string;
+  lifetime_value: number;
+  months_since_last_purchase: number | null;
+  courses_purchased: string[] | null;
+  cross_score: number;
+  cross_reasons: Array<{ sign: string; label: string; points: number }>;
+  suggested_next_course: string | null;
+};
+
+export async function getCrossSellReady(minScore = 60, limit = 100): Promise<CrossSellRow[]> {
+  const supabase = getAnalyticsClient();
+  const today = new Date().toISOString().slice(0, 10);
+  const { data } = await supabase
+    .from("fact_crosssell_score")
+    .select(`
+      cross_score, cross_reasons, suggested_next_course, lead_id,
+      dim_lead!inner(full_name, email, customer_lifecycle_stage, lifetime_value, months_since_last_purchase, courses_purchased)
+    `)
+    .eq("scored_at", today)
+    .gte("cross_score", minScore)
+    .order("cross_score", { ascending: false })
+    .limit(limit);
+
+  return (data || []).map((r) => {
+    const l = r.dim_lead as unknown as {
+      full_name: string | null;
+      email: string | null;
+      customer_lifecycle_stage: string;
+      lifetime_value: number;
+      months_since_last_purchase: number | null;
+      courses_purchased: string[] | null;
+    };
+    return {
+      lead_id: r.lead_id,
+      full_name: l.full_name,
+      email: l.email,
+      customer_lifecycle_stage: l.customer_lifecycle_stage,
+      lifetime_value: l.lifetime_value,
+      months_since_last_purchase: l.months_since_last_purchase,
+      courses_purchased: l.courses_purchased,
+      cross_score: r.cross_score,
+      cross_reasons: (r.cross_reasons as Array<{ sign: string; label: string; points: number }>) || [],
+      suggested_next_course: r.suggested_next_course,
+    };
+  });
+}
+
+export async function getCrossSellStats() {
+  const supabase = getAnalyticsClient();
+  const today = new Date().toISOString().slice(0, 10);
+  const [readyC, nurtureC, coldC] = await Promise.all([
+    supabase.from("fact_crosssell_score").select("*", { count: "exact", head: true }).eq("scored_at", today).gte("cross_score", 60),
+    supabase.from("fact_crosssell_score").select("*", { count: "exact", head: true }).eq("scored_at", today).gte("cross_score", 40).lte("cross_score", 59),
+    supabase.from("fact_crosssell_score").select("*", { count: "exact", head: true }).eq("scored_at", today).lte("cross_score", 39),
+  ]);
+  return {
+    ready: readyC.count ?? 0,
+    nurture: nurtureC.count ?? 0,
+    cold: coldC.count ?? 0,
+  };
+}
+
 export const getWarmLeads = (limit = 100, offset = 0, filter?: LeadListFilter) =>
   fetchLeadsByScoreRange(40, 59, limit, offset, false, filter);
 export const getWarmLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(40, 59, filter);

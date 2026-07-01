@@ -9,6 +9,7 @@ import {
   Thermometer,
   Snowflake,
   Moon,
+  Gem,
   Users,
   Settings,
   Sparkles,
@@ -36,6 +37,7 @@ const COCKPIT: NavItem[] = [
   { href: "/warm-leads",    label: "Lead ẤM",        icon: Thermometer },
   { href: "/cool-leads",    label: "Lead MÁT",       icon: Snowflake },
   { href: "/dormant-leads", label: "Lead NGỦ ĐÔNG",  icon: Moon },
+  { href: "/cross-sell",    label: "Cross-sell 💎",  icon: Gem },
   { href: "/leads",         label: "Tất cả",         icon: Users },
 ];
 
