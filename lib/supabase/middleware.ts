@@ -9,6 +9,7 @@ const PUBLIC_ROUTES = [
   "/api/whoami",
   "/api/webhook/", // all webhook receivers (singular, legacy)
   "/api/webhooks/", // webhook receivers (plural)
+  "/api/export/", // CSV export endpoints for Google Sheets IMPORTDATA
   "/api/cron/",     // Vercel Cron endpoints (auth via x-vercel-cron header)
 ];
 
