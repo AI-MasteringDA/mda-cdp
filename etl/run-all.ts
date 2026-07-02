@@ -3,6 +3,7 @@ import { pullFromSmaxSimulator } from "./sources/smax-simulator";
 import { pullFromSalesforceSimulator } from "./sources/salesforce-simulator";
 import { pullFromInstantlySimulator } from "./sources/instantly-simulator";
 import { pullFromInstantlyReal } from "./sources/instantly-real";
+import { pullFromInstantlyHistorical } from "./sources/instantly-historical";
 import { pullFromSmaxReal } from "./sources/smax-real";
 import { pullSmaxMessages } from "./sources/smax-messages";
 import { pullFromSalesforceReal } from "./sources/salesforce-real";
@@ -36,6 +37,11 @@ async function main() {
     }
     if (SOURCE === "instantly:real") {
       const r = await pullFromInstantlyReal();
+      totalInserted += r.inserted;
+      console.log("");
+    }
+    if (SOURCE === "instantly:historical") {
+      const r = await pullFromInstantlyHistorical();
       totalInserted += r.inserted;
       console.log("");
     }
