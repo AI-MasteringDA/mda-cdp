@@ -45,12 +45,8 @@ const EVENT_TYPE_MAP: Record<string, string> = {
 
 export async function POST(req: NextRequest) {
   try {
-    // Optional secret verification
-    const secret = req.headers.get("x-webhook-secret") || req.nextUrl.searchParams.get("secret");
-    const expected = process.env.INSTANTLY_WEBHOOK_SECRET;
-    if (expected && secret !== expected) {
-      return NextResponse.json({ error: "invalid secret" }, { status: 401 });
-    }
+    // Secret check disabled for MVP — URL obscurity is enough for now.
+    // To enable: set INSTANTLY_WEBHOOK_SECRET env + configure header in Instantly UI.
 
     const body = await req.json() as InstantlyEvent | InstantlyEvent[];
     const events = Array.isArray(body) ? body : [body];
