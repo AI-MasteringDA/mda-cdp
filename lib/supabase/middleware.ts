@@ -7,7 +7,8 @@ const PUBLIC_ROUTES = [
   "/auth/callback",
   "/api/debug-env",
   "/api/whoami",
-  "/api/webhook/", // all webhook receivers (Instantly, SMAX, etc.)
+  "/api/webhook/", // all webhook receivers (singular, legacy)
+  "/api/webhooks/", // webhook receivers (plural)
   "/api/cron/",     // Vercel Cron endpoints (auth via x-vercel-cron header)
 ];
 
