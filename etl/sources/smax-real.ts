@@ -98,47 +98,51 @@ export async function pullFromSmaxReal() {
       }
     }
 
-    // Pagination — SMAX returns most recent first, so stop early when older than cutoff
+    // Pagination — pull EACH platform separately (API returns max 100 per call
+    // when multiple page_pids passed together, but 100 PER platform when isolated).
+    // → 7x more data per run.
     const allThreads: SmaxThread[] = [];
-    let skip = 0;
     const LIMIT = 100;
-    const MAX_PAGES = Number(process.env.SMAX_MAX_PAGES || 200);
-    let page = 0;
-    let earlyStop = false;
+    const MAX_PAGES_PER_PLATFORM = Number(process.env.SMAX_MAX_PAGES_PER_PLATFORM || 50);
+    let totalPagesUsed = 0;
 
-    while (page < MAX_PAGES) {
-      const resp: { data?: SmaxThread[]; total?: number } = await smaxPost(
-        `/bizs/${BIZ_SLUG}/threads`,
-        { page_pids: PAGE_PIDS, skip, limit: LIMIT }
-      );
-      const items = resp.data || [];
+    for (const pagePid of PAGE_PIDS) {
+      let skip = 0;
+      let page = 0;
+      let platformEarlyStop = false;
 
-      // Check if oldest item in this page is past cutoff → break
-      if (cutoffMs > 0 && items.length > 0) {
-        const oldestInPage = items
-          .map((t) => new Date(t.last_message_at || t.last_message_by_customer_at || 0).getTime())
-          .filter((ms) => ms > 0)
-          .reduce((min, ms) => Math.min(min, ms), Infinity);
-        if (oldestInPage > 0 && oldestInPage < cutoffMs) {
-          // Keep only items newer than cutoff from this page
-          const inRange = items.filter((t) => {
-            const ms = new Date(t.last_message_at || t.last_message_by_customer_at || 0).getTime();
-            return ms > cutoffMs;
-          });
-          allThreads.push(...inRange);
-          console.log(`   ✓ Reached cutoff at page ${page + 1} — stopping (took ${inRange.length}/${items.length} from this page)`);
-          earlyStop = true;
-          break;
+      while (page < MAX_PAGES_PER_PLATFORM) {
+        const resp: { data?: SmaxThread[]; total?: number } = await smaxPost(
+          `/bizs/${BIZ_SLUG}/threads`,
+          { page_pids: [pagePid], skip, limit: LIMIT }
+        );
+        const items = resp.data || [];
+        if (items.length === 0) break;
+
+        // Check cutoff
+        if (cutoffMs > 0 && items.length > 0) {
+          const oldestInPage = items
+            .map((t) => new Date(t.last_message_at || t.last_message_by_customer_at || 0).getTime())
+            .filter((ms) => ms > 0)
+            .reduce((min, ms) => Math.min(min, ms), Infinity);
+          if (oldestInPage > 0 && oldestInPage < cutoffMs) {
+            const inRange = items.filter((t) => {
+              const ms = new Date(t.last_message_at || t.last_message_by_customer_at || 0).getTime();
+              return ms > cutoffMs;
+            });
+            allThreads.push(...inRange);
+            platformEarlyStop = true;
+            break;
+          }
         }
-      }
 
-      allThreads.push(...items);
-      if (items.length < LIMIT) break;
-      skip += LIMIT;
-      page++;
-    }
-    if (!earlyStop && page >= MAX_PAGES) {
-      console.log(`   ⚠️  Hit MAX_PAGES=${MAX_PAGES} (~${MAX_PAGES * LIMIT} threads)`);
+        allThreads.push(...items);
+        if (items.length < LIMIT) break;
+        skip += LIMIT;
+        page++;
+      }
+      totalPagesUsed += page + 1;
+      console.log(`   ↳ platform ${pagePid.slice(0, 20)}... : ${page + 1} pages, cutoff=${platformEarlyStop ? "yes" : "no"}`);
     }
 
     // DEDUPE allThreads by t.id — SMAX API có thể trả cùng thread qua nhiều
@@ -162,7 +166,7 @@ export async function pullFromSmaxReal() {
       const key = t.platform || "unknown";
       channelStats[key] = (channelStats[key] || 0) + 1;
     }
-    console.log(`📦 [SMAX] Pull ${allThreads.length} threads từ ${page + 1} pages`);
+    console.log(`📦 [SMAX] Pull ${allThreads.length} threads từ ${totalPagesUsed} pages across ${PAGE_PIDS.length} platforms`);
     console.log(`   ↳ Theo platform:`, channelStats);
 
     if (allThreads.length === 0) {
