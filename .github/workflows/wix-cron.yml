@@ -1,0 +1,35 @@
+name: Wix incremental sync
+
+on:
+  schedule:
+    # Every 6 hours — form submissions are less frequent
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  wix-etl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund --prefer-offline
+
+      - name: Run Wix ETL
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          WIX_API_KEY: ${{ secrets.WIX_API_KEY }}
+          WIX_ACCOUNT_ID: ${{ secrets.WIX_ACCOUNT_ID }}
+          WIX_SITE_ID: ${{ secrets.WIX_SITE_ID }}
+          WIX_BASE_URL: https://www.wixapis.com
+        run: npm run etl:wix:real
