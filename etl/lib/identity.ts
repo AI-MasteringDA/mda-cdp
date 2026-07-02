@@ -5,6 +5,13 @@ export type RawRecord = {
   phone?: string | null;
   email?: string | null;
   name?: string | null;
+  /** Platform-specific ID fallback when email/phone missing.
+   *  For SMAX: pass customer.id (stable across sessions) */
+  smax_customer_id?: string | null;
+  /** Optional platform (facebook, zalo, instagram, custom) */
+  external_platform?: string | null;
+  /** Optional platform profile ID (fb user id, zalo pid, etc) */
+  external_profile_id?: string | null;
 };
 
 export type IdentityMatch = {
@@ -120,6 +127,61 @@ export async function batchResolveOrCreate(
     }
   }
 
+  // 3b. Create leads for records with SMAX customer_id but no email/phone
+  const anonLeads: Array<{
+    smax_customer_id: string;
+    full_name: string;
+    source: string;
+    stage: string;
+    avatar_color: string;
+    first_seen_at: string;
+    external_platform: string | null;
+    external_profile_id: string | null;
+    phone: string | null;
+  }> = [];
+  const seenSmaxIds = new Set<string>();
+  for (const r of records) {
+    if (r.email || !r.smax_customer_id) continue;
+    if (seenSmaxIds.has(r.smax_customer_id)) continue;
+    seenSmaxIds.add(r.smax_customer_id);
+    anonLeads.push({
+      smax_customer_id: r.smax_customer_id,
+      full_name: r.name || `Anonymous (${r.external_platform || "chat"})`,
+      source: options.source,
+      stage: "Mới",
+      avatar_color: pickAvatarColor(r.smax_customer_id),
+      first_seen_at: new Date().toISOString(),
+      external_platform: r.external_platform || null,
+      external_profile_id: r.external_profile_id || null,
+      phone: r.phone ? normalizePhone(r.phone) : null,
+    });
+  }
+  if (anonLeads.length > 0) {
+    // Check which SMAX IDs already exist
+    const existingSmaxIds = new Set<string>();
+    const allSmaxIds = anonLeads.map(l => l.smax_customer_id);
+    for (let i = 0; i < allSmaxIds.length; i += 100) {
+      const batch = allSmaxIds.slice(i, i + 100);
+      const { data } = await admin
+        .from("dim_lead")
+        .select("smax_customer_id")
+        .in("smax_customer_id", batch);
+      for (const l of data ?? []) {
+        if (l.smax_customer_id) existingSmaxIds.add(l.smax_customer_id);
+      }
+    }
+    const trulyNewAnon = anonLeads.filter(l => !existingSmaxIds.has(l.smax_customer_id));
+    console.log(`   ↳ [Identity] Insert ${trulyNewAnon.length} anonymous lead (SMAX only, skip ${anonLeads.length - trulyNewAnon.length}) từ source "${options.source}"`);
+    const BATCH = 500;
+    for (let i = 0; i < trulyNewAnon.length; i += BATCH) {
+      const batch = trulyNewAnon.slice(i, i + BATCH);
+      const { error } = await admin.from("dim_lead").insert(batch);
+      if (error && !error.message.includes("duplicate key")) {
+        console.warn(`   ⚠️ Insert anon batch ${i}: ${error.message}`);
+      }
+    }
+  }
+
   // 4. Fetch lead_ids cho ALL emails ta cần (batched IN-query)
   const emailLeadMap = new Map<string, string>();
   const emailArr = Array.from(uniqueEmails);
@@ -148,7 +210,22 @@ export async function batchResolveOrCreate(
     }
   }
 
-  // 6. Match each record
+  // 5b. Fetch lead_ids cho SMAX customer_ids
+  const smaxLeadMap = new Map<string, string>();
+  const uniqueSmaxIds = new Set(records.filter(r => r.smax_customer_id).map(r => r.smax_customer_id!));
+  const smaxArr = Array.from(uniqueSmaxIds);
+  for (let i = 0; i < smaxArr.length; i += 100) {
+    const batch = smaxArr.slice(i, i + 100);
+    const { data } = await admin
+      .from("dim_lead")
+      .select("lead_id, smax_customer_id")
+      .in("smax_customer_id", batch);
+    for (const l of data ?? []) {
+      if (l.smax_customer_id) smaxLeadMap.set(l.smax_customer_id, l.lead_id);
+    }
+  }
+
+  // 6. Match each record — priority: email > phone > SMAX ID
   return records.map((r) => {
     const email = r.email?.toLowerCase().trim();
     if (email && emailLeadMap.has(email)) {
@@ -162,6 +239,13 @@ export async function batchResolveOrCreate(
     if (r.phone) {
       const leadId = phoneLeadMap.get(normalizePhone(r.phone));
       if (leadId) return { rawId: r.id, leadId, matchedBy: "phone" };
+    }
+    if (r.smax_customer_id) {
+      const leadId = smaxLeadMap.get(r.smax_customer_id);
+      if (leadId) {
+        const wasNew = seenSmaxIds.has(r.smax_customer_id);
+        return { rawId: r.id, leadId, matchedBy: wasNew ? "created" : "email" };
+      }
     }
     return { rawId: r.id, leadId: null, matchedBy: "none" };
   });

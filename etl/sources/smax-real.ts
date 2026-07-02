@@ -178,7 +178,7 @@ export async function pullFromSmaxReal() {
       return { inserted: 0, jobId };
     }
 
-    // Identity resolution — match by phone or email, auto-create new
+    // Identity resolution — match by phone/email OR SMAX customer_id (fallback for anonymous)
     const identityRecords = allThreads
       .filter((t) => t.customer)
       .map((t) => ({
@@ -186,8 +186,11 @@ export async function pullFromSmaxReal() {
         email: t.customer?.email || (t.emails && t.emails[0]) || null,
         phone: t.customer?.phone || (t.phones && t.phones[0]) || null,
         name: t.customer?.name || t.customer?.profile_name || null,
-      }))
-      .filter((r) => r.email || r.phone);
+        smax_customer_id: t.customer?.id || null,
+        external_platform: t.platform || null,
+        external_profile_id: t.customer?.pid || null,
+      }));
+      // No filter — accept anonymous customers too (SMAX customer_id as fallback)
 
     const matches = await batchResolveOrCreate(identityRecords, { source: "smax" });
     logMatches(matches, "SMAX REAL");
