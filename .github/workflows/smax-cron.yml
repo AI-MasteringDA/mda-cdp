@@ -1,0 +1,35 @@
+name: SMAX incremental sync
+
+on:
+  schedule:
+    # Every 10 minutes — smart polling to capture all customer chats
+    - cron: '*/10 * * * *'
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+
+jobs:
+  smax-etl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run SMAX ETL (incremental)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SMAX_USER_TOKEN: ${{ secrets.SMAX_USER_TOKEN }}
+          SMAX_API_KEY: ${{ secrets.SMAX_API_KEY }}
+          SMAX_BASE_URL: https://api.smax.ai
+        run: npm run etl:smax:real
