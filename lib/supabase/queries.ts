@@ -199,9 +199,28 @@ async function fetchLeadsByScoreRange(
     listViewLeadIds = memberIds;
   }
 
-  // Else: pull more scores then filter in JS
-  const { data: scores } = await query.range(0, Math.min(5000, offset + limit) - 1);
-  if (!scores || scores.length === 0) return [];
+  // Paginate scores (Supabase caps single query at 1000 rows even with .range)
+  const scoresAll: { lead_id: string; hot_score: number; cold_score: number; hot_reasons: unknown; cold_reasons: unknown }[] = [];
+  const CHUNK = 1000;
+  const MAX = 10000;
+  let scoreFrom = 0;
+  while (scoreFrom < MAX) {
+    let q = supabase
+      .from("fact_lead_score")
+      .select("*")
+      .eq("scored_at", latestDate)
+      .gte("hot_score", minScore)
+      .lte("hot_score", maxScore);
+    if (sort === "score-asc") q = q.order("hot_score", { ascending: true });
+    else q = q.order("hot_score", { ascending: false });
+    const { data: page } = await q.range(scoreFrom, scoreFrom + CHUNK - 1);
+    if (!page?.length) break;
+    scoresAll.push(...page);
+    if (page.length < CHUNK) break;
+    scoreFrom += CHUNK;
+  }
+  const scores = scoresAll;
+  if (scores.length === 0) return [];
   const all = await joinLeads(supabase, scores, sort);
   const productLower = filter?.product?.toLowerCase();
   const filtered = all.filter((l) => {
@@ -251,13 +270,24 @@ async function countLeadsByScoreRange(min: number, max: number, filter?: LeadLis
     return count ?? 0;
   }
   // With meta filter, pull score lead_ids then count via dim_lead with .in()
-  const { data: scores } = await supabase
-    .from("fact_lead_score")
-    .select("lead_id")
-    .eq("scored_at", latestDate)
-    .gte("hot_score", min)
-    .lte("hot_score", max);
-  if (!scores || scores.length === 0) return 0;
+  // Paginate to bypass Supabase default 1000 row cap
+  const scoresAll: { lead_id: string }[] = [];
+  let fromIdx = 0;
+  while (fromIdx < 10000) {
+    const { data: page } = await supabase
+      .from("fact_lead_score")
+      .select("lead_id")
+      .eq("scored_at", latestDate)
+      .gte("hot_score", min)
+      .lte("hot_score", max)
+      .range(fromIdx, fromIdx + 999);
+    if (!page?.length) break;
+    scoresAll.push(...page);
+    if (page.length < 1000) break;
+    fromIdx += 1000;
+  }
+  const scores = scoresAll;
+  if (scores.length === 0) return 0;
   let leadIds = scores.map((s) => s.lead_id);
 
   // Pre-filter by list view membership
@@ -307,12 +337,21 @@ export async function getHotListViews(): Promise<{ viewId: string; viewName: str
     .order("view_name");
   if (!views?.length) return [];
 
-  const { data: hotScores } = await supabase
-    .from("fact_lead_score")
-    .select("lead_id")
-    .eq("scored_at", latestDate)
-    .gte("hot_score", 70);
-  const hotLeadIds = new Set((hotScores ?? []).map((s) => s.lead_id));
+  const hotScoresAll: { lead_id: string }[] = [];
+  let hsFrom = 0;
+  while (hsFrom < 10000) {
+    const { data: page } = await supabase
+      .from("fact_lead_score")
+      .select("lead_id")
+      .eq("scored_at", latestDate)
+      .gte("hot_score", 70)
+      .range(hsFrom, hsFrom + 999);
+    if (!page?.length) break;
+    hotScoresAll.push(...page);
+    if (page.length < 1000) break;
+    hsFrom += 1000;
+  }
+  const hotLeadIds = new Set(hotScoresAll.map((s) => s.lead_id));
   if (hotLeadIds.size === 0) return views.map((v) => ({ viewId: v.view_id, viewName: v.view_name, hotCount: 0 }));
 
   const out: { viewId: string; viewName: string; hotCount: number }[] = [];
@@ -340,19 +379,27 @@ export const getHotLeads = (limit = 50, offset = 0, filter?: LeadListFilter) =>
 
 /**
  * Auto-discover top products in Hot leads (for filter dropdown).
- * Returns product name + hot count, sorted by count DESC.
- * Excludes null/generic products.
+ * Returns product name + hot count. Active courses are always included, then top N by count.
  */
-export async function getTopHotProducts(limit = 15): Promise<{ product: string; hotCount: number }[]> {
+export async function getTopHotProducts(limit = 15, activeCourses: string[] = []): Promise<{ product: string; hotCount: number }[]> {
   const supabase = await createClient();
   const latestDate = await getLatestScoredAt(supabase);
-  const { data: scores } = await supabase
-    .from("fact_lead_score")
-    .select("lead_id")
-    .eq("scored_at", latestDate)
-    .gte("hot_score", 70);
-  if (!scores || scores.length === 0) return [];
-  const leadIds = scores.map((s) => s.lead_id);
+  const scoresAll: { lead_id: string }[] = [];
+  let sFrom = 0;
+  while (sFrom < 10000) {
+    const { data: page } = await supabase
+      .from("fact_lead_score")
+      .select("lead_id")
+      .eq("scored_at", latestDate)
+      .gte("hot_score", 70)
+      .range(sFrom, sFrom + 999);
+    if (!page?.length) break;
+    scoresAll.push(...page);
+    if (page.length < 1000) break;
+    sFrom += 1000;
+  }
+  if (scoresAll.length === 0) return [];
+  const leadIds = scoresAll.map((s) => s.lead_id);
   const productCounts = new Map<string, number>();
   for (let i = 0; i < leadIds.length; i += 500) {
     const batch = leadIds.slice(i, i + 500);
@@ -363,14 +410,20 @@ export async function getTopHotProducts(limit = 15): Promise<{ product: string; 
       .not("sf_product", "is", null);
     for (const l of leads ?? []) {
       const p = (l.sf_product || "").trim();
-      if (!p || p === "Data Analytics Training") continue; // skip generic
+      if (!p || p === "Data Analytics Training") continue;
       productCounts.set(p, (productCounts.get(p) ?? 0) + 1);
     }
   }
-  return Array.from(productCounts.entries())
+  const sorted = Array.from(productCounts.entries())
     .map(([product, hotCount]) => ({ product, hotCount }))
-    .sort((a, b) => b.hotCount - a.hotCount)
-    .slice(0, limit);
+    .sort((a, b) => b.hotCount - a.hotCount);
+
+  // Ensure active courses appear at top (regardless of hot count)
+  const isActive = (p: string) =>
+    activeCourses.some((k) => p.toLowerCase().includes(k.trim().toLowerCase()));
+  const active = sorted.filter((x) => isActive(x.product));
+  const others = sorted.filter((x) => !isActive(x.product));
+  return [...active, ...others].slice(0, Math.max(limit, active.length));
 }
 export const getHotLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(70, 100, filter);
 

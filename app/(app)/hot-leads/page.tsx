@@ -23,17 +23,17 @@ export default async function HotLeadsPage({
     listView: params.listView,
     sort: (params.sort as LeadListFilter["sort"]) || "score-desc",
   };
-  const [hotLeads, total, stages, products, listViews] = await Promise.all([
-    getHotLeads(PAGE_SIZE, offset, filter),
-    getHotLeadsCount(filter),
-    getAvailableStages(),
-    getTopHotProducts(15),
-    getHotListViews(),
-  ]);
   const activeCourses = (process.env.ACTIVE_COURSES || "K61,F3 - 2026")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  const [hotLeads, total, stages, products, listViews] = await Promise.all([
+    getHotLeads(PAGE_SIZE, offset, filter),
+    getHotLeadsCount(filter),
+    getAvailableStages(),
+    getTopHotProducts(15, activeCourses),
+    getHotListViews(),
+  ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const qsBase = new URLSearchParams();
