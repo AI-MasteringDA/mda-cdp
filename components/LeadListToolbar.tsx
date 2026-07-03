@@ -32,6 +32,10 @@ const DEFAULT_PRODUCT_OPTIONS = [
   { value: "", label: "Tất cả khóa" },
 ];
 
+const DEFAULT_LIST_VIEW_OPTIONS = [
+  { value: "", label: "Tất cả SF list views" },
+];
+
 export function LeadListToolbar({
   leads,
   total,
@@ -40,6 +44,7 @@ export function LeadListToolbar({
   availableStages,
   availableProducts,
   activeCourses,
+  availableListViews,
 }: {
   leads: Lead[];
   total: number;
@@ -50,6 +55,8 @@ export function LeadListToolbar({
   availableProducts?: { product: string; hotCount: number }[];
   /** Substrings identifying currently-open courses. Matches will be highlighted 🔥. */
   activeCourses?: string[];
+  /** SF List Views mirrored from Salesforce (viewId + name + hot count). */
+  availableListViews?: { viewId: string; viewName: string; hotCount: number }[];
 }) {
   const STAGE_OPTIONS = [
     ...DEFAULT_STAGE_OPTIONS,
@@ -74,6 +81,14 @@ export function LeadListToolbar({
     }),
   ];
 
+  const LIST_VIEW_OPTIONS = [
+    ...DEFAULT_LIST_VIEW_OPTIONS,
+    ...(availableListViews ?? []).map((v) => ({
+      value: v.viewId,
+      label: `📋 ${v.viewName} (${v.hotCount} hot)`,
+    })),
+  ];
+
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -82,6 +97,7 @@ export function LeadListToolbar({
   const filterSource = searchParams.get("src") || "";
   const filterStage = searchParams.get("stage") || "";
   const filterProduct = searchParams.get("product") || "";
+  const filterListView = searchParams.get("listView") || "";
   const sort = searchParams.get("sort") || "score-desc";
 
   const [downloading, setDownloading] = useState(false);
@@ -138,7 +154,7 @@ export function LeadListToolbar({
     }
   }
 
-  const hasFilters = filterSource || filterStage || filterProduct || (sort && sort !== "score-desc");
+  const hasFilters = filterSource || filterStage || filterProduct || filterListView || (sort && sort !== "score-desc");
 
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -178,6 +194,19 @@ export function LeadListToolbar({
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
+
+        {LIST_VIEW_OPTIONS.length > 1 && (
+          <select
+            value={filterListView}
+            onChange={(e) => updateParam("listView", e.target.value)}
+            className="press h-8 rounded-md border border-[var(--border-subtle)] bg-white px-2 text-[12px] focus:border-foreground outline-none"
+            title="SF List Views (auto-sync mỗi giờ)"
+          >
+            {LIST_VIEW_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        )}
 
         <span className="text-muted-2 ml-2">Sắp xếp:</span>
         <select

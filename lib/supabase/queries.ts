@@ -145,6 +145,8 @@ export type LeadListFilter = {
   stage?: string;
   /** Filter by SF product name substring. e.g. "K61" matches "K61 - 2026" and "K61 - ONL - 2026". */
   product?: string;
+  /** Filter by SF ListView id (Sales' saved filter). Membership auto-synced hourly. */
+  listView?: string;
   sort?: "score-desc" | "score-asc" | "recent" | "oldest" | "name";
 };
 
@@ -170,12 +172,31 @@ async function fetchLeadsByScoreRange(
   if (sort === "score-asc") query = query.order("hot_score", { ascending: true });
   else query = query.order("hot_score", { ascending: false });
 
-  // If no source/stage/product filter, paginate at SQL level
-  const hasMetaFilter = !!(filter?.source || filter?.stage || filter?.product);
+  // If no source/stage/product/listView filter, paginate at SQL level
+  const hasMetaFilter = !!(filter?.source || filter?.stage || filter?.product || filter?.listView);
   if (!hasMetaFilter) {
     const { data: scores } = await query.range(offset, offset + limit - 1);
     if (!scores || scores.length === 0) return [];
     return joinLeads(supabase, scores, sort);
+  }
+
+  // Pre-filter by list view membership (if filter is set) — reduces scores to intersect
+  let listViewLeadIds: Set<string> | null = null;
+  if (filter?.listView) {
+    const memberIds = new Set<string>();
+    let from = 0;
+    while (true) {
+      const { data: mem } = await supabase
+        .from("fact_list_view_member")
+        .select("lead_id")
+        .eq("view_id", filter.listView)
+        .range(from, from + 999);
+      if (!mem?.length) break;
+      for (const m of mem) memberIds.add(m.lead_id);
+      if (mem.length < 1000) break;
+      from += 1000;
+    }
+    listViewLeadIds = memberIds;
   }
 
   // Else: pull more scores then filter in JS
@@ -187,6 +208,7 @@ async function fetchLeadsByScoreRange(
     if (filter?.source && l.source !== filter.source) return false;
     if (filter?.stage && l.stage !== filter.stage) return false;
     if (productLower && !(l.sfProduct || "").toLowerCase().includes(productLower)) return false;
+    if (listViewLeadIds && !listViewLeadIds.has(l.id)) return false;
     return true;
   });
   return filtered.slice(offset, offset + limit);
@@ -219,7 +241,7 @@ async function countLeadsByScoreRange(min: number, max: number, filter?: LeadLis
   const supabase = await createClient();
   const latestDate = await getLatestScoredAt(supabase);
   // No meta filter → exact count fast
-  if (!filter?.source && !filter?.stage && !filter?.product) {
+  if (!filter?.source && !filter?.stage && !filter?.product && !filter?.listView) {
     const { count } = await supabase
       .from("fact_lead_score")
       .select("*", { count: "exact", head: true })
@@ -236,7 +258,27 @@ async function countLeadsByScoreRange(min: number, max: number, filter?: LeadLis
     .gte("hot_score", min)
     .lte("hot_score", max);
   if (!scores || scores.length === 0) return 0;
-  const leadIds = scores.map((s) => s.lead_id);
+  let leadIds = scores.map((s) => s.lead_id);
+
+  // Pre-filter by list view membership
+  if (filter?.listView) {
+    const memberIds = new Set<string>();
+    let from = 0;
+    while (true) {
+      const { data: mem } = await supabase
+        .from("fact_list_view_member")
+        .select("lead_id")
+        .eq("view_id", filter.listView)
+        .range(from, from + 999);
+      if (!mem?.length) break;
+      for (const m of mem) memberIds.add(m.lead_id);
+      if (mem.length < 1000) break;
+      from += 1000;
+    }
+    leadIds = leadIds.filter((id) => memberIds.has(id));
+    if (leadIds.length === 0) return 0;
+  }
+
   let total = 0;
   for (let i = 0; i < leadIds.length; i += 500) {
     const batch = leadIds.slice(i, i + 500);
@@ -248,6 +290,49 @@ async function countLeadsByScoreRange(min: number, max: number, filter?: LeadLis
     total += count ?? 0;
   }
   return total;
+}
+
+/**
+ * Get list views from SF (mirrored via ETL), with count of Hot leads in each.
+ * Sales' own filters auto-flow into CDP as filter chips.
+ */
+export async function getHotListViews(): Promise<{ viewId: string; viewName: string; hotCount: number }[]> {
+  const supabase = await createClient();
+  const latestDate = await getLatestScoredAt(supabase);
+
+  const { data: views } = await supabase
+    .from("dim_list_view")
+    .select("view_id, view_name")
+    .eq("sf_object_type", "Lead")
+    .order("view_name");
+  if (!views?.length) return [];
+
+  const { data: hotScores } = await supabase
+    .from("fact_lead_score")
+    .select("lead_id")
+    .eq("scored_at", latestDate)
+    .gte("hot_score", 70);
+  const hotLeadIds = new Set((hotScores ?? []).map((s) => s.lead_id));
+  if (hotLeadIds.size === 0) return views.map((v) => ({ viewId: v.view_id, viewName: v.view_name, hotCount: 0 }));
+
+  const out: { viewId: string; viewName: string; hotCount: number }[] = [];
+  for (const v of views) {
+    let count = 0;
+    let from = 0;
+    while (true) {
+      const { data: mem } = await supabase
+        .from("fact_list_view_member")
+        .select("lead_id")
+        .eq("view_id", v.view_id)
+        .range(from, from + 999);
+      if (!mem?.length) break;
+      for (const m of mem) if (hotLeadIds.has(m.lead_id)) count++;
+      if (mem.length < 1000) break;
+      from += 1000;
+    }
+    out.push({ viewId: v.view_id, viewName: v.view_name, hotCount: count });
+  }
+  return out.sort((a, b) => b.hotCount - a.hotCount);
 }
 
 export const getHotLeads = (limit = 50, offset = 0, filter?: LeadListFilter) =>

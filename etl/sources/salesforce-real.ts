@@ -57,6 +57,36 @@ async function sfQuery<T>(soql: string): Promise<T[]> {
   return records;
 }
 
+/** Fetch results of an SF List View (returns Lead IDs currently visible in that view). */
+async function sfListViewResults(sobject: string, listViewId: string): Promise<string[]> {
+  const token = await getToken();
+  const ids: string[] = [];
+  let url: string | null = `${INSTANCE}/services/data/${API_VERSION}/sobjects/${sobject}/listviews/${listViewId}/results?limit=2000`;
+  while (url) {
+    const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const errText = (await res.text()).slice(0, 200);
+      if (res.status === 400 || res.status === 403 || res.status === 404) {
+        // Some views require SOQL that references excluded fields — skip gracefully
+        console.warn(`   ⚠️  listview ${listViewId} skip: ${res.status} ${errText}`);
+        return [];
+      }
+      throw new Error(`SF listview ${listViewId}: ${res.status} ${errText}`);
+    }
+    const data = (await res.json()) as {
+      records?: { columns?: { fieldNameOrPath?: string; value?: string | null }[] }[];
+      done?: boolean;
+      nextRecordsUrl?: string;
+    };
+    for (const r of data.records ?? []) {
+      const idCol = r.columns?.find((c) => c.fieldNameOrPath === "Id");
+      if (idCol?.value) ids.push(idCol.value);
+    }
+    url = data.done ? null : (data.nextRecordsUrl ? `${INSTANCE}${data.nextRecordsUrl}` : null);
+  }
+  return ids;
+}
+
 type SfContact = {
   Id: string;
   Name: string | null;
@@ -513,6 +543,66 @@ export async function pullFromSalesforceReal() {
     if (failed > 0) console.log(`   ⚠️ ${failed} touchpoint skip do lỗi`);
 
     totalTouchpoints = inserted;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Sync SF List Views for Lead (auto-mirror Sales' saved filters)
+    // ═══════════════════════════════════════════════════════════════════════
+    try {
+      console.log("📋 Syncing SF List Views (Lead)...");
+      const listViews = await sfQuery<{ Id: string; Name: string | null; DeveloperName: string | null; SobjectType: string | null }>(
+        `SELECT Id, Name, DeveloperName, SobjectType FROM ListView WHERE SobjectType = 'Lead'`
+      );
+      console.log(`   ↳ Found ${listViews.length} Lead list views on SF`);
+
+      // Upsert list view metadata
+      const lvRows = listViews
+        .filter((v) => v.Name)
+        .map((v) => ({
+          view_id: v.Id,
+          view_name: sanitize(v.Name),
+          developer_name: v.DeveloperName ? sanitize(v.DeveloperName) : null,
+          sf_object_type: v.SobjectType,
+          updated_at: new Date().toISOString(),
+        }));
+      if (lvRows.length > 0) {
+        const { error: lvErr } = await admin.from("dim_list_view").upsert(lvRows, { onConflict: "view_id" });
+        if (lvErr) console.warn(`   ⚠️  dim_list_view upsert: ${lvErr.message}`);
+      }
+
+      // Pull members per view + upsert
+      // Build sfLeadId → dim_lead lead_id map first
+      const sfIdToLead = new Map<string, string>();
+      for (const m of leadMatches) if (m.leadId) sfIdToLead.set(m.rawId, m.leadId);
+      for (const m of contactMatches) if (m.leadId) sfIdToLead.set(m.rawId, m.leadId);
+
+      let totalMembers = 0;
+      for (const view of listViews) {
+        if (!view.Name) continue;
+        try {
+          const sfLeadIds = await sfListViewResults("Lead", view.Id);
+          const leadIds = sfLeadIds.map((sfId) => sfIdToLead.get(sfId)).filter(Boolean) as string[];
+          // Replace membership snapshot: delete existing, insert current
+          await admin.from("fact_list_view_member").delete().eq("view_id", view.Id);
+          if (leadIds.length > 0) {
+            const rows = leadIds.map((lid) => ({ view_id: view.Id, lead_id: lid }));
+            const BATCH = 500;
+            for (let i = 0; i < rows.length; i += BATCH) {
+              const { error: memErr } = await admin.from("fact_list_view_member").insert(rows.slice(i, i + BATCH));
+              if (memErr && !memErr.message.includes("duplicate key")) {
+                console.warn(`   ⚠️  members batch ${i}: ${memErr.message}`);
+              }
+            }
+          }
+          totalMembers += leadIds.length;
+          console.log(`   ↳ "${view.Name}": ${sfLeadIds.length} SF ids → ${leadIds.length} CDP leads`);
+        } catch (e) {
+          console.warn(`   ⚠️  view "${view.Name}" fail: ${(e as Error).message.slice(0, 120)}`);
+        }
+      }
+      console.log(`   ✓ List Views synced: ${listViews.length} views, ${totalMembers} total members`);
+    } catch (e) {
+      console.warn(`⚠️  List View sync failed (non-fatal): ${(e as Error).message}`);
+    }
 
     await admin
       .from("sync_job")

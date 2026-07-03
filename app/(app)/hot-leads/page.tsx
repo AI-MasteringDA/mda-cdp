@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Topbar } from "@/components/Topbar";
 import { LeadListItem } from "@/components/LeadListItem";
 import { LeadListToolbar } from "@/components/LeadListToolbar";
-import { getHotLeads, getHotLeadsCount, getAvailableStages, getTopHotProducts, type LeadListFilter } from "@/lib/supabase/queries";
+import { getHotLeads, getHotLeadsCount, getAvailableStages, getTopHotProducts, getHotListViews, type LeadListFilter } from "@/lib/supabase/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ const PAGE_SIZE = 100;
 export default async function HotLeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; src?: string; stage?: string; product?: string; sort?: string }>;
+  searchParams: Promise<{ page?: string; src?: string; stage?: string; product?: string; listView?: string; sort?: string }>;
 }) {
   const params = await searchParams;
   const page = Math.max(1, Number(params.page || 1));
@@ -20,13 +20,15 @@ export default async function HotLeadsPage({
     source: params.src,
     stage: params.stage,
     product: params.product,
+    listView: params.listView,
     sort: (params.sort as LeadListFilter["sort"]) || "score-desc",
   };
-  const [hotLeads, total, stages, products] = await Promise.all([
+  const [hotLeads, total, stages, products, listViews] = await Promise.all([
     getHotLeads(PAGE_SIZE, offset, filter),
     getHotLeadsCount(filter),
     getAvailableStages(),
     getTopHotProducts(15),
+    getHotListViews(),
   ]);
   const activeCourses = (process.env.ACTIVE_COURSES || "K61,F3 - 2026")
     .split(",")
@@ -38,6 +40,7 @@ export default async function HotLeadsPage({
   if (params.src) qsBase.set("src", params.src);
   if (params.stage) qsBase.set("stage", params.stage);
   if (params.product) qsBase.set("product", params.product);
+  if (params.listView) qsBase.set("listView", params.listView);
   if (params.sort && params.sort !== "score-desc") qsBase.set("sort", params.sort);
   const buildPageUrl = (p: number) => {
     const qs = new URLSearchParams(qsBase);
@@ -58,7 +61,7 @@ export default async function HotLeadsPage({
           </p>
         </div>
 
-        <LeadListToolbar leads={hotLeads} total={total} availableStages={stages} availableProducts={products} activeCourses={activeCourses} exportFilename="hot-leads.csv" />
+        <LeadListToolbar leads={hotLeads} total={total} availableStages={stages} availableProducts={products} activeCourses={activeCourses} availableListViews={listViews} exportFilename="hot-leads.csv" />
 
         <div className="hairline rounded-2xl bg-white px-3 py-2">
           {hotLeads.length === 0 ? (
