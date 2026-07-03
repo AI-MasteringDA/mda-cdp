@@ -11,7 +11,7 @@ const PAGE_SIZE = 100;
 export default async function CoolLeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; src?: string; stage?: string; sort?: string }>;
+  searchParams: Promise<{ page?: string; src?: string; stage?: string; product?: string; sort?: string }>;
 }) {
   const params = await searchParams;
   const page = Math.max(1, Number(params.page || 1));
@@ -19,6 +19,7 @@ export default async function CoolLeadsPage({
   const filter: LeadListFilter = {
     source: params.src,
     stage: params.stage,
+    product: params.product,
     sort: (params.sort as LeadListFilter["sort"]) || "score-desc",
   };
   const [leads, total, stages] = await Promise.all([
@@ -31,6 +32,7 @@ export default async function CoolLeadsPage({
   const qsBase = new URLSearchParams();
   if (params.src) qsBase.set("src", params.src);
   if (params.stage) qsBase.set("stage", params.stage);
+  if (params.product) qsBase.set("product", params.product);
   if (params.sort && params.sort !== "score-desc") qsBase.set("sort", params.sort);
   const buildPageUrl = (p: number) => {
     const qs = new URLSearchParams(qsBase);

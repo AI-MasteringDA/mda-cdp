@@ -31,5 +31,5 @@ jobs:
           LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
           LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
           LARK_BASE_APP_TOKEN: ${{ secrets.LARK_BASE_APP_TOKEN }}
-          LARK_DAYS_TO_PUSH: '30'
+          LARK_DAYS_TO_PUSH: '365'
         run: npm run etl:lark:push

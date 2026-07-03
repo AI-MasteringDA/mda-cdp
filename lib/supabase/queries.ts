@@ -42,6 +42,9 @@ type LeadRow = {
   company?: string | null;
   assignee?: string | null;
   lead_source?: string | null;
+  sf_product?: string | null;
+  sf_rating?: string | null;
+  sf_status?: string | null;
 };
 
 type ScoreRow = {
@@ -110,6 +113,9 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
     assignee: row.assignee || "—",
     company: row.company || null,
     leadSource: row.lead_source || null,
+    sfProduct: row.sf_product || null,
+    sfRating: row.sf_rating || null,
+    sfStatus: row.sf_status || null,
     touchpoints: touchpoints.map<Touchpoint>((t) => ({
       id: t.id,
       source: t.source as Touchpoint["source"],
@@ -137,6 +143,8 @@ async function getLatestScoredAt(supabase: Awaited<ReturnType<typeof createClien
 export type LeadListFilter = {
   source?: string;
   stage?: string;
+  /** Filter by SF product name substring. e.g. "K61" matches "K61 - 2026" and "K61 - ONL - 2026". */
+  product?: string;
   sort?: "score-desc" | "score-asc" | "recent" | "oldest" | "name";
 };
 
@@ -162,8 +170,8 @@ async function fetchLeadsByScoreRange(
   if (sort === "score-asc") query = query.order("hot_score", { ascending: true });
   else query = query.order("hot_score", { ascending: false });
 
-  // If no source/stage filter, paginate at SQL level
-  const hasMetaFilter = !!(filter?.source || filter?.stage);
+  // If no source/stage/product filter, paginate at SQL level
+  const hasMetaFilter = !!(filter?.source || filter?.stage || filter?.product);
   if (!hasMetaFilter) {
     const { data: scores } = await query.range(offset, offset + limit - 1);
     if (!scores || scores.length === 0) return [];
@@ -171,12 +179,14 @@ async function fetchLeadsByScoreRange(
   }
 
   // Else: pull more scores then filter in JS
-  const { data: scores } = await query.range(0, Math.min(2000, offset + limit) - 1);
+  const { data: scores } = await query.range(0, Math.min(5000, offset + limit) - 1);
   if (!scores || scores.length === 0) return [];
   const all = await joinLeads(supabase, scores, sort);
+  const productLower = filter?.product?.toLowerCase();
   const filtered = all.filter((l) => {
     if (filter?.source && l.source !== filter.source) return false;
     if (filter?.stage && l.stage !== filter.stage) return false;
+    if (productLower && !(l.sfProduct || "").toLowerCase().includes(productLower)) return false;
     return true;
   });
   return filtered.slice(offset, offset + limit);
@@ -209,7 +219,7 @@ async function countLeadsByScoreRange(min: number, max: number, filter?: LeadLis
   const supabase = await createClient();
   const latestDate = await getLatestScoredAt(supabase);
   // No meta filter → exact count fast
-  if (!filter?.source && !filter?.stage) {
+  if (!filter?.source && !filter?.stage && !filter?.product) {
     const { count } = await supabase
       .from("fact_lead_score")
       .select("*", { count: "exact", head: true })
@@ -233,6 +243,7 @@ async function countLeadsByScoreRange(min: number, max: number, filter?: LeadLis
     let q = supabase.from("dim_lead").select("*", { count: "exact", head: true }).in("lead_id", batch);
     if (filter?.source) q = q.eq("source", filter.source);
     if (filter?.stage) q = q.eq("stage", filter.stage);
+    if (filter?.product) q = q.ilike("sf_product", `%${filter.product}%`);
     const { count } = await q;
     total += count ?? 0;
   }

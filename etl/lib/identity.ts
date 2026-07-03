@@ -68,7 +68,7 @@ export async function batchResolveOrCreate(
   const uniqueEmails = new Set<string>();
   const uniquePhones = new Set<string>();
   for (const r of records) {
-    if (r.email) uniqueEmails.add(r.email.toLowerCase().trim());
+    if (r.email && typeof r.email === "string") uniqueEmails.add(r.email.toLowerCase().trim());
     if (r.phone) uniquePhones.add(normalizePhone(r.phone));
   }
 
@@ -83,7 +83,7 @@ export async function batchResolveOrCreate(
   }> = [];
   const seenEmails = new Set<string>();
   for (const r of records) {
-    const email = r.email?.toLowerCase().trim();
+    const email = typeof r.email === "string" ? r.email.toLowerCase().trim() : undefined;
     if (!email || seenEmails.has(email)) continue;
     seenEmails.add(email);
     newLeads.push({
@@ -227,7 +227,7 @@ export async function batchResolveOrCreate(
 
   // 6. Match each record — priority: email > phone > SMAX ID
   return records.map((r) => {
-    const email = r.email?.toLowerCase().trim();
+    const email = typeof r.email === "string" ? r.email.toLowerCase().trim() : undefined;
     if (email && emailLeadMap.has(email)) {
       const wasNew = seenEmails.has(email);
       return {
@@ -251,8 +251,9 @@ export async function batchResolveOrCreate(
   });
 }
 
-export function normalizePhone(phone: string): string {
-  return phone.replace(/\s|-|\+84/g, "").replace(/^0/, "");
+export function normalizePhone(phone: string | number | null | undefined): string {
+  if (phone === null || phone === undefined) return "";
+  return String(phone).replace(/\s|-|\+84/g, "").replace(/^0/, "");
 }
 
 export function logMatches(matches: IdentityMatch[], source: string) {

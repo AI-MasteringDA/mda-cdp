@@ -61,6 +61,9 @@ export interface Lead {
   assignee: string;
   company?: string | null;
   leadSource?: string | null;
+  sfProduct?: string | null;
+  sfRating?: string | null;
+  sfStatus?: string | null;
   touchpoints: Touchpoint[];
 }
 

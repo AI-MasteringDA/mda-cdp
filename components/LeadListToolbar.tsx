@@ -27,6 +27,12 @@ const SORT_OPTIONS = [
   { value: "name",       label: "Tên A → Z" },
 ];
 
+const PRODUCT_OPTIONS = [
+  { value: "", label: "Tất cả khóa" },
+  { value: "K61", label: "📚 K61 (BI) — đang mở" },
+  { value: "F3 - 2026", label: "📚 F3 (FA) — đang mở" },
+];
+
 export function LeadListToolbar({
   leads,
   total,
@@ -55,6 +61,7 @@ export function LeadListToolbar({
 
   const filterSource = searchParams.get("src") || "";
   const filterStage = searchParams.get("stage") || "";
+  const filterProduct = searchParams.get("product") || "";
   const sort = searchParams.get("sort") || "score-desc";
 
   const [downloading, setDownloading] = useState(false);
@@ -111,7 +118,7 @@ export function LeadListToolbar({
     }
   }
 
-  const hasFilters = filterSource || filterStage || (sort && sort !== "score-desc");
+  const hasFilters = filterSource || filterStage || filterProduct || (sort && sort !== "score-desc");
 
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -137,6 +144,17 @@ export function LeadListToolbar({
           className="press h-8 rounded-md border border-[var(--border-subtle)] bg-white px-2 text-[12px] focus:border-foreground outline-none"
         >
           {STAGE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+
+        <select
+          value={filterProduct}
+          onChange={(e) => updateParam("product", e.target.value)}
+          className="press h-8 rounded-md border border-[var(--border-subtle)] bg-white px-2 text-[12px] focus:border-foreground outline-none"
+          title="Filter theo khóa học đang mở"
+        >
+          {PRODUCT_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>

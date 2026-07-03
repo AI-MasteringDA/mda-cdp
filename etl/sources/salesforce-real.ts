@@ -79,7 +79,9 @@ type SfLead = {
   Phone: string | null;
   Company: string | null;
   Status: string | null;
+  Rating: string | null;
   LeadSource: string | null;
+  Product__c?: string | null;
   Owner?: { Name: string | null } | null;
   CreatedDate: string;
 };
@@ -114,7 +116,7 @@ type SfTask = {
 
 async function updateLeadMetadata(
   matches: Array<{ rawId: string; leadId: string | null }>,
-  metaMap: Map<string, { company?: string; assignee?: string; leadSource?: string }>
+  metaMap: Map<string, { company?: string; assignee?: string; leadSource?: string; sfRating?: string; sfProduct?: string; sfStatus?: string }>
 ) {
   const BATCH = 50;
   for (let i = 0; i < matches.length; i += BATCH) {
@@ -123,11 +125,14 @@ async function updateLeadMetadata(
       batch.map(async (m) => {
         if (!m.leadId) return;
         const meta = metaMap.get(m.rawId);
-        if (!meta || (!meta.company && !meta.assignee && !meta.leadSource)) return;
+        if (!meta || (!meta.company && !meta.assignee && !meta.leadSource && !meta.sfRating && !meta.sfProduct && !meta.sfStatus)) return;
         const update: Record<string, string> = {};
         if (meta.company) update.company = sanitize(meta.company);
         if (meta.assignee) update.assignee = sanitize(meta.assignee);
         if (meta.leadSource) update.lead_source = sanitize(meta.leadSource);
+        if (meta.sfRating) update.sf_rating = sanitize(meta.sfRating);
+        if (meta.sfProduct) update.sf_product = sanitize(meta.sfProduct);
+        if (meta.sfStatus) update.sf_status = sanitize(meta.sfStatus);
         await admin.from("dim_lead").update(update).eq("lead_id", m.leadId);
       })
     );
@@ -189,10 +194,21 @@ export async function pullFromSalesforceReal() {
     await updateLeadMetadata(contactMatches, contactMeta);
     console.log(`   ↳ Updated metadata (company/assignee/lead_source) cho contacts`);
 
-    // 2. Leads
+    // 2a. Product2 lookup (Id → Name mapping)
+    console.log("📋 Pulling Product2 catalog...");
+    const products = await sfQuery<{ Id: string; Name: string | null; ProductCode: string | null }>(
+      `SELECT Id, Name, ProductCode FROM Product2 LIMIT 5000`
+    );
+    const productIdToName = new Map<string, string>();
+    for (const p of products) {
+      if (p.Name) productIdToName.set(p.Id, p.Name);
+    }
+    console.log(`   ↳ ${products.length} products (${productIdToName.size} named)`);
+
+    // 2b. Leads
     console.log("📋 Pulling Leads (with Owner.Name)...");
     const leadSql = `
-      SELECT Id, Name, Email, Phone, Company, Status, LeadSource, Owner.Name, CreatedDate
+      SELECT Id, Name, Email, Phone, Company, Status, Rating, LeadSource, Product__c, Owner.Name, CreatedDate
       FROM Lead
       WHERE (Email != null OR Phone != null) AND IsConverted = false
       ORDER BY CreatedDate DESC
@@ -216,12 +232,16 @@ export async function pullFromSalesforceReal() {
       if (m.leadId) whoIdToLeadId.set(m.rawId, m.leadId);
     }
 
-    const leadMeta = new Map<string, { company?: string; assignee?: string; leadSource?: string }>();
+    const leadMeta = new Map<string, { company?: string; assignee?: string; leadSource?: string; sfRating?: string; sfProduct?: string; sfStatus?: string }>();
     for (const l of leads) {
+      const productName = l.Product__c ? (productIdToName.get(l.Product__c) || l.Product__c) : undefined;
       leadMeta.set(l.Id, {
         company: l.Company || undefined,
         assignee: l.Owner?.Name || undefined,
         leadSource: l.LeadSource || undefined,
+        sfRating: l.Rating || undefined,
+        sfProduct: productName,
+        sfStatus: l.Status || undefined,
       });
     }
     await updateLeadMetadata(leadMatches, leadMeta);
@@ -361,15 +381,16 @@ export async function pullFromSalesforceReal() {
     }
 
     // 5. Tasks
-    console.log("📋 Pulling Tasks...");
+    const taskDays = Number(process.env.SF_TASK_LOOKBACK_DAYS || 365);
+    console.log(`📋 Pulling Tasks (last ${taskDays} days)...`);
     const taskSql = `
       SELECT Id, Subject, WhoId, WhatId, Status, Priority,
              ActivityDate, CallDurationInSeconds, Description,
              CreatedDate, TaskSubtype, Owner.Name
       FROM Task
-      WHERE WhoId != null AND CreatedDate = LAST_N_DAYS:30
+      WHERE WhoId != null AND CreatedDate = LAST_N_DAYS:${taskDays}
       ORDER BY CreatedDate DESC
-      LIMIT 10000
+      LIMIT 50000
     `.replace(/\s+/g, " ").trim();
     const tasks = await sfQuery<SfTask>(taskSql);
     console.log(`   ↳ ${tasks.length} tasks pulled`);

@@ -257,7 +257,8 @@ async function processBatch(
   batch: InstantlyEmail[],
   sinceMs: number,
   leadsMap: Map<string, { fullName: string; phone?: string }>,
-  existingRawIds: Set<string>
+  existingRawIds: Set<string>,
+  forcedUeType?: number  // NEW: when pulling by ?ue_type=X, API response omits ue_type field
 ): Promise<{ inserted: number; created: number }> {
   const inRange = batch.filter((e) => {
     const t = new Date(e.timestamp_email || 0).getTime();
@@ -274,32 +275,36 @@ async function processBatch(
   const matchMap = new Map(matches.map((m) => [m.rawId, m.leadId]));
   const created = matches.filter((m) => m.matchedBy === "created").length;
 
-  // Skip `email_sent` (ue_type=1): outbound action, no engagement signal.
-  // Keep: opens (2), replies (3), clicks (4), bounces (5) — actual lead activity.
+  // Use forced ue_type if provided (from filter query) — API response omits ue_type field.
   const touchpoints = inRange
-    .filter((e) => matchMap.get(e.id) && !existingRawIds.has(e.id) && e.ue_type !== 1)
-    .map((e) => ({
-      lead_id: matchMap.get(e.id)!,
-      source: "instantly",
-      event_type: mapUeTypeToEvent(e.ue_type),
-      title: e.ue_type === 3
-        ? `Phản hồi email: ${e.subject || "(no subject)"}`
-        : e.ue_type === 2
-        ? `Đã mở email: ${e.subject || "(no subject)"}`
-        : e.ue_type === 4
-        ? `Đã click email: ${e.subject || "(no subject)"}`
-        : `Đã gửi email: ${e.subject || "(no subject)"}`,
-      detail: null,
-      occurred_at: e.timestamp_email || e.timestamp_created || new Date().toISOString(),
-      payload: {
-        raw_id: e.id, // ← critical for dedupe
-        subject: e.subject,
-        campaign_id: e.campaign_id,
-        ue_type: e.ue_type,
-        from: e.from_address_email,
-        real: true,
-      },
-    }));
+    .filter((e) => matchMap.get(e.id) && !existingRawIds.has(e.id))
+    .map((e) => {
+      const ue = forcedUeType ?? e.ue_type;
+      return {
+        lead_id: matchMap.get(e.id)!,
+        source: "instantly",
+        event_type: mapUeTypeToEvent(ue),
+        title: ue === 3
+          ? `Phản hồi email: ${e.subject || "(no subject)"}`
+          : ue === 2
+          ? `Đã mở email: ${e.subject || "(no subject)"}`
+          : ue === 4
+          ? `Đã click email: ${e.subject || "(no subject)"}`
+          : ue === 5
+          ? `Email bounced: ${e.subject || "(no subject)"}`
+          : `Đã gửi email: ${e.subject || "(no subject)"}`,
+        detail: null,
+        occurred_at: e.timestamp_email || e.timestamp_created || new Date().toISOString(),
+        payload: {
+          raw_id: e.id,
+          subject: e.subject,
+          campaign_id: e.campaign_id,
+          ue_type: ue,
+          from: e.from_address_email,
+          real: true,
+        },
+      };
+    });
 
   if (touchpoints.length > 0) {
     const { error } = await admin.from("fact_touchpoint").insert(touchpoints);
@@ -354,102 +359,93 @@ export async function pullFromInstantlyReal() {
     }
     console.log(`   ↳ ${existingRawIds.size} email đã có trong DB → sẽ skip dedupe`);
 
-    // 3. Pull /emails with pagination + RESUME from saved cursor.
-    // INSERT IN BATCHES every BATCH_PAGES — survives Ctrl+C, timeout, 5xx.
-    const BATCH_PAGES = 10; // insert every 1000 emails
+    // 3. Pull /emails with pagination — SEPARATE per ue_type to avoid
+    //    Instantly returning only sent events (newest-first ordering makes
+    //    high-volume "sent" starve out opens/replies/clicks on unfiltered pull).
+    //    ue_type: 1=sent (skip), 2=opened, 3=reply, 4=click, 5=bounce.
+    const BATCH_PAGES = 10;
     let pendingBatch: InstantlyEmail[] = [];
-    let cursor: string | undefined = await loadInstantlyCursor();
-    let page = 0;
     let totalCollected = 0;
     let totalInserted = 0;
     let totalCreated = 0;
-    const MAX_PAGES = 1000;
+    const MAX_PAGES_PER_TYPE = 500;
     let failedAt: string | undefined;
 
-    if (cursor) {
-      console.log(`   ↻  Resuming from saved cursor (page ${page})`);
-    }
+    const UE_TYPES_TO_PULL = [2, 3, 4, 5]; // opens, replies, clicks, bounces (skip sent=1)
+    const UE_LABEL: Record<number, string> = { 2: "opens", 3: "replies", 4: "clicks", 5: "bounces" };
 
-    // Before starting: if we've failed CURSOR_FAIL_GIVEUP times on this same cursor
-    // across previous runs, clear the cursor and start fresh.
-    if (cursor) {
-      const prevFails = await getCursorFailCount();
-      if (prevFails >= CURSOR_FAIL_GIVEUP) {
-        console.warn(`   ❌ Cursor ${cursor.slice(0, 12)} failed ${prevFails}× across previous runs — clearing & starting fresh`);
-        await saveInstantlyCursor(null);
-        cursor = undefined;
-      }
-    }
+    for (const ueType of UE_TYPES_TO_PULL) {
+      console.log(`   ↳ Pulling ue_type=${ueType} (${UE_LABEL[ueType]})...`);
+      let cursor: string | undefined;
+      let page = 0;
+      let typeCollected = 0;
 
-    while (page < MAX_PAGES) {
-      const params: Record<string, string> = { limit: "100" };
-      if (cursor) params.starting_after = cursor;
+      while (page < MAX_PAGES_PER_TYPE) {
+        const params: Record<string, string> = { limit: "100", ue_type: String(ueType) };
+        if (cursor) params.starting_after = cursor;
 
-      let resp: { items?: InstantlyEmail[]; next_starting_after?: string };
-      try {
-        resp = await instantlyFetch("/emails", params);
-      } catch (err) {
-        const msg = (err as Error).message;
-        console.warn(`   ⚠️ Page ${page} (cursor ${cursor?.slice(0, 12) || "-"}) failed: ${msg.slice(0, 120)}`);
-        failedAt = cursor;
-        break;
-      }
+        let resp: { items?: InstantlyEmail[]; next_starting_after?: string };
+        try {
+          resp = await instantlyFetch("/emails", params);
+        } catch (err) {
+          const msg = (err as Error).message;
+          console.warn(`   ⚠️ ue=${ueType} page ${page} failed: ${msg.slice(0, 100)}`);
+          failedAt = cursor;
+          break;
+        }
 
-      const items = resp.items || [];
-      pendingBatch.push(...items);
-      totalCollected += items.length;
-      page++;
+        const items = resp.items || [];
+        pendingBatch.push(...items);
+        totalCollected += items.length;
+        typeCollected += items.length;
+        page++;
 
       // INSERT BATCH every N pages + save cursor
       if (page % BATCH_PAGES === 0 && pendingBatch.length > 0) {
-        const { inserted, created } = await processBatch(pendingBatch, sinceMs, leadsMap, existingRawIds);
+        const { inserted, created } = await processBatch(pendingBatch, sinceMs, leadsMap, existingRawIds, ueType);
         totalInserted += inserted;
         totalCreated += created;
         pendingBatch = [];
-        if (resp.next_starting_after) {
-          await saveInstantlyCursor(resp.next_starting_after);
-        }
-        console.log(`   💾 Inserted batch page ${page}: +${inserted} touchpoints (+${created} new leads) | total ${totalInserted}`);
+        console.log(`   💾 ue=${ueType} batch page ${page}: +${inserted} touchpoints | total ${totalInserted}`);
       }
 
       const oldestTs = items.length > 0
         ? Math.min(...items.map((i) => new Date(i.timestamp_email || 0).getTime()))
         : 0;
       if (oldestTs > 0 && oldestTs < sinceMs) {
-        // Reached historical cutoff — done, clear saved cursor
-        await saveInstantlyCursor(null);
-        console.log(`   ✓ Hit historical cutoff, cursor cleared`);
+        console.log(`   ✓ ue=${ueType} hit historical cutoff at page ${page}`);
         break;
       }
       if (!resp.next_starting_after || items.length === 0) {
-        await saveInstantlyCursor(null);
-        console.log(`   ✓ Reached end of feed, cursor cleared`);
+        console.log(`   ✓ ue=${ueType} reached end of feed (${typeCollected} events)`);
         break;
       }
       cursor = resp.next_starting_after;
     }
+      // Flush remaining batch for THIS ueType before moving to next
+      if (pendingBatch.length > 0) {
+        const { inserted, created } = await processBatch(pendingBatch, sinceMs, leadsMap, existingRawIds, ueType);
+        totalInserted += inserted;
+        totalCreated += created;
+        pendingBatch = [];
+        console.log(`   💾 ue=${ueType} flush end: +${inserted} touchpoints`);
+      }
+      console.log(`   ✅ ue=${ueType} (${UE_LABEL[ueType]}): ${typeCollected} events collected`);
+    }
 
-    // Flush remaining batch after loop ends
+    // Flush remaining batch (uses last ueType — should be 5 or last iterated)
     if (pendingBatch.length > 0) {
-      const { inserted, created } = await processBatch(pendingBatch, sinceMs, leadsMap, existingRawIds);
+      const { inserted, created } = await processBatch(pendingBatch, sinceMs, leadsMap, existingRawIds, UE_TYPES_TO_PULL[UE_TYPES_TO_PULL.length - 1]);
       totalInserted += inserted;
       totalCreated += created;
       console.log(`   💾 Final flush: +${inserted} touchpoints (+${created} new leads)`);
     }
 
     if (failedAt) {
-      await saveInstantlyCursor(failedAt);
-      // Increment cross-run failure counter; auto-clear after CURSOR_FAIL_GIVEUP
-      const prevFails = await getCursorFailCount();
-      const nextFails = prevFails + 1;
-      await setCursorFailCount(nextFails);
-      console.log(`   📍 Cursor saved at ${failedAt} (fail ${nextFails}/${CURSOR_FAIL_GIVEUP}) — re-run ETL to resume`);
-    } else {
-      // Successful run — reset counter
-      await setCursorFailCount(0);
+      console.log(`   📍 Some pages failed at cursor ${failedAt} — re-run ETL to retry`);
     }
 
-    console.log(`📦 [Instantly] Pulled ${totalCollected} emails (${page} pages), inserted ${totalInserted} new touchpoints (+${totalCreated} leads)`);
+    console.log(`📦 [Instantly] Pulled ${totalCollected} events across ${UE_TYPES_TO_PULL.length} types, inserted ${totalInserted} new touchpoints (+${totalCreated} leads)`);
 
     await admin
       .from("sync_job")

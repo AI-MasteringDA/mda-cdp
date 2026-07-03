@@ -18,6 +18,49 @@ const TOKEN = process.env.SMAX_USER_TOKEN || process.env.SMAX_API_KEY;
 const BASE = process.env.SMAX_BASE_URL || "https://api.smax.ai";
 const BIZ_SLUG = "mastering-data-analytics";
 
+/**
+ * Extract email + VN phone from arbitrary text. Handles all observed patterns:
+ *   "Name_email@x.com"           → email
+ *   "Name_+84 869 689 105"       → phone 0869689105
+ *   "Name_0978 31 41 22"         → phone 0978314122
+ *   "Name_0912345678"            → phone 0912345678
+ *   "K39- Lộc-937144709"         → phone 0937144709 (bare 9-digit)
+ * Strips whitespace/dashes/parens before phone matching. +84 → 0 normalized.
+ */
+function scanEmailPhone(...texts: (string | null | undefined)[]) {
+  const joined = texts.filter(Boolean).join(" ");
+
+  // Treat "_" as separator (MDA TVV format "Name_email@x.com") so regex doesn't
+  // greedily eat "Name_" into the email's local part.
+  const emailMatch = joined.replace(/_/g, " ").match(/[a-zA-Z0-9.%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+  const email = emailMatch?.[0]?.toLowerCase() || null;
+
+  const cleaned = joined.replace(/[\s\-()]/g, "");
+  let phoneMatch: RegExpMatchArray | null =
+    cleaned.match(/\+84(3|5|7|8|9)\d{8}/) ||
+    cleaned.match(/0(3|5|7|8|9)\d{8}/) ||
+    cleaned.match(/(?<!\d)(3|5|7|8|9)\d{8}(?!\d)/);
+  let phone: string | null = null;
+  if (phoneMatch) {
+    phone = phoneMatch[0].replace(/^\+84/, "0");
+    if (phone.length === 9) phone = "0" + phone;
+  }
+
+  return { email, phone };
+}
+
+function toStringOrNull(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") return v.trim() || null;
+  if (typeof v === "number") return String(v);
+  if (typeof v === "object") {
+    const obj = v as Record<string, unknown>;
+    // Common shapes: { phone: "..." }, { email: "..." }, { value: "..." }
+    return toStringOrNull(obj.phone ?? obj.email ?? obj.value ?? obj.number ?? null);
+  }
+  return null;
+}
+
 const PAGE_PIDS = [
   "fb102323788540150",      // FB Brand
   "fb107203051058856",      // FB KOL
@@ -53,15 +96,39 @@ type SmaxThread = {
   };
 };
 
-async function smaxPost(path: string, body: unknown) {
+async function smaxPost(path: string, body: unknown, retries = 3): Promise<unknown> {
   if (!TOKEN) throw new Error("Thiếu SMAX_USER_TOKEN / SMAX_API_KEY trong .env.local");
-  const res = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`SMAX API ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  return res.json();
+  let lastErr: string = "";
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(`${BASE}${path}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.status === 502 || res.status === 503 || res.status === 504 || res.status === 429) {
+        lastErr = `SMAX API ${res.status}`;
+        if (attempt < retries) {
+          const wait = 2000 * (attempt + 1);
+          console.log(`   ⏳ ${lastErr}, retry in ${wait}ms (attempt ${attempt + 1}/${retries})`);
+          await new Promise((r) => setTimeout(r, wait));
+          continue;
+        }
+      }
+      if (!res.ok) throw new Error(`SMAX API ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      return res.json();
+    } catch (e) {
+      lastErr = (e as Error).message;
+      if (attempt < retries && (lastErr.includes("fetch") || lastErr.includes("502") || lastErr.includes("timeout"))) {
+        const wait = 2000 * (attempt + 1);
+        console.log(`   ⏳ Network error, retry in ${wait}ms (attempt ${attempt + 1}/${retries})`);
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error(`SMAX API failed after ${retries} retries: ${lastErr}`);
 }
 
 export async function pullFromSmaxReal() {
@@ -76,11 +143,15 @@ export async function pullFromSmaxReal() {
   const jobId = jobData.id;
 
   try {
-    // INCREMENTAL: find the last_message_at of the most recent SMAX touchpoint.
-    // Stop pulling when we reach threads older than that (already in DB).
-    // First run with empty table: pulls everything (subject to MAX_PAGES).
+    // Cutoff modes:
+    //  - SMAX_LOOKBACK_DAYS=365 → BACKFILL: pull threads with last_message_at > now-365d
+    //  - Otherwise INCREMENTAL: cutoff = last SMAX touchpoint's occurred_at
     let cutoffMs = 0;
-    {
+    const lookbackDays = Number(process.env.SMAX_LOOKBACK_DAYS || 0);
+    if (lookbackDays > 0) {
+      cutoffMs = Date.now() - lookbackDays * 86400_000;
+      console.log(`   ⚙️  BACKFILL mode: pulling last ${lookbackDays} days (since ${new Date(cutoffMs).toISOString().slice(0, 10)})`);
+    } else {
       const { data: lastTp } = await admin
         .from("fact_touchpoint")
         .select("occurred_at")
@@ -91,7 +162,7 @@ export async function pullFromSmaxReal() {
       if (lastTp?.occurred_at) {
         cutoffMs = new Date(lastTp.occurred_at).getTime();
         const overlapMin = Number(process.env.SMAX_OVERLAP_MINUTES || 30);
-        cutoffMs -= overlapMin * 60_000; // small overlap so we don't miss updates
+        cutoffMs -= overlapMin * 60_000;
         console.log(`   ↻ Incremental: pulling threads with last_message_at > ${new Date(cutoffMs).toISOString().slice(0, 19)}`);
       } else {
         console.log(`   ⚙️  No prior SMAX data → full backfill mode`);
@@ -112,10 +183,10 @@ export async function pullFromSmaxReal() {
       let platformEarlyStop = false;
 
       while (page < MAX_PAGES_PER_PLATFORM) {
-        const resp: { data?: SmaxThread[]; total?: number } = await smaxPost(
+        const resp = await smaxPost(
           `/bizs/${BIZ_SLUG}/threads`,
           { page_pids: [pagePid], skip, limit: LIMIT }
-        );
+        ) as { data?: SmaxThread[]; total?: number };
         const items = resp.data || [];
         if (items.length === 0) break;
 
@@ -178,28 +249,137 @@ export async function pullFromSmaxReal() {
       return { inserted: 0, jobId };
     }
 
-    // Identity resolution — match by phone/email OR SMAX customer_id (fallback for anonymous)
-    const identityRecords = allThreads
+    // ═══════════════════════════════════════════════════════════════════════
+    // Supplementary pull via /customers endpoint (up to 10k customers, ~14 months)
+    // /threads endpoint is capped at ~700 unique threads regardless of pagination.
+    // /customers exposes the full customer DB — fills the gap for historic data.
+    // ═══════════════════════════════════════════════════════════════════════
+    type SmaxCustomer = {
+      id: string;
+      name?: string;
+      profile_name?: string;
+      emails?: string[];
+      phones?: string[];
+      platform?: string;
+      page_pid?: string;
+      pid?: string;
+      picture?: string;
+      created_at?: string;
+      updated_at?: string;
+      interaction?: { first?: string; last?: string };
+      tags?: string[];
+    };
+    const CUSTOMER_SIZE = Number(process.env.SMAX_CUSTOMER_SIZE || 10000);
+    const customerLookbackDays = lookbackDays || 365;
+    const customerCutoffMs = Date.now() - customerLookbackDays * 86400_000;
+    console.log(`   ↳ Pulling /customers (size=${CUSTOMER_SIZE}, filter last ${customerLookbackDays}d)...`);
+    const custRes = await smaxPost(`/bizs/${BIZ_SLUG}/customers`, { size: CUSTOMER_SIZE }) as { data?: SmaxCustomer[]; total?: number };
+    const allCustomers = (custRes.data || []).filter((c) => {
+      const t = c.interaction?.last || c.updated_at || c.created_at;
+      return t ? new Date(t).getTime() >= customerCutoffMs : false;
+    });
+    console.log(`   ↳ /customers: ${custRes.data?.length || 0} pulled, ${allCustomers.length} in last ${customerLookbackDays}d (SMAX total: ${custRes.total})`);
+
+    // Identity resolution — merge threads + customers, with regex extraction
+    // from name/message so "Nguyễn A_x@y.com" or "call me 0912345678" gets picked up.
+    let regexEmailWin = 0;
+    let regexPhoneWin = 0;
+
+    const threadIdentityRecords = allThreads
       .filter((t) => t.customer)
-      .map((t) => ({
-        id: t.id,
-        email: t.customer?.email || (t.emails && t.emails[0]) || null,
-        phone: t.customer?.phone || (t.phones && t.phones[0]) || null,
-        name: t.customer?.name || t.customer?.profile_name || null,
-        smax_customer_id: t.customer?.id || null,
-        external_platform: t.platform || null,
-        external_profile_id: t.customer?.pid || null,
-      }));
-      // No filter — accept anonymous customers too (SMAX customer_id as fallback)
+      .map((t) => {
+        const nativeEmail = toStringOrNull(t.customer?.email) || toStringOrNull(t.emails?.[0]);
+        const nativePhone = toStringOrNull(t.customer?.phone) || toStringOrNull(t.phones?.[0]);
+        const name = t.customer?.name || t.customer?.profile_name || null;
+        const scanned = (!nativeEmail || !nativePhone)
+          ? scanEmailPhone(name, t.message)
+          : { email: null, phone: null };
+        const email = nativeEmail || scanned.email;
+        const phone = nativePhone || scanned.phone;
+        if (!nativeEmail && scanned.email) regexEmailWin++;
+        if (!nativePhone && scanned.phone) regexPhoneWin++;
+        return {
+          id: t.id,
+          email,
+          phone,
+          name,
+          smax_customer_id: t.customer?.id || null,
+          external_platform: t.platform || null,
+          external_profile_id: t.customer?.pid || null,
+        };
+      });
+
+    const threadCustomerIds = new Set(allThreads.map((t) => t.customer?.id).filter(Boolean));
+    const customerIdentityRecords = allCustomers
+      .filter((c) => !threadCustomerIds.has(c.id))
+      .map((c) => {
+        const nativeEmail = toStringOrNull(c.emails?.[0]);
+        const nativePhone = toStringOrNull(c.phones?.[0]);
+        const name = c.name || c.profile_name || null;
+        const scanned = (!nativeEmail || !nativePhone)
+          ? scanEmailPhone(name)
+          : { email: null, phone: null };
+        const email = nativeEmail || scanned.email;
+        const phone = nativePhone || scanned.phone;
+        if (!nativeEmail && scanned.email) regexEmailWin++;
+        if (!nativePhone && scanned.phone) regexPhoneWin++;
+        return {
+          id: `smax-cust-${c.id}`,
+          email,
+          phone,
+          name,
+          smax_customer_id: c.id,
+          external_platform: c.platform || null,
+          external_profile_id: c.pid || null,
+        };
+      });
+    console.log(`   ↳ Regex extraction: +${regexEmailWin} emails, +${regexPhoneWin} phones from name/message`);
+
+    const identityRecords = [...threadIdentityRecords, ...customerIdentityRecords];
+    console.log(`   ↳ Identity records: ${threadIdentityRecords.length} threads + ${customerIdentityRecords.length} historic customers = ${identityRecords.length} total`);
 
     const matches = await batchResolveOrCreate(identityRecords, { source: "smax" });
     logMatches(matches, "SMAX REAL");
+
+    const matchMap = new Map(matches.map((m) => [m.rawId, m.leadId]));
+
+    // Historic-customer touchpoints (customers without a recent thread)
+    // occurred_at = interaction.last (when they last chatted). No message text available.
+    const customerTouchpoints = allCustomers
+      .filter((c) => !threadCustomerIds.has(c.id))
+      .map((c) => {
+        const leadId = matchMap.get(`smax-cust-${c.id}`);
+        if (!leadId) return null;
+        const occurred = c.interaction?.last || c.updated_at || c.created_at || new Date().toISOString();
+        const displayName = c.name || c.profile_name || "(anonymous)";
+        return {
+          lead_id: leadId,
+          source: "smax",
+          event_type: "chat" as const,
+          title: `Chat: ${displayName.slice(0, 60)}`,
+          detail: null as string | null,
+          occurred_at: occurred,
+          payload: {
+            thread_id: `cust-${c.id}`,
+            smax_customer_id: c.id,
+            page_pid: c.page_pid,
+            platform: c.platform,
+            tags: c.tags || [],
+            customer_name: c.name || c.profile_name,
+            source_endpoint: "customers",
+            interaction_first: c.interaction?.first,
+            interaction_last: c.interaction?.last,
+            real: true,
+          },
+        };
+      })
+      .filter((t): t is NonNullable<typeof t> => t !== null);
+    console.log(`   ↳ Built ${customerTouchpoints.length} historic-customer touchpoints`);
 
     // Build touchpoints (1 per thread)
     // CLASSIFY SENDER: compare last_message_at vs last_message_by_customer_at
     //   if last_message_at > last_message_by_customer_at → TVV/staff sent last → event_type='chat_staff'
     //   if equal or no staff time → customer sent last → event_type='chat'
-    const matchMap = new Map(matches.map((m) => [m.rawId, m.leadId]));
     const touchpoints = allThreads
       .filter((t) => matchMap.get(t.id))
       .map((t) => {
@@ -238,7 +418,10 @@ export async function pullFromSmaxReal() {
         };
       });
 
-    if (touchpoints.length > 0) {
+    // Merge thread touchpoints + customer touchpoints
+    const allTouchpoints = [...touchpoints, ...customerTouchpoints];
+
+    if (allTouchpoints.length > 0) {
       // PAGINATED fetch existing thread_ids (handle >1000 rows)
       const existingThreadIds = new Set<string>();
       let from = 0;
@@ -258,7 +441,7 @@ export async function pullFromSmaxReal() {
       }
       console.log(`   ↳ Cache ${existingThreadIds.size} existing thread_ids`);
 
-      const newTouchpoints = touchpoints.filter(
+      const newTouchpoints = allTouchpoints.filter(
         (t) => !existingThreadIds.has((t.payload as { thread_id: string }).thread_id)
       );
       const skipped = touchpoints.length - newTouchpoints.length;
@@ -285,7 +468,7 @@ export async function pullFromSmaxReal() {
           inserted += batch.length;
         }
         if (failed > 0) console.log(`   ⚠️ ${failed} touchpoint skip do conflict`);
-        console.log(`✅ [SMAX REAL] Insert ${inserted} fact_touchpoint mới từ ${allThreads.length} threads`);
+        console.log(`✅ [SMAX REAL] Insert ${inserted} fact_touchpoint mới (${allThreads.length} threads + ${allCustomers.length} customers)`);
       } else {
         console.log(`✅ [SMAX REAL] 0 touchpoint mới — DB đã up-to-date`);
       }
@@ -296,12 +479,12 @@ export async function pullFromSmaxReal() {
       .update({
         status: "success",
         finished_at: new Date().toISOString(),
-        records_in: allThreads.length,
-        records_merged: touchpoints.length,
+        records_in: allThreads.length + allCustomers.length,
+        records_merged: allTouchpoints.length,
       })
       .eq("id", jobId);
 
-    return { inserted: touchpoints.length, jobId };
+    return { inserted: allTouchpoints.length, jobId };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await admin

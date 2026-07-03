@@ -11,7 +11,7 @@ const LARK_APP_ID = process.env.LARK_APP_ID || "";
 const LARK_APP_SECRET = process.env.LARK_APP_SECRET || "";
 const APP_TOKEN = process.env.LARK_BASE_APP_TOKEN || "";
 const BASE_URL = "https://open.larksuite.com/open-apis";
-const DAYS_TO_PUSH = Number(process.env.LARK_DAYS_TO_PUSH || 30);
+const DAYS_TO_PUSH = Number(process.env.LARK_DAYS_TO_PUSH || 365);
 
 const CHANNEL_TABLES: Record<string, string> = {
   smax: "SMAX_Database",
