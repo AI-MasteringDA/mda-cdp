@@ -239,9 +239,16 @@ async function joinLeads(
   sort: LeadListFilter["sort"]
 ): Promise<Lead[]> {
   const leadIds = scores.map((s) => s.lead_id);
-  const { data: leads } = await supabase.from("dim_lead").select("*").in("lead_id", leadIds);
-  if (!leads) return [];
-  const leadMap = new Map(leads.map((l) => [l.lead_id, l]));
+  // Batch .in() at 500 IDs per call — Supabase rejects URL when list exceeds ~1000 IDs
+  const leadsAll: Record<string, unknown>[] = [];
+  const IN_BATCH = 500;
+  for (let i = 0; i < leadIds.length; i += IN_BATCH) {
+    const batch = leadIds.slice(i, i + IN_BATCH);
+    const { data } = await supabase.from("dim_lead").select("*").in("lead_id", batch);
+    if (data?.length) leadsAll.push(...(data as Record<string, unknown>[]));
+  }
+  if (leadsAll.length === 0) return [];
+  const leadMap = new Map(leadsAll.map((l) => [l.lead_id as string, l as unknown as LeadRow]));
   const merged = scores
     .map((s) => {
       const lead = leadMap.get(s.lead_id);
