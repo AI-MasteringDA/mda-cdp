@@ -252,6 +252,41 @@ async function countLeadsByScoreRange(min: number, max: number, filter?: LeadLis
 
 export const getHotLeads = (limit = 50, offset = 0, filter?: LeadListFilter) =>
   fetchLeadsByScoreRange(70, 100, limit, offset, false, filter);
+
+/**
+ * Auto-discover top products in Hot leads (for filter dropdown).
+ * Returns product name + hot count, sorted by count DESC.
+ * Excludes null/generic products.
+ */
+export async function getTopHotProducts(limit = 15): Promise<{ product: string; hotCount: number }[]> {
+  const supabase = await createClient();
+  const latestDate = await getLatestScoredAt(supabase);
+  const { data: scores } = await supabase
+    .from("fact_lead_score")
+    .select("lead_id")
+    .eq("scored_at", latestDate)
+    .gte("hot_score", 70);
+  if (!scores || scores.length === 0) return [];
+  const leadIds = scores.map((s) => s.lead_id);
+  const productCounts = new Map<string, number>();
+  for (let i = 0; i < leadIds.length; i += 500) {
+    const batch = leadIds.slice(i, i + 500);
+    const { data: leads } = await supabase
+      .from("dim_lead")
+      .select("sf_product")
+      .in("lead_id", batch)
+      .not("sf_product", "is", null);
+    for (const l of leads ?? []) {
+      const p = (l.sf_product || "").trim();
+      if (!p || p === "Data Analytics Training") continue; // skip generic
+      productCounts.set(p, (productCounts.get(p) ?? 0) + 1);
+    }
+  }
+  return Array.from(productCounts.entries())
+    .map(([product, hotCount]) => ({ product, hotCount }))
+    .sort((a, b) => b.hotCount - a.hotCount)
+    .slice(0, limit);
+}
 export const getHotLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(70, 100, filter);
 
 // Cross-sell READY: existing customers with intent for next course

@@ -27,10 +27,9 @@ const SORT_OPTIONS = [
   { value: "name",       label: "Tên A → Z" },
 ];
 
-const PRODUCT_OPTIONS = [
+// Fallback nếu k truyền products từ server
+const DEFAULT_PRODUCT_OPTIONS = [
   { value: "", label: "Tất cả khóa" },
-  { value: "K61", label: "📚 K61 (BI) — đang mở" },
-  { value: "F3 - 2026", label: "📚 F3 (FA) — đang mở" },
 ];
 
 export function LeadListToolbar({
@@ -39,12 +38,18 @@ export function LeadListToolbar({
   source,
   exportFilename,
   availableStages,
+  availableProducts,
+  activeCourses,
 }: {
   leads: Lead[];
   total: number;
   source?: string;
   exportFilename?: string;
   availableStages?: StageOption[];
+  /** Products auto-discovered from data (with hot counts). Sorted DESC by count. */
+  availableProducts?: { product: string; hotCount: number }[];
+  /** Substrings identifying currently-open courses. Matches will be highlighted 🔥. */
+  activeCourses?: string[];
 }) {
   const STAGE_OPTIONS = [
     ...DEFAULT_STAGE_OPTIONS,
@@ -52,6 +57,21 @@ export function LeadListToolbar({
       value: s.value,
       label: s.count !== undefined ? `${s.label} (${s.count.toLocaleString("vi-VN")})` : s.label,
     })),
+  ];
+
+  const PRODUCT_OPTIONS = [
+    ...DEFAULT_PRODUCT_OPTIONS,
+    ...(availableProducts ?? []).map((p) => {
+      const isActive = (activeCourses ?? []).some((k) =>
+        p.product.toLowerCase().includes(k.trim().toLowerCase())
+      );
+      const prefix = isActive ? "🔥" : "📚";
+      const activeSuffix = isActive ? " — đang mở" : "";
+      return {
+        value: p.product,
+        label: `${prefix} ${p.product}${activeSuffix} (${p.hotCount} hot)`,
+      };
+    }),
   ];
 
   const router = useRouter();

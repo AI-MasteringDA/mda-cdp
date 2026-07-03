@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Topbar } from "@/components/Topbar";
 import { LeadListItem } from "@/components/LeadListItem";
 import { LeadListToolbar } from "@/components/LeadListToolbar";
-import { getHotLeads, getHotLeadsCount, getAvailableStages, type LeadListFilter } from "@/lib/supabase/queries";
+import { getHotLeads, getHotLeadsCount, getAvailableStages, getTopHotProducts, type LeadListFilter } from "@/lib/supabase/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -22,11 +22,16 @@ export default async function HotLeadsPage({
     product: params.product,
     sort: (params.sort as LeadListFilter["sort"]) || "score-desc",
   };
-  const [hotLeads, total, stages] = await Promise.all([
+  const [hotLeads, total, stages, products] = await Promise.all([
     getHotLeads(PAGE_SIZE, offset, filter),
     getHotLeadsCount(filter),
     getAvailableStages(),
+    getTopHotProducts(15),
   ]);
+  const activeCourses = (process.env.ACTIVE_COURSES || "K61,F3 - 2026")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const qsBase = new URLSearchParams();
@@ -53,7 +58,7 @@ export default async function HotLeadsPage({
           </p>
         </div>
 
-        <LeadListToolbar leads={hotLeads} total={total} availableStages={stages} exportFilename="hot-leads.csv" />
+        <LeadListToolbar leads={hotLeads} total={total} availableStages={stages} availableProducts={products} activeCourses={activeCourses} exportFilename="hot-leads.csv" />
 
         <div className="hairline rounded-2xl bg-white px-3 py-2">
           {hotLeads.length === 0 ? (
