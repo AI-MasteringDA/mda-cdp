@@ -46,6 +46,7 @@ const GROWTH: NavItem[] = [
   { href: "/attribution", label: "Attribution",     icon: BarChart3 },
   { href: "/funnel",      label: "Phễu & cohort",   icon: GitBranch },
   { href: "/segments",    label: "Phân khúc",       icon: PieChart },
+  { href: "/audiences",   label: "Audiences 🎯",   icon: Target },
   { href: "/ai-planner",  label: "AI Planner",      icon: Lightbulb },
 ];
 
