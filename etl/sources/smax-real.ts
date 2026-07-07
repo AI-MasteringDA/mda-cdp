@@ -395,43 +395,9 @@ export async function pullFromSmaxReal() {
       }
     }
 
-    if (leadTagMap.size > 0) {
-      // Fetch existing tags to skip unchanged
-      const leadIds = Array.from(leadTagMap.keys());
-      const existingTagsByLead = new Map<string, string[]>();
-      for (let i = 0; i < leadIds.length; i += 500) {
-        const batch = leadIds.slice(i, i + 500);
-        const { data } = await admin.from("dim_lead").select("lead_id, smax_tags").in("lead_id", batch);
-        for (const row of data ?? []) {
-          existingTagsByLead.set(row.lead_id, Array.isArray(row.smax_tags) ? row.smax_tags : []);
-        }
-      }
-
-      // Union current DB tags with newly-pulled tags (never remove, only add).
-      // Only queue update if union differs from existing.
-      const changed: { lead_id: string; smax_tags: string[] }[] = [];
-      for (const [lead_id, tagSet] of leadTagMap.entries()) {
-        const existing = existingTagsByLead.get(lead_id) ?? [];
-        const union = new Set(existing);
-        let added = false;
-        for (const t of tagSet) if (!union.has(t)) { union.add(t); added = true; }
-        if (added) changed.push({ lead_id, smax_tags: Array.from(union) });
-      }
-
-      console.log(`   ↳ smax_tags: ${leadTagMap.size} candidates → ${changed.length} need new tags → batch upserting...`);
-
-      // Batch UPSERT (Supabase does single SQL statement per batch — much faster
-      // than 6k+ sequential UPDATEs).
-      let updated = 0;
-      const BATCH = 500;
-      for (let i = 0; i < changed.length; i += BATCH) {
-        const batch = changed.slice(i, i + BATCH);
-        const { error } = await admin.from("dim_lead").upsert(batch, { onConflict: "lead_id" });
-        if (!error) updated += batch.length;
-        else console.warn(`   ⚠️ upsert batch ${i}: ${error.message.slice(0, 120)}`);
-      }
-      console.log(`   ✓ Upserted smax_tags on ${updated} leads (skipped ${leadTagMap.size - changed.length} unchanged)`);
-    }
+    // NOTE: smax_tags update is deferred to AFTER touchpoint insert so that even
+    // if the tag update step is slow/killed, the chat data (fact_touchpoint) is
+    // already safely in DB.
 
     // Historic-customer touchpoints (customers without a recent thread)
     // occurred_at = interaction.last (when they last chatted). No message text available.
@@ -562,6 +528,42 @@ export async function pullFromSmaxReal() {
       } else {
         console.log(`✅ [SMAX REAL] 0 touchpoint mới — DB đã up-to-date`);
       }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Update smax_tags on leads — deferred until AFTER touchpoint insert so
+    // fact_touchpoint (chat data) is safely in DB even if this step is slow.
+    // ═══════════════════════════════════════════════════════════════════════
+    if (leadTagMap.size > 0) {
+      const leadIds = Array.from(leadTagMap.keys());
+      const existingTagsByLead = new Map<string, string[]>();
+      for (let i = 0; i < leadIds.length; i += 500) {
+        const batch = leadIds.slice(i, i + 500);
+        const { data } = await admin.from("dim_lead").select("lead_id, smax_tags").in("lead_id", batch);
+        for (const row of data ?? []) {
+          existingTagsByLead.set(row.lead_id, Array.isArray(row.smax_tags) ? row.smax_tags : []);
+        }
+      }
+
+      const changed: { lead_id: string; smax_tags: string[] }[] = [];
+      for (const [lead_id, tagSet] of leadTagMap.entries()) {
+        const existing = existingTagsByLead.get(lead_id) ?? [];
+        const union = new Set(existing);
+        let added = false;
+        for (const t of tagSet) if (!union.has(t)) { union.add(t); added = true; }
+        if (added) changed.push({ lead_id, smax_tags: Array.from(union) });
+      }
+      console.log(`   ↳ smax_tags: ${leadTagMap.size} candidates → ${changed.length} need new tags → batch upserting...`);
+
+      let updated = 0;
+      const TAG_BATCH = 500;
+      for (let i = 0; i < changed.length; i += TAG_BATCH) {
+        const batch = changed.slice(i, i + TAG_BATCH);
+        const { error } = await admin.from("dim_lead").upsert(batch, { onConflict: "lead_id" });
+        if (!error) updated += batch.length;
+        else console.warn(`   ⚠️ upsert batch ${i}: ${error.message.slice(0, 120)}`);
+      }
+      console.log(`   ✓ Upserted smax_tags on ${updated} leads (skipped ${leadTagMap.size - changed.length} unchanged)`);
     }
 
     await admin
