@@ -2,8 +2,8 @@ name: SMAX incremental sync
 
 on:
   schedule:
-    # Every 10 minutes — smart polling to capture all customer chats
-    - cron: '*/10 * * * *'
+    # Every 5 minutes — near-real-time polling (no need for SMAX webhook config)
+    - cron: '*/5 * * * *'
   # Allow manual trigger from GitHub UI
   workflow_dispatch:
 
