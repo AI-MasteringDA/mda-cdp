@@ -13,6 +13,16 @@ const APP_TOKEN = process.env.LARK_BASE_APP_TOKEN || "";
 const BASE_URL = "https://open.larksuite.com/open-apis";
 const DAYS_TO_PUSH = Number(process.env.LARK_DAYS_TO_PUSH || 365);
 
+// Lark free tier caps at 20,000 records per table. For Instantly which
+// has 29k+ touchpoints in 365 days, use a shorter window that fits the cap.
+const DAYS_PER_SOURCE: Record<string, number> = {
+  instantly: Number(process.env.LARK_DAYS_INSTANTLY || 60),
+};
+
+function daysForSource(source: string): number {
+  return DAYS_PER_SOURCE[source] || DAYS_TO_PUSH;
+}
+
 const CHANNEL_TABLES: Record<string, string> = {
   smax: "SMAX_Database",
   salesforce: "Salesforce_Database",
@@ -164,6 +174,36 @@ async function deleteAllRecords(token: string, tableId: string) {
   }
 }
 
+/**
+ * Get the max value of a DateTime field from a Lark table.
+ * Used for incremental push: only insert records newer than what's already in Lark.
+ */
+async function getMaxDateTimeField(token: string, tableId: string, fieldName: string): Promise<number | null> {
+  let pageToken: string | undefined;
+  let maxMs = 0;
+  let scanned = 0;
+  const HARD_CAP = 25000;  // safety guard
+  while (scanned < HARD_CAP) {
+    const url = new URL(`${BASE_URL}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/records`);
+    url.searchParams.set("page_size", "500");
+    // We only need the one field to speed up
+    url.searchParams.set("field_names", JSON.stringify([fieldName]));
+    if (pageToken) url.searchParams.set("page_token", pageToken);
+    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    const items = data.data?.items || [];
+    for (const r of items) {
+      const val = r.fields?.[fieldName];
+      const n = typeof val === "number" ? val : (typeof val === "string" ? new Date(val).getTime() : 0);
+      if (n > maxMs) maxMs = n;
+    }
+    scanned += items.length;
+    if (!data.data?.has_more) break;
+    pageToken = data.data.page_token;
+  }
+  return maxMs > 0 ? maxMs : null;
+}
+
 async function insertRecords(token: string, tableId: string, records: unknown[]) {
   let inserted = 0;
   for (let i = 0; i < records.length; i += 500) {
@@ -187,26 +227,47 @@ async function insertRecords(token: string, tableId: string, records: unknown[])
 async function pushChannel(token: string, source: string, tableName: string) {
   console.log(`\n📦 [${source}] → ${tableName}`);
 
+  // Env flag: LARK_FULL_REFRESH=1 forces delete-all-and-reinsert (slow but corrects drift)
+  // Default: incremental — only insert touchpoints newer than what's already in Lark.
+  const fullRefresh = process.env.LARK_FULL_REFRESH === "1";
+
   // Get or create table
   const tables = await listTables(token);
   let table = tables.find((t: { name: string }) => t.name === tableName);
   let tableId: string;
+  let isNewTable = false;
   if (!table) {
     tableId = await createTable(token, tableName);
+    isNewTable = true;
   } else {
     tableId = table.table_id;
-    // Note: field type update requires empty table — done after deleteAllRecords below
   }
 
-  // Pull data from DB (last N days)
-  const cutoff = new Date(Date.now() - DAYS_TO_PUSH * 86400_000).toISOString();
+  // Determine cutoff for pulling records
+  const daysForThis = daysForSource(source);
+  const daysCutoffMs = Date.now() - daysForThis * 86400_000;
+  let cutoffMs = daysCutoffMs;
+  let mode: "full" | "incremental" = "full";
+
+  if (!isNewTable && !fullRefresh) {
+    const maxTimeInLark = await getMaxDateTimeField(token, tableId, "Time");
+    if (maxTimeInLark && maxTimeInLark > daysCutoffMs) {
+      cutoffMs = maxTimeInLark;  // only newer than Lark's most recent
+      mode = "incremental";
+    }
+  }
+
+  const cutoff = new Date(cutoffMs).toISOString();
+  console.log(`   ↳ Mode: ${mode} · cutoff: ${cutoff}`);
+
+  // Pull touchpoints (paginated, Supabase 1000-row cap)
   const rows: any[] = [];
   let from = 0;
   while (true) {
     const { data } = await admin.from("fact_touchpoint")
       .select("event_type, title, detail, occurred_at, payload, dim_lead(full_name, email, phone, company, stage, assignee, smax_tags)")
       .eq("source", source)
-      .gte("occurred_at", cutoff)
+      .gt("occurred_at", cutoff)   // strict > to avoid duplicate at boundary
       .order("occurred_at", { ascending: false })
       .range(from, from + 999);
     if (!data || data.length === 0) break;
@@ -214,9 +275,12 @@ async function pushChannel(token: string, source: string, tableName: string) {
     if (data.length < 1000) break;
     from += 1000;
   }
-  console.log(`   ↳ Loaded ${rows.length} touchpoints (last ${DAYS_TO_PUSH} days)`);
+  console.log(`   ↳ Loaded ${rows.length} touchpoints ${mode === "incremental" ? "(new since last push)" : `(last ${daysForThis} days)`}`);
 
-  if (rows.length === 0) return;
+  if (rows.length === 0) {
+    console.log(`   ✓ Nothing new. Skipping.`);
+    return;
+  }
 
   // Transform to Lark records — DateTime fields as Unix milliseconds
   const records = rows.map((r) => {
@@ -238,11 +302,13 @@ async function pushChannel(token: string, source: string, tableName: string) {
     };
   });
 
-  // Full refresh: delete all → update field types (only works when empty) → insert
-  await deleteAllRecords(token, tableId);
-  await ensureFieldsExist(token, tableId, STANDARD_FIELDS);
+  if (mode === "full") {
+    // Full refresh: delete all → update field types (only works when empty) → insert
+    await deleteAllRecords(token, tableId);
+    await ensureFieldsExist(token, tableId, STANDARD_FIELDS);
+  }
   const inserted = await insertRecords(token, tableId, records);
-  console.log(`   ✅ Inserted ${inserted} records to Lark`);
+  console.log(`   ✅ Inserted ${inserted} records to Lark (${mode})`);
 }
 
 /**
@@ -332,11 +398,28 @@ export async function pushToLark() {
     throw new Error("Missing Lark env vars: LARK_APP_ID, LARK_APP_SECRET, LARK_BASE_APP_TOKEN");
   }
 
+  // LARK_SOURCES=smax → push only SMAX + Hotleads (fast, every 5min)
+  // LARK_SOURCES=salesforce,instantly,web → push everything else (slow, hourly)
+  // Unset → push all (default, backward-compat)
+  const sourcesFilter = (process.env.LARK_SOURCES || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const shouldPush = (source: string) =>
+    sourcesFilter.length === 0 || sourcesFilter.includes(source);
+
   console.log("📡 [Lark Push] Starting...");
+  if (sourcesFilter.length > 0) {
+    console.log(`   ↳ Filter: ${sourcesFilter.join(", ")}`);
+  }
   const token = await getToken();
   console.log("✅ Got Lark access token");
 
   for (const [source, tableName] of Object.entries(CHANNEL_TABLES)) {
+    if (!shouldPush(source)) {
+      console.log(`\n⏭  [${source}] skipped (not in LARK_SOURCES)`);
+      continue;
+    }
     try {
       await pushChannel(token, source, tableName);
     } catch (err) {
@@ -344,11 +427,13 @@ export async function pushToLark() {
     }
   }
 
-  // New table for Hoàng → SF auto-import
-  try {
-    await pushSmaxHotleads(token);
-  } catch (err) {
-    console.error(`❌ [SMAX Hotleads] failed: ${(err as Error).message}`);
+  // SMAX Hotleads table: push only when SMAX is in filter (or filter empty)
+  if (shouldPush("smax")) {
+    try {
+      await pushSmaxHotleads(token);
+    } catch (err) {
+      console.error(`❌ [SMAX Hotleads] failed: ${(err as Error).message}`);
+    }
   }
 
   console.log("\n✨ Lark push complete");

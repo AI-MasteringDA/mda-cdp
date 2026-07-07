@@ -1,16 +1,16 @@
-name: Lark Base push (Salesforce/Instantly/Wix)
+name: Lark Base push (SMAX only, fast)
 
 on:
   schedule:
-    # Every 1 hour — non-critical sources (SF/Instantly/Wix)
-    # SMAX has its own faster workflow (see lark-push-smax-cron.yml)
-    - cron: '15 * * * *'
+    # Every 5 minutes — SMAX pipeline needs near-real-time for Sales team.
+    # Non-SMAX sources use lark-push-cron.yml (hourly).
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
-  lark-push:
+  lark-push-smax:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund --prefer-offline
 
-      - name: Push data to Lark Base
+      - name: Push SMAX data to Lark Base
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
@@ -33,5 +33,5 @@ jobs:
           LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
           LARK_BASE_APP_TOKEN: ${{ secrets.LARK_BASE_APP_TOKEN }}
           LARK_DAYS_TO_PUSH: '365'
-          LARK_SOURCES: 'salesforce,instantly,web'
+          LARK_SOURCES: 'smax'
         run: npm run etl:lark:push
