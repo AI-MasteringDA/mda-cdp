@@ -73,6 +73,28 @@ export async function POST(req: NextRequest) {
 
     const direction = payload.message?.direction || payload.direction || "inbound";
     const channelId = payload.page_pid || payload.channel_id || payload.page_id || null;
+    const platform = payload.customer?.platform || payload.platform || null;
+    const smaxCustomerId = payload.customer?.id || payload.customer_id || null;
+    const customerName =
+      payload.customer?.name ||
+      payload.customer?.profile_name ||
+      payload.user?.name ||
+      payload.contact?.name ||
+      null;
+
+    // Extract tags — SMAX can send as objects {id,name,alias} or strings
+    const rawTags: unknown[] = payload.customer?.tags || payload.tags || payload.tag_aliases || [];
+    const extractedTags = rawTags
+      .map((t) => {
+        if (typeof t === "string") return t.trim();
+        if (typeof t === "object" && t !== null) {
+          const obj = t as Record<string, unknown>;
+          const name = obj.name ?? obj.alias ?? obj.tag_name;
+          return typeof name === "string" ? name.trim() : "";
+        }
+        return "";
+      })
+      .filter((s) => s.length > 0);
 
     const admin = createClient(supabaseUrl, supabaseSecret, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -92,7 +114,7 @@ export async function POST(req: NextRequest) {
       console.warn("[SMAX webhook] insert raw error:", rawErr.message);
     }
 
-    // 5. Identity resolve + insert fact_touchpoint nếu match
+    // 5. Identity resolve — priority: email → phone → smax_customer_id
     let leadId: string | null = null;
     if (email) {
       const { data } = await admin
@@ -110,48 +132,81 @@ export async function POST(req: NextRequest) {
       );
       leadId = match?.lead_id ?? null;
     }
+    if (!leadId && smaxCustomerId) {
+      const { data } = await admin
+        .from("dim_lead")
+        .select("lead_id")
+        .eq("smax_customer_id", smaxCustomerId)
+        .maybeSingle();
+      leadId = data?.lead_id ?? null;
+    }
 
-    // 6. Auto-create lead nếu có email (không tạo cho phone-only vì có thể là spam)
-    if (!leadId && email) {
+    // 6. Auto-create lead nếu chưa có
+    if (!leadId) {
+      const insertData: Record<string, unknown> = {
+        source: "smax",
+        stage: "Mới",
+        avatar_color: "#FFE3F0",
+        first_seen_at: new Date().toISOString(),
+        full_name: customerName || email?.split("@")[0] || `Anonymous SMAX ${platform || ""}`,
+      };
+      if (email) insertData.email = email.toLowerCase().trim();
+      if (phone) insertData.phone = phone;
+      if (smaxCustomerId) insertData.smax_customer_id = smaxCustomerId;
+      if (platform) insertData.external_platform = platform;
+      if (extractedTags.length > 0) insertData.smax_tags = extractedTags;
+
       const { data: newLead } = await admin
         .from("dim_lead")
-        .insert({
-          email: email.toLowerCase().trim(),
-          phone,
-          full_name: email.split("@")[0],
-          source: "smax",
-          stage: "Mới",
-          avatar_color: "#FFE3F0",
-          first_seen_at: new Date().toISOString(),
-        })
+        .insert(insertData)
         .select("lead_id")
         .single();
       leadId = newLead?.lead_id ?? null;
     }
 
-    // 7. Insert touchpoint
+    // 7. Insert touchpoint + update tags on existing lead
     if (leadId) {
       await admin.from("fact_touchpoint").insert({
         lead_id: leadId,
         source: "smax",
-        event_type: "chat",
+        event_type: direction === "outbound" ? "chat_staff" : "chat",
         title: `Chat: ${message.slice(0, 60)}${message.length > 60 ? "..." : ""}`,
         detail: message,
         occurred_at: occurredAt,
-        payload: { direction, channel_id: channelId, real: true, source: "webhook" },
+        payload: {
+          direction,
+          channel_id: channelId,
+          platform,
+          smax_customer_id: smaxCustomerId,
+          tags: extractedTags,
+          real: true,
+          source: "webhook",
+        },
       });
+
+      // Merge new tags with existing (union)
+      if (extractedTags.length > 0) {
+        const { data: current } = await admin
+          .from("dim_lead")
+          .select("smax_tags")
+          .eq("lead_id", leadId)
+          .maybeSingle();
+        const existing: string[] = Array.isArray(current?.smax_tags) ? current!.smax_tags : [];
+        const merged = Array.from(new Set([...existing, ...extractedTags]));
+        await admin.from("dim_lead").update({ smax_tags: merged }).eq("lead_id", leadId);
+      }
 
       await admin
         .from("dim_lead")
-        .update({ last_touch_at: occurredAt })
-        .eq("lead_id", leadId)
-        .lt("last_touch_at", occurredAt);
+        .update({ last_touch_at: occurredAt, last_chat_at: occurredAt })
+        .eq("lead_id", leadId);
     }
 
     return NextResponse.json({
       received: true,
       matched_lead: !!leadId,
       message_id: messageId,
+      tags_extracted: extractedTags.length,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

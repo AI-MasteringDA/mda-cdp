@@ -2,8 +2,8 @@ name: Lark Base push
 
 on:
   schedule:
-    # Every 1 hour — sync latest 30 days of data to Lark Base
-    - cron: '30 * * * *'
+    # Every 15 minutes — near-real-time sync to Lark Base
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
