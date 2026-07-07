@@ -20,9 +20,10 @@ const CHANNEL_TABLES: Record<string, string> = {
   web: "Wix_Database",
 };
 
+// Lark field types: 1=Text, 2=Number, 5=DateTime, 11=User, 13=Phone, 15=URL
 // Standard fields for each channel table
 const STANDARD_FIELDS = [
-  { field_name: "Time", type: 1 },
+  { field_name: "Time", type: 5, property: { date_formatter: "yyyy-MM-dd HH:mm", auto_fill: false } },
   { field_name: "Event", type: 1 },
   { field_name: "Lead Name", type: 1 },
   { field_name: "Email", type: 1 },
@@ -30,8 +31,20 @@ const STANDARD_FIELDS = [
   { field_name: "Company", type: 1 },
   { field_name: "Stage", type: 1 },
   { field_name: "TVV", type: 1 },
+  { field_name: "Tag SMAX", type: 1 },
   { field_name: "Title", type: 1 },
   { field_name: "Detail", type: 1 },
+];
+
+// SMAX Hotleads table: dedup by lead (1 row per lead) — for Hoàng import to SF
+const HOTLEADS_FIELDS = [
+  { field_name: "Ngày", type: 5, property: { date_formatter: "yyyy-MM-dd HH:mm", auto_fill: false } },
+  { field_name: "Tên", type: 1 },
+  { field_name: "Email", type: 1 },
+  { field_name: "SĐT", type: 1 },
+  { field_name: "Tag SMAX", type: 1 },
+  { field_name: "Platform", type: 1 },
+  { field_name: "Score", type: 2 },
 ];
 
 async function getToken(): Promise<string> {
@@ -53,7 +66,7 @@ async function listTables(token: string) {
   return data.data?.items || [];
 }
 
-async function createTable(token: string, name: string): Promise<string> {
+async function createTable(token: string, name: string, fields: { field_name: string; type: number }[] = STANDARD_FIELDS): Promise<string> {
   const res = await fetch(`${BASE_URL}/bitable/v1/apps/${APP_TOKEN}/tables`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -61,7 +74,7 @@ async function createTable(token: string, name: string): Promise<string> {
       table: {
         name,
         default_view_name: "Grid",
-        fields: STANDARD_FIELDS,
+        fields,
       },
     }),
   });
@@ -79,22 +92,42 @@ async function listFields(token: string, tableId: string) {
   return data.data?.items || [];
 }
 
-async function createField(token: string, tableId: string, fieldName: string) {
+async function createField(token: string, tableId: string, field: { field_name: string; type: number; property?: object }) {
+  const body: Record<string, unknown> = { field_name: field.field_name, type: field.type };
+  if (field.property) body.property = field.property;
   const res = await fetch(`${BASE_URL}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/fields`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ field_name: fieldName, type: 1 }),
+    body: JSON.stringify(body),
   });
   const data = await res.json();
-  if (data.code !== 0) console.warn(`   ⚠️ Create field "${fieldName}" failed: ${JSON.stringify(data).slice(0, 200)}`);
+  if (data.code !== 0) console.warn(`   ⚠️ Create field "${field.field_name}" failed: ${JSON.stringify(data).slice(0, 200)}`);
 }
 
-async function ensureFieldsExist(token: string, tableId: string) {
-  const existingFields = await listFields(token, tableId);
-  const existingNames = new Set(existingFields.map((f: { field_name: string }) => f.field_name));
-  for (const std of STANDARD_FIELDS) {
-    if (!existingNames.has(std.field_name)) {
-      await createField(token, tableId, std.field_name);
+async function updateFieldType(token: string, tableId: string, fieldId: string, field: { field_name: string; type: number; property?: object }) {
+  const body: Record<string, unknown> = { field_name: field.field_name, type: field.type };
+  if (field.property) body.property = field.property;
+  const res = await fetch(`${BASE_URL}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/fields/${fieldId}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (data.code !== 0) console.warn(`   ⚠️ Update field "${field.field_name}" failed: ${JSON.stringify(data).slice(0, 200)}`);
+}
+
+async function ensureFieldsExist(token: string, tableId: string, fields: { field_name: string; type: number; property?: object }[] = STANDARD_FIELDS) {
+  const existingFields = await listFields(token, tableId) as { field_id: string; field_name: string; type: number }[];
+  const existingByName = new Map(existingFields.map((f) => [f.field_name, f]));
+  for (const std of fields) {
+    const existing = existingByName.get(std.field_name);
+    if (!existing) {
+      await createField(token, tableId, std);
+      await new Promise(r => setTimeout(r, 300));
+    } else if (existing.type !== std.type) {
+      // Type mismatch — Lark cannot change type once records exist. Only try if empty.
+      console.log(`   ↻ Field "${std.field_name}" type=${existing.type}, need=${std.type} — attempting update...`);
+      await updateFieldType(token, tableId, existing.field_id, std);
       await new Promise(r => setTimeout(r, 300));
     }
   }
@@ -162,7 +195,7 @@ async function pushChannel(token: string, source: string, tableName: string) {
     tableId = await createTable(token, tableName);
   } else {
     tableId = table.table_id;
-    await ensureFieldsExist(token, tableId);
+    // Note: field type update requires empty table — done after deleteAllRecords below
   }
 
   // Pull data from DB (last N days)
@@ -171,7 +204,7 @@ async function pushChannel(token: string, source: string, tableName: string) {
   let from = 0;
   while (true) {
     const { data } = await admin.from("fact_touchpoint")
-      .select("event_type, title, detail, occurred_at, payload, dim_lead(full_name, email, phone, company, stage, assignee)")
+      .select("event_type, title, detail, occurred_at, payload, dim_lead(full_name, email, phone, company, stage, assignee, smax_tags)")
       .eq("source", source)
       .gte("occurred_at", cutoff)
       .order("occurred_at", { ascending: false })
@@ -185,11 +218,13 @@ async function pushChannel(token: string, source: string, tableName: string) {
 
   if (rows.length === 0) return;
 
-  // Transform to Lark records
+  // Transform to Lark records — DateTime fields as Unix milliseconds
   const records = rows.map((r) => {
     const l = r.dim_lead || {};
+    const tags: string[] = Array.isArray(l.smax_tags) ? l.smax_tags : [];
+    const timeMs = r.occurred_at ? new Date(r.occurred_at).getTime() : null;
     return {
-      "Time": r.occurred_at?.slice(0, 19) || "",
+      "Time": timeMs || null,
       "Event": r.event_type || "",
       "Lead Name": l.full_name || "",
       "Email": l.email || "",
@@ -197,15 +232,99 @@ async function pushChannel(token: string, source: string, tableName: string) {
       "Company": l.company || (l.email?.includes("@") ? l.email.split("@")[1] : ""),
       "Stage": l.stage || "",
       "TVV": l.assignee || "",
+      "Tag SMAX": tags.join(", "),
       "Title": (r.title || "").slice(0, 500),
       "Detail": (r.detail || "").slice(0, 500),
     };
   });
 
-  // Full refresh: delete all + insert
+  // Full refresh: delete all → update field types (only works when empty) → insert
   await deleteAllRecords(token, tableId);
+  await ensureFieldsExist(token, tableId, STANDARD_FIELDS);
   const inserted = await insertRecords(token, tableId, records);
   console.log(`   ✅ Inserted ${inserted} records to Lark`);
+}
+
+/**
+ * SMAX Hotleads table — 1 row per hot SMAX lead (dedup, not per-event).
+ * Format: Ngày, Tên, Email, SĐT, Tag SMAX, Platform, Score
+ * Purpose: Hoàng imports this table to Salesforce to auto-create leads.
+ * Filter: hot_score >= 70 (from V11 scoring) AND source lead surfaced by SMAX.
+ */
+async function pushSmaxHotleads(token: string) {
+  const tableName = "SMAX_Hotleads";
+  console.log(`\n🔥 [SMAX Hotleads] → ${tableName}`);
+
+  // Get or create table
+  const tables = await listTables(token);
+  let table = tables.find((t: { name: string }) => t.name === tableName);
+  let tableId: string;
+  if (!table) {
+    tableId = await createTable(token, tableName, HOTLEADS_FIELDS);
+  } else {
+    tableId = table.table_id;
+    // Field type update deferred until after deleteAllRecords (Lark requires empty)
+  }
+
+  // Pull hot lead ids from latest score date (paginated)
+  const { data: latest } = await admin
+    .from("fact_lead_score").select("scored_at")
+    .order("scored_at", { ascending: false }).limit(1).maybeSingle();
+  const scoredAt = latest?.scored_at ?? new Date().toISOString().slice(0, 10);
+
+  const scoreMap = new Map<string, number>();
+  let sFrom = 0;
+  while (sFrom < 50000) {
+    const { data: page } = await admin.from("fact_lead_score")
+      .select("lead_id, hot_score")
+      .eq("scored_at", scoredAt)
+      .gte("hot_score", 70)
+      .range(sFrom, sFrom + 999);
+    if (!page?.length) break;
+    for (const r of page) scoreMap.set(r.lead_id, r.hot_score ?? 0);
+    if (page.length < 1000) break;
+    sFrom += 1000;
+  }
+  console.log(`   ↳ ${scoreMap.size} hot-scored leads (score >= 70)`);
+
+  // Load SMAX leads (source = smax OR touched by smax) with metadata
+  const leadIds = Array.from(scoreMap.keys());
+  const leadRows: Record<string, unknown>[] = [];
+  for (let i = 0; i < leadIds.length; i += 500) {
+    const batch = leadIds.slice(i, i + 500);
+    const { data } = await admin.from("dim_lead")
+      .select("lead_id, full_name, email, phone, source, external_platform, smax_tags, first_seen_at, last_engagement_at, last_chat_at")
+      .eq("source", "smax")
+      .in("lead_id", batch);
+    if (data?.length) leadRows.push(...(data as Record<string, unknown>[]));
+  }
+  console.log(`   ↳ ${leadRows.length} SMAX-sourced hot leads`);
+
+  if (leadRows.length === 0) return;
+
+  // Sort by score DESC (highest first)
+  leadRows.sort((a, b) => (scoreMap.get(b.lead_id as string) ?? 0) - (scoreMap.get(a.lead_id as string) ?? 0));
+
+  // Transform to Lark records — Ngày as DateTime, Score as Number
+  const records = leadRows.map((l) => {
+    const tags: string[] = Array.isArray(l.smax_tags) ? (l.smax_tags as string[]) : [];
+    const ngay = (l.last_chat_at || l.last_engagement_at || l.first_seen_at) as string | null;
+    const ngayMs = ngay ? new Date(ngay).getTime() : null;
+    return {
+      "Ngày": ngayMs || null,
+      "Tên": (l.full_name as string) || "",
+      "Email": (l.email as string) || "",
+      "SĐT": (l.phone as string) || "",
+      "Tag SMAX": tags.join(", "),
+      "Platform": (l.external_platform as string) || "",
+      "Score": Number(scoreMap.get(l.lead_id as string) ?? 0),
+    };
+  });
+
+  await deleteAllRecords(token, tableId);
+  await ensureFieldsExist(token, tableId, HOTLEADS_FIELDS);
+  const inserted = await insertRecords(token, tableId, records);
+  console.log(`   ✅ Inserted ${inserted} hot leads to Lark (${tableName})`);
 }
 
 export async function pushToLark() {
@@ -223,6 +342,13 @@ export async function pushToLark() {
     } catch (err) {
       console.error(`❌ [${source}] failed: ${(err as Error).message}`);
     }
+  }
+
+  // New table for Hoàng → SF auto-import
+  try {
+    await pushSmaxHotleads(token);
+  } catch (err) {
+    console.error(`❌ [SMAX Hotleads] failed: ${(err as Error).message}`);
   }
 
   console.log("\n✨ Lark push complete");

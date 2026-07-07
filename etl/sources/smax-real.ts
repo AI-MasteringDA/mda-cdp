@@ -343,6 +343,40 @@ export async function pullFromSmaxReal() {
 
     const matchMap = new Map(matches.map((m) => [m.rawId, m.leadId]));
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Aggregate SMAX tags per lead (customer.tags + thread.tag_aliases)
+    // ═══════════════════════════════════════════════════════════════════════
+    const leadTagMap = new Map<string, Set<string>>();
+    for (const c of allCustomers) {
+      const leadId = matchMap.get(`smax-cust-${c.id}`);
+      if (!leadId || !c.tags?.length) continue;
+      if (!leadTagMap.has(leadId)) leadTagMap.set(leadId, new Set());
+      const set = leadTagMap.get(leadId)!;
+      for (const t of c.tags) if (t) set.add(String(t));
+    }
+    for (const t of allThreads) {
+      if (!t.customer?.id) continue;
+      const leadId = matchMap.get(t.id);
+      if (!leadId || !t.tag_aliases?.length) continue;
+      if (!leadTagMap.has(leadId)) leadTagMap.set(leadId, new Set());
+      const set = leadTagMap.get(leadId)!;
+      for (const tag of t.tag_aliases) if (tag) set.add(String(tag));
+    }
+
+    if (leadTagMap.size > 0) {
+      console.log(`   ↳ Updating smax_tags for ${leadTagMap.size} leads...`);
+      const updates = Array.from(leadTagMap.entries()).map(([lead_id, tags]) => ({
+        lead_id,
+        smax_tags: Array.from(tags),
+      }));
+      let updated = 0;
+      for (const u of updates) {
+        const { error } = await admin.from("dim_lead").update({ smax_tags: u.smax_tags }).eq("lead_id", u.lead_id);
+        if (!error) updated++;
+      }
+      console.log(`   ✓ Updated smax_tags on ${updated} leads`);
+    }
+
     // Historic-customer touchpoints (customers without a recent thread)
     // occurred_at = interaction.last (when they last chatted). No message text available.
     const customerTouchpoints = allCustomers
