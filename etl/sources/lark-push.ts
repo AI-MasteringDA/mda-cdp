@@ -20,7 +20,7 @@ const CHANNEL_TABLES: Record<string, string> = {
   web: "Wix_Database",
 };
 
-// Lark field types: 1=Text, 2=Number, 5=DateTime, 11=User, 13=Phone, 15=URL
+// Lark field types: 1=Text, 2=Number, 3=SingleSelect, 4=MultiSelect, 5=DateTime, 11=User
 // Standard fields for each channel table
 const STANDARD_FIELDS = [
   { field_name: "Time", type: 5, property: { date_formatter: "yyyy-MM-dd HH:mm", auto_fill: false } },
@@ -31,7 +31,7 @@ const STANDARD_FIELDS = [
   { field_name: "Company", type: 1 },
   { field_name: "Stage", type: 1 },
   { field_name: "TVV", type: 1 },
-  { field_name: "Tag SMAX", type: 1 },
+  { field_name: "Tag SMAX", type: 4 },  // MultiSelect
   { field_name: "Title", type: 1 },
   { field_name: "Detail", type: 1 },
 ];
@@ -42,8 +42,8 @@ const HOTLEADS_FIELDS = [
   { field_name: "Tên", type: 1 },
   { field_name: "Email", type: 1 },
   { field_name: "SĐT", type: 1 },
-  { field_name: "Tag SMAX", type: 1 },
-  { field_name: "Platform", type: 1 },
+  { field_name: "Tag SMAX", type: 4 },  // MultiSelect
+  { field_name: "Platform", type: 3 },  // SingleSelect (facebook/zalo/zaloweb/instagram/custom)
   { field_name: "Score", type: 2 },
 ];
 
@@ -232,7 +232,7 @@ async function pushChannel(token: string, source: string, tableName: string) {
       "Company": l.company || (l.email?.includes("@") ? l.email.split("@")[1] : ""),
       "Stage": l.stage || "",
       "TVV": l.assignee || "",
-      "Tag SMAX": tags.join(", "),
+      "Tag SMAX": tags.length > 0 ? tags : null,  // MultiSelect: array or null
       "Title": (r.title || "").slice(0, 500),
       "Detail": (r.detail || "").slice(0, 500),
     };
@@ -315,8 +315,8 @@ async function pushSmaxHotleads(token: string) {
       "Tên": (l.full_name as string) || "",
       "Email": (l.email as string) || "",
       "SĐT": (l.phone as string) || "",
-      "Tag SMAX": tags.join(", "),
-      "Platform": (l.external_platform as string) || "",
+      "Tag SMAX": tags.length > 0 ? tags : null,  // MultiSelect: array
+      "Platform": (l.external_platform as string) || "",  // SingleSelect: string
       "Score": Number(scoreMap.get(l.lead_id as string) ?? 0),
     };
   });

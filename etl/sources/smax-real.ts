@@ -267,7 +267,7 @@ export async function pullFromSmaxReal() {
       created_at?: string;
       updated_at?: string;
       interaction?: { first?: string; last?: string };
-      tags?: string[];
+      tags?: (string | { id?: string; name?: string; alias?: string; time?: string })[];
     };
     const CUSTOMER_SIZE = Number(process.env.SMAX_CUSTOMER_SIZE || 10000);
     const customerLookbackDays = lookbackDays || 365;
@@ -344,23 +344,55 @@ export async function pullFromSmaxReal() {
     const matchMap = new Map(matches.map((m) => [m.rawId, m.leadId]));
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Aggregate SMAX tags per lead (customer.tags + thread.tag_aliases)
+    // Aggregate SMAX tags per lead
+    // - customer.tags: array of objects {id, name, alias, time} → extract .name
+    // - thread.tag_aliases: array of strings → keep as-is
+    // Also map customer_id → leadId for customers that have BOTH a thread and tags
     // ═══════════════════════════════════════════════════════════════════════
-    const leadTagMap = new Map<string, Set<string>>();
+    const customerIdToLeadId = new Map<string, string>();
+    for (const t of allThreads) {
+      if (t.customer?.id) {
+        const lid = matchMap.get(t.id);
+        if (lid) customerIdToLeadId.set(t.customer.id, lid);
+      }
+    }
     for (const c of allCustomers) {
-      const leadId = matchMap.get(`smax-cust-${c.id}`);
+      const lid = matchMap.get(`smax-cust-${c.id}`);
+      if (lid) customerIdToLeadId.set(c.id, lid);
+    }
+
+    const leadTagMap = new Map<string, Set<string>>();
+    const extractTagName = (raw: unknown): string | null => {
+      if (!raw) return null;
+      if (typeof raw === "string") return raw.trim() || null;
+      if (typeof raw === "object") {
+        const obj = raw as Record<string, unknown>;
+        const name = obj.name ?? obj.alias ?? obj.tag_name;
+        if (typeof name === "string") return name.trim() || null;
+      }
+      return null;
+    };
+
+    for (const c of allCustomers) {
+      const leadId = customerIdToLeadId.get(c.id);
       if (!leadId || !c.tags?.length) continue;
       if (!leadTagMap.has(leadId)) leadTagMap.set(leadId, new Set());
       const set = leadTagMap.get(leadId)!;
-      for (const t of c.tags) if (t) set.add(String(t));
+      for (const tag of c.tags) {
+        const name = extractTagName(tag);
+        if (name) set.add(name);
+      }
     }
     for (const t of allThreads) {
-      if (!t.customer?.id) continue;
-      const leadId = matchMap.get(t.id);
-      if (!leadId || !t.tag_aliases?.length) continue;
+      if (!t.customer?.id || !t.tag_aliases?.length) continue;
+      const leadId = customerIdToLeadId.get(t.customer.id);
+      if (!leadId) continue;
       if (!leadTagMap.has(leadId)) leadTagMap.set(leadId, new Set());
       const set = leadTagMap.get(leadId)!;
-      for (const tag of t.tag_aliases) if (tag) set.add(String(tag));
+      for (const tag of t.tag_aliases) {
+        const name = extractTagName(tag);
+        if (name) set.add(name);
+      }
     }
 
     if (leadTagMap.size > 0) {
