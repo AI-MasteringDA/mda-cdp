@@ -258,6 +258,12 @@ export async function pullFromSmaxReal() {
       id: string;
       name?: string;
       profile_name?: string;
+      // SMAX API returns email/phone as SINGULAR strings on the customer object
+      // (verified against real payload). The plural arrays exist too but are
+      // almost always empty. Reading only the plurals silently lost contact
+      // info for most SMAX-sourced leads.
+      email?: string;
+      phone?: string;
       emails?: string[];
       phones?: string[];
       platform?: string;
@@ -313,8 +319,10 @@ export async function pullFromSmaxReal() {
     const customerIdentityRecords = allCustomers
       .filter((c) => !threadCustomerIds.has(c.id))
       .map((c) => {
-        const nativeEmail = toStringOrNull(c.emails?.[0]);
-        const nativePhone = toStringOrNull(c.phones?.[0]);
+        // Prefer singular fields (that's where SMAX actually puts them); fall
+        // back to plurals for any customer that does use the array shape.
+        const nativeEmail = toStringOrNull(c.email) || toStringOrNull(c.emails?.[0]);
+        const nativePhone = toStringOrNull(c.phone) || toStringOrNull(c.phones?.[0]);
         const name = c.name || c.profile_name || null;
         const scanned = (!nativeEmail || !nativePhone)
           ? scanEmailPhone(name)
