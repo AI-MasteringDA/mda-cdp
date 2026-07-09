@@ -309,7 +309,9 @@ function normalizeFieldValue(v: unknown): unknown {
     if (v.length === 0) return null;
     return [...v].map(x => String(x)).sort();
   }
-  if (typeof v === "number") return v;
+  // Always stringify scalars — Lark returns Number-type fields (e.g. "Total Chats")
+  // as strings on read even though they accept numbers on write, so 50 !== "50"
+  // would flag every row as changed.
   return String(v);
 }
 
