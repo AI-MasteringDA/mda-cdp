@@ -7,6 +7,12 @@ on:
   # Allow manual trigger from GitHub UI
   workflow_dispatch:
 
+# Concurrency lock: SMAX ETL runs 4-5 min. If it ever exceeds 5 min (SMAX API
+# slow / retries), don't spawn a second parallel run — queue it instead.
+concurrency:
+  group: smax-etl
+  cancel-in-progress: false
+
 jobs:
   smax-etl:
     runs-on: ubuntu-latest

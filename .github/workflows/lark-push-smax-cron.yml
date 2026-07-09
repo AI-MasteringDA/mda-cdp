@@ -7,6 +7,14 @@ on:
     - cron: '*/5 * * * *'
   workflow_dispatch:
 
+# Concurrency lock: push takes 7-8 min but cron fires every 5 min. Without this
+# lock, run N+1 starts `deleteAllRecords` while run N is still inserting, wiping
+# the fresh data. `cancel-in-progress: false` queues the next run until the
+# current finishes (safer than cancel: no half-written state in Lark).
+concurrency:
+  group: lark-push-smax
+  cancel-in-progress: false
+
 jobs:
   lark-push-smax:
     runs-on: ubuntu-latest

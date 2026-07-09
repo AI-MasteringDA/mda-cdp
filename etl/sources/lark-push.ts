@@ -372,7 +372,7 @@ async function pushSmaxLeadSnapshot(token: string) {
     const batch = idsArr.slice(i, i + 500);
     const { data } = await admin
       .from("fact_touchpoint")
-      .select("lead_id, event_type, title, detail, occurred_at")
+      .select("lead_id, event_type, title, detail, occurred_at, payload")
       .eq("source", "smax")
       .in("lead_id", batch)
       .order("occurred_at", { ascending: false });
@@ -395,17 +395,25 @@ async function pushSmaxLeadSnapshot(token: string) {
   }
 
   // 4. Build 1 record per lead
+  // NOTE: fact_touchpoint may reference lead_ids that no longer exist in dim_lead
+  // (orphans from identity resolution churn). We still push the row using the
+  // touchpoint's own customer_name from payload, else fallback to empty strings.
+  // This avoids silently dropping >98% of SMAX leads from Lark.
+  let orphanCount = 0;
   const records = idsArr
     .map((lid) => {
       const stats = leadStats.get(lid);
-      const info = leadInfo.get(lid);
-      if (!stats || !info) return null;
+      if (!stats) return null;
+      const info = leadInfo.get(lid) || {};
+      if (!leadInfo.has(lid)) orphanCount++;
       const tags: string[] = Array.isArray(info.smax_tags) ? info.smax_tags : [];
       const timeMs = stats.latest.occurred_at ? new Date(stats.latest.occurred_at).getTime() : null;
+      const fallbackName =
+        (stats.latest as { payload?: { customer_name?: string } })?.payload?.customer_name || "";
       return {
         "Time": timeMs || null,
         "Event": stats.latest.event_type || "",
-        "Lead Name": info.full_name || "",
+        "Lead Name": info.full_name || fallbackName || "",
         "Email": info.email || "",
         "Phone": info.phone || "",
         "Company": info.company || (info.email?.includes("@") ? info.email.split("@")[1] : ""),
@@ -418,6 +426,9 @@ async function pushSmaxLeadSnapshot(token: string) {
       };
     })
     .filter(Boolean);
+  if (orphanCount > 0) {
+    console.log(`   ⚠️  ${orphanCount} SMAX leads have no dim_lead row (pushed with fallback name from payload)`);
+  }
 
   console.log(`   ↳ Building ${records.length} lead-snapshot rows`);
 
