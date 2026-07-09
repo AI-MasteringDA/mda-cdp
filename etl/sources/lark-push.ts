@@ -47,6 +47,9 @@ const STANDARD_FIELDS = [
 ];
 
 // SMAX_Database columns (LEAD SNAPSHOT — 1 row per unique lead, not per event)
+// "Lead ID" holds dim_lead.lead_id UUID as a hidden stable key so the diff-based
+// UPSERT can match Lark record ↔ DB lead. Users don't need to see it but it must
+// exist for the push to work; sales can hide the column in their Lark view.
 const SMAX_LEAD_FIELDS = [
   { field_name: "Time", type: 5, property: { date_formatter: "yyyy-MM-dd HH:mm", auto_fill: false } },
   { field_name: "Event", type: 1 },      // latest event type
@@ -61,6 +64,7 @@ const SMAX_LEAD_FIELDS = [
   { field_name: "Total Chats", type: 2 },
   { field_name: "Title", type: 1 },      // latest chat title
   { field_name: "Detail", type: 1 },     // latest chat detail
+  { field_name: "Lead ID", type: 1 },    // dim_lead.lead_id UUID — key for diff-based UPSERT (safe to hide in view)
 ];
 
 // SMAX platform prefixes to strip from external_profile_id so the value
@@ -83,6 +87,7 @@ const HOTLEADS_FIELDS = [
   { field_name: "Tag SMAX", type: 4 },  // MultiSelect
   { field_name: "Platform", type: 3 },  // SingleSelect (facebook/zalo/zaloweb/instagram/custom)
   { field_name: "Score", type: 2 },
+  { field_name: "Lead ID", type: 1 },   // dim_lead.lead_id UUID — UPSERT key
 ];
 
 async function getToken(): Promise<string> {
@@ -230,6 +235,104 @@ async function getMaxDateTimeField(token: string, tableId: string, fieldName: st
     pageToken = data.data.page_token;
   }
   return maxMs > 0 ? maxMs : null;
+}
+
+/**
+ * Fetch every record with its fields — used by diff-based UPSERT so we can
+ * compare current Lark state to the new snapshot and only mutate what changed.
+ */
+async function listAllRecordsWithFields(token: string, tableId: string): Promise<Array<{ record_id: string; fields: Record<string, unknown> }>> {
+  const out: Array<{ record_id: string; fields: Record<string, unknown> }> = [];
+  let pageToken: string | undefined;
+  while (true) {
+    const url = new URL(`${BASE_URL}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/records`);
+    url.searchParams.set("page_size", "500");
+    if (pageToken) url.searchParams.set("page_token", pageToken);
+    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    const items = data.data?.items || [];
+    for (const it of items) out.push({ record_id: it.record_id, fields: it.fields || {} });
+    if (!data.data?.has_more) break;
+    pageToken = data.data.page_token;
+  }
+  return out;
+}
+
+async function updateRecords(token: string, tableId: string, updates: Array<{ record_id: string; fields: Record<string, unknown> }>) {
+  let updated = 0;
+  for (let i = 0; i < updates.length; i += 500) {
+    const batch = updates.slice(i, i + 500);
+    const res = await fetch(`${BASE_URL}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/records/batch_update`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ records: batch }),
+    });
+    const data = await res.json();
+    if (data.code === 0) updated += batch.length;
+    else console.warn(`   ⚠️ Update batch failed: ${JSON.stringify(data).slice(0, 300)}`);
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return updated;
+}
+
+async function deleteRecords(token: string, tableId: string, recordIds: string[]) {
+  let deleted = 0;
+  for (let i = 0; i < recordIds.length; i += 500) {
+    const batch = recordIds.slice(i, i + 500);
+    const res = await fetch(`${BASE_URL}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/records/batch_delete`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ records: batch }),
+    });
+    const data = await res.json();
+    if (data.code === 0) deleted += batch.length;
+    else console.warn(`   ⚠️ Delete batch failed: ${JSON.stringify(data).slice(0, 300)}`);
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return deleted;
+}
+
+/**
+ * Normalize a Lark field value into a JSON-serializable shape suitable for
+ * equality comparison. Text fields come back as either a plain string OR as
+ * [{type:'text', text:'...'}] wrappers depending on how they were written,
+ * and multi-selects can be null vs [] — normalize both so we don't churn.
+ */
+function normalizeFieldValue(v: unknown): unknown {
+  if (v == null || v === "") return null;
+  // Lark rich-text array format: [{type:'text', text:'foo'}]
+  if (Array.isArray(v) && v.length > 0 && typeof v[0] === "object" && v[0] !== null && "text" in (v[0] as Record<string, unknown>)) {
+    return (v as Array<{ text: string }>).map(x => x.text).join("");
+  }
+  // MultiSelect array: sort for stable equality
+  if (Array.isArray(v)) {
+    if (v.length === 0) return null;
+    return [...v].map(x => String(x)).sort();
+  }
+  if (typeof v === "number") return v;
+  return String(v);
+}
+
+/**
+ * Compare a new-record's fields to what's currently in Lark. Returns the
+ * subset of fields that actually differ (so we send small patches, not full
+ * row overwrites). Returns null if nothing differs — skip the update entirely.
+ */
+function diffFields(newFields: Record<string, unknown>, existingFields: Record<string, unknown>): Record<string, unknown> | null {
+  const patch: Record<string, unknown> = {};
+  let changed = false;
+  for (const key of Object.keys(newFields)) {
+    const a = normalizeFieldValue(newFields[key]);
+    const b = normalizeFieldValue(existingFields[key]);
+    let equal = false;
+    if (a === b) equal = true;
+    else if (Array.isArray(a) && Array.isArray(b)) equal = a.length === b.length && a.every((x, i) => x === b[i]);
+    if (!equal) {
+      patch[key] = newFields[key];
+      changed = true;
+    }
+  }
+  return changed ? patch : null;
 }
 
 async function insertRecords(token: string, tableId: string, records: unknown[]) {
@@ -410,23 +513,22 @@ async function pushSmaxLeadSnapshot(token: string) {
     for (const l of data ?? []) leadInfo.set(l.lead_id, l);
   }
 
-  // 4. Build 1 record per lead
-  // NOTE: fact_touchpoint may reference lead_ids that no longer exist in dim_lead
-  // (orphans from identity resolution churn). We still push the row using the
-  // touchpoint's own customer_name from payload, else fallback to empty strings.
-  // This avoids silently dropping >98% of SMAX leads from Lark.
+  // 4. Build 1 record per lead. Each record carries "Lead ID" (UUID) as the
+  //    stable key that the diff-based UPSERT uses to match Lark rows to DB leads.
   let orphanCount = 0;
-  const records = idsArr
-    .map((lid) => {
-      const stats = leadStats.get(lid);
-      if (!stats) return null;
-      const info = leadInfo.get(lid) || {};
-      if (!leadInfo.has(lid)) orphanCount++;
-      const tags: string[] = Array.isArray(info.smax_tags) ? info.smax_tags : [];
-      const timeMs = stats.latest.occurred_at ? new Date(stats.latest.occurred_at).getTime() : null;
-      const fallbackName =
-        (stats.latest as { payload?: { customer_name?: string } })?.payload?.customer_name || "";
-      return {
+  const records: Array<{ leadId: string; fields: Record<string, unknown> }> = [];
+  for (const lid of idsArr) {
+    const stats = leadStats.get(lid);
+    if (!stats) continue;
+    const info = leadInfo.get(lid) || {};
+    if (!leadInfo.has(lid)) orphanCount++;
+    const tags: string[] = Array.isArray(info.smax_tags) ? info.smax_tags : [];
+    const timeMs = stats.latest.occurred_at ? new Date(stats.latest.occurred_at).getTime() : null;
+    const fallbackName =
+      (stats.latest as { payload?: { customer_name?: string } })?.payload?.customer_name || "";
+    records.push({
+      leadId: lid,
+      fields: {
         "Time": timeMs || null,
         "Event": stats.latest.event_type || "",
         "Lead Name": info.full_name || fallbackName || "",
@@ -440,20 +542,73 @@ async function pushSmaxLeadSnapshot(token: string) {
         "Total Chats": stats.count,
         "Title": (stats.latest.title || "").slice(0, 500),
         "Detail": (stats.latest.detail || "").slice(0, 500),
-      };
-    })
-    .filter(Boolean);
+        "Lead ID": lid,
+      },
+    });
+  }
   if (orphanCount > 0) {
     console.log(`   ⚠️  ${orphanCount} SMAX leads have no dim_lead row (pushed with fallback name from payload)`);
   }
-
   console.log(`   ↳ Building ${records.length} lead-snapshot rows`);
 
-  // 5. Full refresh (dedup snapshot doesn't support incremental cleanly)
-  await deleteAllRecords(token, tableId);
+  // 5. Ensure schema (adds new fields; no-op once table is set up).
   await ensureFieldsExist(token, tableId, SMAX_LEAD_FIELDS);
-  const inserted = await insertRecords(token, tableId, records);
-  console.log(`   ✅ Inserted ${inserted} lead snapshots to Lark`);
+
+  // 6. Diff-based UPSERT — avoids the empty flash of delete+reinsert.
+  //    Match Lark rows to DB rows by "Lead ID". If no existing row has a
+  //    "Lead ID" populated (first run after this refactor), fall back to
+  //    delete-all + insert to bootstrap the key on every row.
+  const existing = await listAllRecordsWithFields(token, tableId);
+  const hasKeyCoverage = existing.length === 0 || existing.some(r => typeof r.fields["Lead ID"] === "string" && r.fields["Lead ID"]);
+
+  if (!hasKeyCoverage) {
+    console.log(`   ⚙️  First run after UPSERT refactor — bootstrapping "Lead ID" key via full refresh`);
+    await deleteAllRecords(token, tableId);
+    const inserted = await insertRecords(token, tableId, records.map(r => r.fields));
+    console.log(`   ✅ Bootstrap inserted ${inserted} rows`);
+    return;
+  }
+
+  // Build map of existing rows: lead_id → {record_id, fields}
+  const existingByLeadId = new Map<string, { record_id: string; fields: Record<string, unknown> }>();
+  const existingWithoutKey: string[] = []; // record_ids that somehow lost their Lead ID
+  for (const r of existing) {
+    const key = normalizeFieldValue(r.fields["Lead ID"]);
+    if (typeof key === "string" && key) existingByLeadId.set(key, r);
+    else existingWithoutKey.push(r.record_id);
+  }
+
+  const toInsert: Array<Record<string, unknown>> = [];
+  const toUpdate: Array<{ record_id: string; fields: Record<string, unknown> }> = [];
+  const seenLeadIds = new Set<string>();
+  for (const r of records) {
+    seenLeadIds.add(r.leadId);
+    const cur = existingByLeadId.get(r.leadId);
+    if (!cur) { toInsert.push(r.fields); continue; }
+    const patch = diffFields(r.fields, cur.fields);
+    if (patch) toUpdate.push({ record_id: cur.record_id, fields: patch });
+  }
+  const toDelete = [
+    ...Array.from(existingByLeadId.entries()).filter(([lid]) => !seenLeadIds.has(lid)).map(([, r]) => r.record_id),
+    ...existingWithoutKey, // orphaned rows without a Lead ID key — safe to remove
+  ];
+
+  console.log(`   ↻ UPSERT plan: insert=${toInsert.length}  update=${toUpdate.length}  delete=${toDelete.length}  unchanged=${records.length - toInsert.length - toUpdate.length}`);
+
+  // Apply in an order that keeps Lark populated: insert first, then update,
+  // then delete stale. Never leaves the table below its current row count.
+  if (toInsert.length) {
+    const n = await insertRecords(token, tableId, toInsert);
+    console.log(`   ✅ Inserted ${n} new leads`);
+  }
+  if (toUpdate.length) {
+    const n = await updateRecords(token, tableId, toUpdate);
+    console.log(`   ✅ Updated ${n} changed leads`);
+  }
+  if (toDelete.length) {
+    const n = await deleteRecords(token, tableId, toDelete);
+    console.log(`   ✅ Deleted ${n} stale rows`);
+  }
 }
 
 /**
@@ -517,26 +672,77 @@ async function pushSmaxHotleads(token: string) {
   // Sort by score DESC (highest first)
   leadRows.sort((a, b) => (scoreMap.get(b.lead_id as string) ?? 0) - (scoreMap.get(a.lead_id as string) ?? 0));
 
-  // Transform to Lark records — Ngày as DateTime, Score as Number
-  const records = leadRows.map((l) => {
+  // Transform to Lark records — Ngày as DateTime, Score as Number. Each record
+  // includes "Lead ID" (UUID) as the UPSERT key.
+  const records: Array<{ leadId: string; fields: Record<string, unknown> }> = leadRows.map((l) => {
     const tags: string[] = Array.isArray(l.smax_tags) ? (l.smax_tags as string[]) : [];
     const ngay = (l.last_chat_at || l.last_engagement_at || l.first_seen_at) as string | null;
     const ngayMs = ngay ? new Date(ngay).getTime() : null;
     return {
-      "Ngày": ngayMs || null,
-      "Tên": (l.full_name as string) || "",
-      "Email": (l.email as string) || "",
-      "SĐT": (l.phone as string) || "",
-      "Tag SMAX": tags.length > 0 ? tags : null,  // MultiSelect: array
-      "Platform": (l.external_platform as string) || "",  // SingleSelect: string
-      "Score": Number(scoreMap.get(l.lead_id as string) ?? 0),
+      leadId: l.lead_id as string,
+      fields: {
+        "Ngày": ngayMs || null,
+        "Tên": (l.full_name as string) || "",
+        "Email": (l.email as string) || "",
+        "SĐT": (l.phone as string) || "",
+        "Tag SMAX": tags.length > 0 ? tags : null,
+        "Platform": (l.external_platform as string) || "",
+        "Score": Number(scoreMap.get(l.lead_id as string) ?? 0),
+        "Lead ID": l.lead_id as string,
+      },
     };
   });
 
-  await deleteAllRecords(token, tableId);
   await ensureFieldsExist(token, tableId, HOTLEADS_FIELDS);
-  const inserted = await insertRecords(token, tableId, records);
-  console.log(`   ✅ Inserted ${inserted} hot leads to Lark (${tableName})`);
+
+  const existing = await listAllRecordsWithFields(token, tableId);
+  const hasKeyCoverage = existing.length === 0 || existing.some(r => typeof r.fields["Lead ID"] === "string" && r.fields["Lead ID"]);
+
+  if (!hasKeyCoverage) {
+    console.log(`   ⚙️  Bootstrapping "Lead ID" key via full refresh`);
+    await deleteAllRecords(token, tableId);
+    const n = await insertRecords(token, tableId, records.map(r => r.fields));
+    console.log(`   ✅ Bootstrap inserted ${n} rows`);
+    return;
+  }
+
+  const existingByLeadId = new Map<string, { record_id: string; fields: Record<string, unknown> }>();
+  const existingWithoutKey: string[] = [];
+  for (const r of existing) {
+    const key = normalizeFieldValue(r.fields["Lead ID"]);
+    if (typeof key === "string" && key) existingByLeadId.set(key, r);
+    else existingWithoutKey.push(r.record_id);
+  }
+
+  const toInsert: Array<Record<string, unknown>> = [];
+  const toUpdate: Array<{ record_id: string; fields: Record<string, unknown> }> = [];
+  const seenLeadIds = new Set<string>();
+  for (const r of records) {
+    seenLeadIds.add(r.leadId);
+    const cur = existingByLeadId.get(r.leadId);
+    if (!cur) { toInsert.push(r.fields); continue; }
+    const patch = diffFields(r.fields, cur.fields);
+    if (patch) toUpdate.push({ record_id: cur.record_id, fields: patch });
+  }
+  const toDelete = [
+    ...Array.from(existingByLeadId.entries()).filter(([lid]) => !seenLeadIds.has(lid)).map(([, r]) => r.record_id),
+    ...existingWithoutKey,
+  ];
+
+  console.log(`   ↻ UPSERT plan: insert=${toInsert.length}  update=${toUpdate.length}  delete=${toDelete.length}  unchanged=${records.length - toInsert.length - toUpdate.length}`);
+
+  if (toInsert.length) {
+    const n = await insertRecords(token, tableId, toInsert);
+    console.log(`   ✅ Inserted ${n} new hot leads`);
+  }
+  if (toUpdate.length) {
+    const n = await updateRecords(token, tableId, toUpdate);
+    console.log(`   ✅ Updated ${n} changed hot leads`);
+  }
+  if (toDelete.length) {
+    const n = await deleteRecords(token, tableId, toDelete);
+    console.log(`   ✅ Deleted ${n} stale rows`);
+  }
 }
 
 export async function pushToLark() {
