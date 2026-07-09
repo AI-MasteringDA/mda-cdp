@@ -46,6 +46,22 @@ const STANDARD_FIELDS = [
   { field_name: "Detail", type: 1 },
 ];
 
+// SMAX_Database columns (LEAD SNAPSHOT — 1 row per unique lead, not per event)
+const SMAX_LEAD_FIELDS = [
+  { field_name: "Time", type: 5, property: { date_formatter: "yyyy-MM-dd HH:mm", auto_fill: false } },
+  { field_name: "Event", type: 1 },      // latest event type
+  { field_name: "Lead Name", type: 1 },
+  { field_name: "Email", type: 1 },
+  { field_name: "Phone", type: 1 },
+  { field_name: "Company", type: 1 },
+  { field_name: "Stage", type: 1 },
+  { field_name: "TVV", type: 1 },
+  { field_name: "Tag SMAX", type: 4 },   // current tags
+  { field_name: "Total Chats", type: 2 },
+  { field_name: "Title", type: 1 },      // latest chat title
+  { field_name: "Detail", type: 1 },     // latest chat detail
+];
+
 // SMAX Hotleads table: dedup by lead (1 row per lead) — for Hoàng import to SF
 const HOTLEADS_FIELDS = [
   { field_name: "Ngày", type: 5, property: { date_formatter: "yyyy-MM-dd HH:mm", auto_fill: false } },
@@ -312,6 +328,107 @@ async function pushChannel(token: string, source: string, tableName: string) {
 }
 
 /**
+ * SMAX_Database — 1 row per lead (snapshot, not per-event).
+ * Time = last chat, Tag SMAX = current tags, Title/Detail = latest chat content.
+ * Full-refresh every push (small ~10k rows, fast).
+ */
+async function pushSmaxLeadSnapshot(token: string) {
+  const tableName = "SMAX_Database";
+  console.log(`\n📦 [smax] → ${tableName} (LEAD SNAPSHOT)`);
+
+  const tables = await listTables(token);
+  const table = tables.find((t: { name: string }) => t.name === tableName);
+  let tableId: string;
+  if (!table) tableId = await createTable(token, tableName, SMAX_LEAD_FIELDS);
+  else tableId = table.table_id;
+
+  // Pull ALL SMAX leads with their latest touchpoint
+  const cutoffMs = Date.now() - DAYS_TO_PUSH * 86400_000;
+  const cutoff = new Date(cutoffMs).toISOString();
+
+  // 1. Get lead IDs with SMAX touchpoints in window
+  const leadIds = new Set<string>();
+  let from = 0;
+  while (from < 50000) {
+    const { data } = await admin
+      .from("fact_touchpoint")
+      .select("lead_id")
+      .eq("source", "smax")
+      .gte("occurred_at", cutoff)
+      .range(from, from + 999);
+    if (!data?.length) break;
+    for (const r of data) if (r.lead_id) leadIds.add(r.lead_id);
+    if (data.length < 1000) break;
+    from += 1000;
+  }
+  console.log(`   ↳ ${leadIds.size} unique SMAX leads in ${DAYS_TO_PUSH}d window`);
+
+  if (leadIds.size === 0) return;
+
+  // 2. For each lead, find latest touchpoint + total count
+  const leadStats = new Map<string, { latest: any; count: number }>();
+  const idsArr = Array.from(leadIds);
+  for (let i = 0; i < idsArr.length; i += 500) {
+    const batch = idsArr.slice(i, i + 500);
+    const { data } = await admin
+      .from("fact_touchpoint")
+      .select("lead_id, event_type, title, detail, occurred_at")
+      .eq("source", "smax")
+      .in("lead_id", batch)
+      .order("occurred_at", { ascending: false });
+    for (const r of data ?? []) {
+      const cur = leadStats.get(r.lead_id);
+      if (!cur) leadStats.set(r.lead_id, { latest: r, count: 1 });
+      else cur.count++;
+    }
+  }
+
+  // 3. Load lead metadata
+  const leadInfo = new Map<string, any>();
+  for (let i = 0; i < idsArr.length; i += 500) {
+    const batch = idsArr.slice(i, i + 500);
+    const { data } = await admin
+      .from("dim_lead")
+      .select("lead_id, full_name, email, phone, company, stage, assignee, smax_tags")
+      .in("lead_id", batch);
+    for (const l of data ?? []) leadInfo.set(l.lead_id, l);
+  }
+
+  // 4. Build 1 record per lead
+  const records = idsArr
+    .map((lid) => {
+      const stats = leadStats.get(lid);
+      const info = leadInfo.get(lid);
+      if (!stats || !info) return null;
+      const tags: string[] = Array.isArray(info.smax_tags) ? info.smax_tags : [];
+      const timeMs = stats.latest.occurred_at ? new Date(stats.latest.occurred_at).getTime() : null;
+      return {
+        "Time": timeMs || null,
+        "Event": stats.latest.event_type || "",
+        "Lead Name": info.full_name || "",
+        "Email": info.email || "",
+        "Phone": info.phone || "",
+        "Company": info.company || (info.email?.includes("@") ? info.email.split("@")[1] : ""),
+        "Stage": info.stage || "",
+        "TVV": info.assignee || "",
+        "Tag SMAX": tags.length > 0 ? tags : null,
+        "Total Chats": stats.count,
+        "Title": (stats.latest.title || "").slice(0, 500),
+        "Detail": (stats.latest.detail || "").slice(0, 500),
+      };
+    })
+    .filter(Boolean);
+
+  console.log(`   ↳ Building ${records.length} lead-snapshot rows`);
+
+  // 5. Full refresh (dedup snapshot doesn't support incremental cleanly)
+  await deleteAllRecords(token, tableId);
+  await ensureFieldsExist(token, tableId, SMAX_LEAD_FIELDS);
+  const inserted = await insertRecords(token, tableId, records);
+  console.log(`   ✅ Inserted ${inserted} lead snapshots to Lark`);
+}
+
+/**
  * SMAX Hotleads table — 1 row per hot SMAX lead (dedup, not per-event).
  * Format: Ngày, Tên, Email, SĐT, Tag SMAX, Platform, Score
  * Purpose: Hoàng imports this table to Salesforce to auto-create leads.
@@ -421,7 +538,13 @@ export async function pushToLark() {
       continue;
     }
     try {
-      await pushChannel(token, source, tableName);
+      // SMAX gets special lead-snapshot treatment (1 row / lead, dedup)
+      // Non-SMAX sources still use per-event rows
+      if (source === "smax") {
+        await pushSmaxLeadSnapshot(token);
+      } else {
+        await pushChannel(token, source, tableName);
+      }
     } catch (err) {
       console.error(`❌ [${source}] failed: ${(err as Error).message}`);
     }
