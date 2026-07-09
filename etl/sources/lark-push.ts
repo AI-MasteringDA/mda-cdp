@@ -366,10 +366,14 @@ async function pushSmaxLeadSnapshot(token: string) {
   if (leadIds.size === 0) return;
 
   // 2. For each lead, find latest touchpoint + total count
+  // BATCH_LOOKUP=100 because Supabase/PostgREST URL length caps out around ~8KB.
+  // 500 UUIDs (~22KB URL) silently returns empty; 100 UUIDs (~4.5KB) works.
+  // Prior bug: batch=500 caused >98% of leads to be dropped from Lark.
+  const BATCH_LOOKUP = 100;
   const leadStats = new Map<string, { latest: any; count: number }>();
   const idsArr = Array.from(leadIds);
-  for (let i = 0; i < idsArr.length; i += 500) {
-    const batch = idsArr.slice(i, i + 500);
+  for (let i = 0; i < idsArr.length; i += BATCH_LOOKUP) {
+    const batch = idsArr.slice(i, i + BATCH_LOOKUP);
     const { data } = await admin
       .from("fact_touchpoint")
       .select("lead_id, event_type, title, detail, occurred_at, payload")
@@ -383,10 +387,10 @@ async function pushSmaxLeadSnapshot(token: string) {
     }
   }
 
-  // 3. Load lead metadata
+  // 3. Load lead metadata (same URL-length constraint — batch 100)
   const leadInfo = new Map<string, any>();
-  for (let i = 0; i < idsArr.length; i += 500) {
-    const batch = idsArr.slice(i, i + 500);
+  for (let i = 0; i < idsArr.length; i += BATCH_LOOKUP) {
+    const batch = idsArr.slice(i, i + BATCH_LOOKUP);
     const { data } = await admin
       .from("dim_lead")
       .select("lead_id, full_name, email, phone, company, stage, assignee, smax_tags")
@@ -482,10 +486,11 @@ async function pushSmaxHotleads(token: string) {
   console.log(`   ↳ ${scoreMap.size} hot-scored leads (score >= 70)`);
 
   // Load SMAX leads (source = smax OR touched by smax) with metadata
+  // Batch 100 — Supabase URL length cap ~8KB, 500 UUIDs silently returns empty.
   const leadIds = Array.from(scoreMap.keys());
   const leadRows: Record<string, unknown>[] = [];
-  for (let i = 0; i < leadIds.length; i += 500) {
-    const batch = leadIds.slice(i, i + 500);
+  for (let i = 0; i < leadIds.length; i += 100) {
+    const batch = leadIds.slice(i, i + 100);
     const { data } = await admin.from("dim_lead")
       .select("lead_id, full_name, email, phone, source, external_platform, smax_tags, first_seen_at, last_engagement_at, last_chat_at")
       .eq("source", "smax")

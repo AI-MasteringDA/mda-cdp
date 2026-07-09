@@ -537,8 +537,11 @@ export async function pullFromSmaxReal() {
     if (leadTagMap.size > 0) {
       const leadIds = Array.from(leadTagMap.keys());
       const existingTagsByLead = new Map<string, string[]>();
-      for (let i = 0; i < leadIds.length; i += 500) {
-        const batch = leadIds.slice(i, i + 500);
+      // Batch 100 — Supabase .in() with 500 UUIDs (URL ~22KB) silently returns
+      // empty. That made union() see existing=[] for most leads and effectively
+      // OVERWRITE tags on every push (only new tags kept, all history nuked).
+      for (let i = 0; i < leadIds.length; i += 100) {
+        const batch = leadIds.slice(i, i + 100);
         const { data } = await admin.from("dim_lead").select("lead_id, smax_tags").in("lead_id", batch);
         for (const row of data ?? []) {
           existingTagsByLead.set(row.lead_id, Array.isArray(row.smax_tags) ? row.smax_tags : []);
