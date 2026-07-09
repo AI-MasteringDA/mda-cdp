@@ -51,6 +51,7 @@ const SMAX_LEAD_FIELDS = [
   { field_name: "Time", type: 5, property: { date_formatter: "yyyy-MM-dd HH:mm", auto_fill: false } },
   { field_name: "Event", type: 1 },      // latest event type
   { field_name: "Lead Name", type: 1 },
+  { field_name: "ID", type: 1 },         // SMAX platform-native customer ID (matches "Id" shown in SMAX UI)
   { field_name: "Email", type: 1 },
   { field_name: "Phone", type: 1 },
   { field_name: "Company", type: 1 },
@@ -61,6 +62,17 @@ const SMAX_LEAD_FIELDS = [
   { field_name: "Title", type: 1 },      // latest chat title
   { field_name: "Detail", type: 1 },     // latest chat detail
 ];
+
+// SMAX platform prefixes to strip from external_profile_id so the value
+// matches what SMAX's own UI displays (e.g. "zlw3882071168794108534" → "3882071168794108534").
+const SMAX_ID_PREFIXES = ["zlw", "fb", "ig", "zl", "ctm"];
+function stripSmaxIdPrefix(pid: string | null | undefined): string {
+  if (!pid) return "";
+  for (const p of SMAX_ID_PREFIXES) {
+    if (pid.startsWith(p)) return pid.slice(p.length);
+  }
+  return pid;
+}
 
 // SMAX Hotleads table: dedup by lead (1 row per lead) — for Hoàng import to SF
 const HOTLEADS_FIELDS = [
@@ -393,7 +405,7 @@ async function pushSmaxLeadSnapshot(token: string) {
     const batch = idsArr.slice(i, i + BATCH_LOOKUP);
     const { data } = await admin
       .from("dim_lead")
-      .select("lead_id, full_name, email, phone, company, stage, assignee, smax_tags")
+      .select("lead_id, full_name, email, phone, company, stage, assignee, smax_tags, external_profile_id")
       .in("lead_id", batch);
     for (const l of data ?? []) leadInfo.set(l.lead_id, l);
   }
@@ -418,6 +430,7 @@ async function pushSmaxLeadSnapshot(token: string) {
         "Time": timeMs || null,
         "Event": stats.latest.event_type || "",
         "Lead Name": info.full_name || fallbackName || "",
+        "ID": stripSmaxIdPrefix(info.external_profile_id),
         "Email": info.email || "",
         "Phone": info.phone || "",
         "Company": info.company || (info.email?.includes("@") ? info.email.split("@")[1] : ""),
