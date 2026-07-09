@@ -361,6 +361,12 @@ export async function pullFromSmaxReal() {
       if (lid) customerIdToLeadId.set(c.id, lid);
     }
 
+    // Tag semantics: MIRROR SMAX exactly (overwrite, not union).
+    // Rationale: user wants DB to reflect current SMAX state — if a customer's
+    // tag changes from "Hot Lead" to "Cold Lead", DB must show "Cold Lead" only,
+    // not both. So we include EVERY customer/thread we pulled (even those with
+    // 0 tags → empty array → dim_lead.smax_tags will be reset to []).
+    // Customers NOT in this ETL batch keep their existing tags (no update).
     const leadTagMap = new Map<string, Set<string>>();
     const extractTagName = (raw: unknown): string | null => {
       if (!raw) return null;
@@ -375,21 +381,22 @@ export async function pullFromSmaxReal() {
 
     for (const c of allCustomers) {
       const leadId = customerIdToLeadId.get(c.id);
-      if (!leadId || !c.tags?.length) continue;
+      if (!leadId) continue;
+      // Always initialize (even for 0 tags) so overwrite semantics work.
       if (!leadTagMap.has(leadId)) leadTagMap.set(leadId, new Set());
       const set = leadTagMap.get(leadId)!;
-      for (const tag of c.tags) {
+      for (const tag of c.tags ?? []) {
         const name = extractTagName(tag);
         if (name) set.add(name);
       }
     }
     for (const t of allThreads) {
-      if (!t.customer?.id || !t.tag_aliases?.length) continue;
+      if (!t.customer?.id) continue;
       const leadId = customerIdToLeadId.get(t.customer.id);
       if (!leadId) continue;
       if (!leadTagMap.has(leadId)) leadTagMap.set(leadId, new Set());
       const set = leadTagMap.get(leadId)!;
-      for (const tag of t.tag_aliases) {
+      for (const tag of t.tag_aliases ?? []) {
         const name = extractTagName(tag);
         if (name) set.add(name);
       }
@@ -534,12 +541,14 @@ export async function pullFromSmaxReal() {
     // Update smax_tags on leads — deferred until AFTER touchpoint insert so
     // fact_touchpoint (chat data) is safely in DB even if this step is slow.
     // ═══════════════════════════════════════════════════════════════════════
+    // MIRROR SMAX exactly: overwrite dim_lead.smax_tags with whatever SMAX
+    // currently returns for each customer we touched. If SMAX now returns 0
+    // tags for a customer that previously had "Hot Lead", we set tags = []
+    // — DB must reflect current SMAX state, not accumulate history.
+    // Read-first to skip no-op writes (no diff → don't touch the row).
     if (leadTagMap.size > 0) {
       const leadIds = Array.from(leadTagMap.keys());
       const existingTagsByLead = new Map<string, string[]>();
-      // Batch 100 — Supabase .in() with 500 UUIDs (URL ~22KB) silently returns
-      // empty. That made union() see existing=[] for most leads and effectively
-      // OVERWRITE tags on every push (only new tags kept, all history nuked).
       for (let i = 0; i < leadIds.length; i += 100) {
         const batch = leadIds.slice(i, i + 100);
         const { data } = await admin.from("dim_lead").select("lead_id, smax_tags").in("lead_id", batch);
@@ -550,13 +559,14 @@ export async function pullFromSmaxReal() {
 
       const changed: { lead_id: string; smax_tags: string[] }[] = [];
       for (const [lead_id, tagSet] of leadTagMap.entries()) {
-        const existing = existingTagsByLead.get(lead_id) ?? [];
-        const union = new Set(existing);
-        let added = false;
-        for (const t of tagSet) if (!union.has(t)) { union.add(t); added = true; }
-        if (added) changed.push({ lead_id, smax_tags: Array.from(union) });
+        const smaxNow = Array.from(tagSet).sort();
+        const existing = (existingTagsByLead.get(lead_id) ?? []).slice().sort();
+        // Skip if no diff (arrays equal element-wise after sort)
+        const sameLen = smaxNow.length === existing.length;
+        const same = sameLen && smaxNow.every((t, i) => t === existing[i]);
+        if (!same) changed.push({ lead_id, smax_tags: smaxNow });
       }
-      console.log(`   ↳ smax_tags: ${leadTagMap.size} candidates → ${changed.length} need new tags → batch upserting...`);
+      console.log(`   ↳ smax_tags mirror: ${leadTagMap.size} touched leads → ${changed.length} diffs → batch upserting...`);
 
       let updated = 0;
       const TAG_BATCH = 500;
