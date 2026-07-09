@@ -580,23 +580,21 @@ async function pushSmaxLeadSnapshot(token: string) {
 
   const toInsert: Array<Record<string, unknown>> = [];
   const toUpdate: Array<{ record_id: string; fields: Record<string, unknown> }> = [];
-  const seenLeadIds = new Set<string>();
   for (const r of records) {
-    seenLeadIds.add(r.leadId);
     const cur = existingByLeadId.get(r.leadId);
     if (!cur) { toInsert.push(r.fields); continue; }
     const patch = diffFields(r.fields, cur.fields);
     if (patch) toUpdate.push({ record_id: cur.record_id, fields: patch });
   }
-  const toDelete = [
-    ...Array.from(existingByLeadId.entries()).filter(([lid]) => !seenLeadIds.has(lid)).map(([, r]) => r.record_id),
-    ...existingWithoutKey, // orphaned rows without a Lead ID key — safe to remove
-  ];
 
-  console.log(`   ↻ UPSERT plan: insert=${toInsert.length}  update=${toUpdate.length}  delete=${toDelete.length}  unchanged=${records.length - toInsert.length - toUpdate.length}`);
+  // Intentionally NEVER delete rows from Lark. If a lead drops out of the
+  // 365d window or gets removed upstream, we leave its row intact so sales
+  // can still find historical contacts. Rows only ever grow.
+  // NOTE: watch table size against Lark's 20k free-tier cap (see log below).
+  void existingWithoutKey; // silence unused — retained for future diagnostics
 
-  // Apply in an order that keeps Lark populated: insert first, then update,
-  // then delete stale. Never leaves the table below its current row count.
+  console.log(`   ↻ UPSERT plan (no-delete): insert=${toInsert.length}  update=${toUpdate.length}  unchanged=${records.length - toInsert.length - toUpdate.length}  total-in-lark-after=${existing.length + toInsert.length}`);
+
   if (toInsert.length) {
     const n = await insertRecords(token, tableId, toInsert);
     console.log(`   ✅ Inserted ${n} new leads`);
@@ -604,10 +602,6 @@ async function pushSmaxLeadSnapshot(token: string) {
   if (toUpdate.length) {
     const n = await updateRecords(token, tableId, toUpdate);
     console.log(`   ✅ Updated ${n} changed leads`);
-  }
-  if (toDelete.length) {
-    const n = await deleteRecords(token, tableId, toDelete);
-    console.log(`   ✅ Deleted ${n} stale rows`);
   }
 }
 
@@ -716,20 +710,17 @@ async function pushSmaxHotleads(token: string) {
 
   const toInsert: Array<Record<string, unknown>> = [];
   const toUpdate: Array<{ record_id: string; fields: Record<string, unknown> }> = [];
-  const seenLeadIds = new Set<string>();
   for (const r of records) {
-    seenLeadIds.add(r.leadId);
     const cur = existingByLeadId.get(r.leadId);
     if (!cur) { toInsert.push(r.fields); continue; }
     const patch = diffFields(r.fields, cur.fields);
     if (patch) toUpdate.push({ record_id: cur.record_id, fields: patch });
   }
-  const toDelete = [
-    ...Array.from(existingByLeadId.entries()).filter(([lid]) => !seenLeadIds.has(lid)).map(([, r]) => r.record_id),
-    ...existingWithoutKey,
-  ];
 
-  console.log(`   ↻ UPSERT plan: insert=${toInsert.length}  update=${toUpdate.length}  delete=${toDelete.length}  unchanged=${records.length - toInsert.length - toUpdate.length}`);
+  // No deletes on Hotleads either — keep historical hot leads visible.
+  void existingWithoutKey;
+
+  console.log(`   ↻ UPSERT plan (no-delete): insert=${toInsert.length}  update=${toUpdate.length}  unchanged=${records.length - toInsert.length - toUpdate.length}`);
 
   if (toInsert.length) {
     const n = await insertRecords(token, tableId, toInsert);
@@ -738,10 +729,6 @@ async function pushSmaxHotleads(token: string) {
   if (toUpdate.length) {
     const n = await updateRecords(token, tableId, toUpdate);
     console.log(`   ✅ Updated ${n} changed hot leads`);
-  }
-  if (toDelete.length) {
-    const n = await deleteRecords(token, tableId, toDelete);
-    console.log(`   ✅ Deleted ${n} stale rows`);
   }
 }
 
