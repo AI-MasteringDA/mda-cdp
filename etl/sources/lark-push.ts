@@ -74,10 +74,15 @@ const SMAX_LEAD_FIELDS = [
   { field_name: "Chat History 3", type: 1 },
   { field_name: "Chat History 4", type: 1 },
   { field_name: "Chat History 5", type: 1 },
+  // "Chưa phản hồi" is CODE-owned: ticked when the newest message in the chat
+  // is from the customer (TVV hasn't replied). Computed deterministically from
+  // the chat data during each push — no AI needed.
+  { field_name: "Chưa phản hồi", type: 7 },   // Checkbox
   // AI-audit columns — created here but NEVER written by this push (we don't
   // send these keys, so the diff leaves them alone). Claude reads the chat
-  // columns and ticks/fills these itself.
-  { field_name: "Đã xin info", type: 7 },     // Checkbox
+  // columns and ticks/fills these itself. Ticked = PROBLEM, so Lark
+  // automations can trigger on checkbox-checked → remind TVV.
+  { field_name: "Chưa xin info", type: 7 },   // Checkbox — chưa xin thông tin khách
   { field_name: "Đủ tag SMAX", type: 7 },     // Checkbox
   { field_name: "Cần follow-up", type: 7 },   // Checkbox
   { field_name: "AI Note", type: 1 },
@@ -316,6 +321,8 @@ async function deleteRecords(token: string, tableId: string, recordIds: string[]
  */
 function normalizeFieldValue(v: unknown): unknown {
   if (v == null || v === "") return null;
+  // Lark OMITS unchecked checkboxes on read — treat false and absent as equal
+  if (v === false) return null;
   // Lark rich-text array format: [{type:'text', text:'foo'}]
   if (Array.isArray(v) && v.length > 0 && typeof v[0] === "object" && v[0] !== null && "text" in (v[0] as Record<string, unknown>)) {
     return (v as Array<{ text: string }>).map(x => x.text).join("");
@@ -610,16 +617,18 @@ async function pushSmaxLeadSnapshot(token: string) {
       if (!changedLeadIds.includes(item.leadId)) continue;
       const threads = threadsByLead.get(item.leadId) ?? [];
       if (threads.length === 0) continue;
-      const chatFields = await buildChatHistoryFields(threads);
-      const hasContent = CHAT_COL_NAMES.some((c) => chatFields[c]);
+      const chat = await buildChatHistoryFields(threads);
+      const hasContent = chat.messageCount > 0;
       const isInsert = toInsert.includes(item as (typeof toInsert)[number]);
       // Never overwrite existing chat with emptiness (API hiccup protection)
       if (!hasContent && !isInsert) continue;
+      // "Chưa phản hồi": tick when the customer sent the last message
+      const withReplyFlag = { ...chat.fields, "Chưa phản hồi": chat.lastFromCustomer };
       if (isInsert) {
-        Object.assign(item.fields, chatFields);
+        Object.assign(item.fields, withReplyFlag);
       } else {
         const cur = existingByLeadId.get(item.leadId);
-        const chatPatch = cur ? diffFields(chatFields, cur.fields) : chatFields;
+        const chatPatch = cur ? diffFields(withReplyFlag, cur.fields) : withReplyFlag;
         if (chatPatch) Object.assign(item.fields, chatPatch);
       }
       chatUpdated++;

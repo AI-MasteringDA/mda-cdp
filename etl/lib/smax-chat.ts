@@ -188,9 +188,19 @@ export async function getThreadsForLeads(
   return result;
 }
 
+export type ChatHistoryResult = {
+  /** "Chat History 1".."Chat History 5" — always all 5 keys (empty string when
+   *  unused) so stale text from a previously longer conversation is cleared. */
+  fields: Record<string, string>;
+  /** true = newest message across all threads is from the CUSTOMER, i.e. TVV
+   *  hasn't replied yet → drives the "Chưa phản hồi" checkbox. */
+  lastFromCustomer: boolean;
+  messageCount: number;
+};
+
 export async function buildChatHistoryFields(
   threads: Array<{ pagePid: string; tid: string }>
-): Promise<Record<string, string>> {
+): Promise<ChatHistoryResult> {
   const all: Array<{ ts: string; staff: boolean; text: string }> = [];
   for (const t of threads) {
     if (!t.pagePid || !t.tid) continue;
@@ -223,5 +233,9 @@ export async function buildChatHistoryFields(
   for (let i = 0; i < CHAT_COL_COUNT; i++) {
     fields[CHAT_COL_NAMES[i]] = full.slice(i * CHAT_COL_CHAR_LIMIT, (i + 1) * CHAT_COL_CHAR_LIMIT);
   }
-  return fields;
+  return {
+    fields,
+    lastFromCustomer: all.length > 0 && !all[all.length - 1].staff,
+    messageCount: all.length,
+  };
 }
