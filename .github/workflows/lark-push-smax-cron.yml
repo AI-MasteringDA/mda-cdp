@@ -42,6 +42,11 @@ jobs:
           LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
           LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
           LARK_BASE_APP_TOKEN: ${{ secrets.LARK_BASE_APP_TOKEN }}
+          # SMAX creds: the chat-history columns pull messages straight from
+          # the SMAX API during the push (etl/lib/smax-chat.ts)
+          SMAX_USER_TOKEN: ${{ secrets.SMAX_USER_TOKEN }}
+          SMAX_API_KEY: ${{ secrets.SMAX_API_KEY }}
+          SMAX_BASE_URL: https://api.smax.ai
           LARK_DAYS_TO_PUSH: '365'
           LARK_SOURCES: 'smax'
         run: npm run etl:lark:push
