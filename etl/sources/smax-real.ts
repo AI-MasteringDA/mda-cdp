@@ -173,7 +173,12 @@ export async function pullFromSmaxReal() {
         .maybeSingle();
       if (lastTp?.occurred_at) {
         cutoffMs = new Date(lastTp.occurred_at).getTime();
-        const overlapMin = Number(process.env.SMAX_OVERLAP_MINUTES || 30);
+        // 240-min overlap: a chat that lands seconds before the previous run's
+        // cutoff (boundary case: Nhu Nguyen Hoang Khanh 2026-07-10 06:08Z) or
+        // during an ETL outage would otherwise be skipped forever, since
+        // merge-upsert no longer re-surfaces old threads by accident. Wide
+        // overlap is cheap: re-pulled threads are idempotent upserts.
+        const overlapMin = Number(process.env.SMAX_OVERLAP_MINUTES || 240);
         cutoffMs -= overlapMin * 60_000;
         console.log(`   ↻ Incremental: pulling threads with last_message_at > ${new Date(cutoffMs).toISOString().slice(0, 19)}`);
       } else {
