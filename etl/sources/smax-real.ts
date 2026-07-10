@@ -515,32 +515,35 @@ export async function pullFromSmaxReal() {
 
     if (allTouchpoints.length > 0) {
       // DB-level dedup via UNIQUE INDEX ux_ft_source_dedup(source, dedup_key).
-      // upsert + ignoreDuplicates = insert new rows, silently skip existing —
-      // no more downloading 72k payloads every run just to pre-check dups.
+      // MERGE semantics (not ignore!): one row per thread, refreshed in place.
+      // When an EXISTING lead sends a new message, their thread's row gets the
+      // new occurred_at/title/detail — that's what moves them to the top of
+      // Lark. ignoreDuplicates froze existing threads at their first message
+      // and only brand-new leads ever surfaced (bug caught by user 2026-07-10).
       const BATCH = 100;
-      let inserted = 0;
+      let upserted = 0;
       let failed = 0;
       for (let i = 0; i < allTouchpoints.length; i += BATCH) {
         const batch = allTouchpoints.slice(i, i + BATCH);
         const { data, error } = await admin
           .from("fact_touchpoint")
-          .upsert(batch, { onConflict: "source,dedup_key", ignoreDuplicates: true })
+          .upsert(batch, { onConflict: "source,dedup_key" })
           .select("id");
-        if (!error) { inserted += data?.length ?? 0; continue; }
+        if (!error) { upserted += data?.length ?? 0; continue; }
         // A single bad row (invalid JSON despite sanitize) shouldn't sink the
         // whole batch — retry one-by-one so the rest still land.
         console.warn(`   ⚠️ batch ${i} failed (${error.message.slice(0, 80)}), retrying row-by-row...`);
         for (const tp of batch) {
           const { data: d1, error: e1 } = await admin
             .from("fact_touchpoint")
-            .upsert([tp], { onConflict: "source,dedup_key", ignoreDuplicates: true })
+            .upsert([tp], { onConflict: "source,dedup_key" })
             .select("id");
-          if (!e1) inserted += d1?.length ?? 0;
+          if (!e1) upserted += d1?.length ?? 0;
           else failed++;
         }
       }
       if (failed > 0) console.log(`   ⚠️ ${failed} touchpoint failed (bad data, skipped)`);
-      console.log(`✅ [SMAX REAL] Insert ${inserted} fact_touchpoint mới, skip ${allTouchpoints.length - inserted - failed} đã có (${allThreads.length} threads + ${allCustomers.length} customers)`);
+      console.log(`✅ [SMAX REAL] Upsert ${upserted} fact_touchpoint (mới + refresh) từ ${allThreads.length} threads + ${allCustomers.length} customers`);
     }
 
     // ═══════════════════════════════════════════════════════════════════════

@@ -1,4 +1,5 @@
 import { admin } from "../lib/supabase-admin";
+import { buildChatHistoryFields, getThreadsForLeads, CHAT_COL_NAMES } from "../lib/smax-chat";
 
 /**
  * Push MDA CDP data to Lark Base tables.
@@ -65,6 +66,21 @@ const SMAX_LEAD_FIELDS = [
   { field_name: "Title", type: 1 },      // latest chat title
   { field_name: "Detail", type: 1 },     // latest chat detail
   { field_name: "Lead ID", type: 1 },    // dim_lead.lead_id UUID — key for diff-based UPSERT (safe to hide in view)
+  // Full chat history split across 5 text cells (Lark caps a cell at 10k
+  // chars). Newest-kept when longer. Populated for changed leads each run;
+  // bulk backfill via etl/debug/backfill-chat-history.ts. Hide in Sales view.
+  { field_name: "Chat History 1", type: 1 },
+  { field_name: "Chat History 2", type: 1 },
+  { field_name: "Chat History 3", type: 1 },
+  { field_name: "Chat History 4", type: 1 },
+  { field_name: "Chat History 5", type: 1 },
+  // AI-audit columns — created here but NEVER written by this push (we don't
+  // send these keys, so the diff leaves them alone). Claude reads the chat
+  // columns and ticks/fills these itself.
+  { field_name: "Đã xin info", type: 7 },     // Checkbox
+  { field_name: "Đủ tag SMAX", type: 7 },     // Checkbox
+  { field_name: "Cần follow-up", type: 7 },   // Checkbox
+  { field_name: "AI Note", type: 1 },
 ];
 
 // SMAX platform prefixes to strip from external_profile_id so the value
@@ -566,13 +582,49 @@ async function pushSmaxLeadSnapshot(token: string) {
     else existingWithoutKey.push(r.record_id);
   }
 
-  const toInsert: Array<Record<string, unknown>> = [];
-  const toUpdate: Array<{ record_id: string; fields: Record<string, unknown> }> = [];
+  const toInsert: Array<{ leadId: string; fields: Record<string, unknown> }> = [];
+  const toUpdate: Array<{ leadId: string; record_id: string; fields: Record<string, unknown> }> = [];
   for (const r of records) {
     const cur = existingByLeadId.get(r.leadId);
-    if (!cur) { toInsert.push(r.fields); continue; }
+    if (!cur) { toInsert.push(r); continue; }
     const patch = diffFields(r.fields, cur.fields);
-    if (patch) toUpdate.push({ record_id: cur.record_id, fields: patch });
+    if (patch) toUpdate.push({ leadId: r.leadId, record_id: cur.record_id, fields: patch });
+  }
+
+  // ── Chat history refresh for changed leads ────────────────────────────
+  // A lead only chats a few times a day, so "changed" is dozens per run —
+  // fetching straight from the SMAX messages API is cheap and adds zero
+  // Supabase IO. Cap at 150 leads/run to stay inside the workflow timeout;
+  // anything beyond that gets picked up by the periodic full window.
+  const CHAT_LEADS_CAP = 150;
+  const changedLeadIds = [
+    ...toInsert.map((r) => r.leadId),
+    ...toUpdate.map((r) => r.leadId),
+  ].slice(0, CHAT_LEADS_CAP);
+  if (changedLeadIds.length > 0) {
+    const pidByLead = new Map<string, string | null>();
+    for (const r of rows) pidByLead.set(r.lead_id, r.external_profile_id);
+    const threadsByLead = await getThreadsForLeads(admin as never, changedLeadIds, pidByLead);
+    let chatUpdated = 0;
+    for (const item of [...toInsert, ...toUpdate]) {
+      if (!changedLeadIds.includes(item.leadId)) continue;
+      const threads = threadsByLead.get(item.leadId) ?? [];
+      if (threads.length === 0) continue;
+      const chatFields = await buildChatHistoryFields(threads);
+      const hasContent = CHAT_COL_NAMES.some((c) => chatFields[c]);
+      const isInsert = toInsert.includes(item as (typeof toInsert)[number]);
+      // Never overwrite existing chat with emptiness (API hiccup protection)
+      if (!hasContent && !isInsert) continue;
+      if (isInsert) {
+        Object.assign(item.fields, chatFields);
+      } else {
+        const cur = existingByLeadId.get(item.leadId);
+        const chatPatch = cur ? diffFields(chatFields, cur.fields) : chatFields;
+        if (chatPatch) Object.assign(item.fields, chatPatch);
+      }
+      chatUpdated++;
+    }
+    console.log(`   ↳ Chat history refreshed for ${chatUpdated}/${changedLeadIds.length} changed leads`);
   }
 
   // Intentionally NEVER delete rows from Lark. If a lead drops out of the
