@@ -109,12 +109,31 @@ function fmtLine(m: { ts: string; staff: boolean; text: string }): string {
  * ALWAYS all 5 keys (empty string when unused) so stale text from a previous
  * longer conversation gets cleared on update.
  */
+// MDA's SMAX pages, grouped by the platform prefix their customer pids carry.
+// Used to GUESS the page when a customer-endpoint touchpoint has no page_pid:
+// we try each candidate page; the wrong one just 404s (harmless).
+const PAGE_CANDIDATES_BY_PREFIX: Array<{ prefix: string; pages: string[] }> = [
+  { prefix: "zlw", pages: ["zlw543187459113764384"] },
+  { prefix: "zl",  pages: ["zl2235256473219383054"] },
+  { prefix: "fb",  pages: ["fb102323788540150", "fb107203051058856"] },
+  { prefix: "ig",  pages: ["ig17841446528067260", "ig17841460097450702"] },
+  { prefix: "ctm", pages: ["ctm68188e11779d16c0779c018c"] },
+];
+
+function guessPagesForPid(pid: string): string[] {
+  // Order matters: "zlw" must match before "zl"
+  for (const { prefix, pages } of PAGE_CANDIDATES_BY_PREFIX) {
+    if (pid.startsWith(prefix)) return pages;
+  }
+  return [];
+}
+
 /**
  * Resolve every (page_pid, tid) chat thread for a set of leads.
  * Thread touchpoints carry payload.tid directly; customer-endpoint touchpoints
  * don't, but on SMAX the thread tid equals the customer's platform pid
  * (verified: thread_tid == customer.pid for Zalo/FB), so we fall back to
- * (page_pid, external_profile_id).
+ * (page_pid|guessed pages, external_profile_id).
  */
 export async function getThreadsForLeads(
   admin: {
@@ -130,6 +149,7 @@ export async function getThreadsForLeads(
   pidByLead: Map<string, string | null>
 ): Promise<Map<string, Array<{ pagePid: string; tid: string }>>> {
   const result = new Map<string, Array<{ pagePid: string; tid: string }>>();
+  const seenLeads = new Set<string>();
   for (let i = 0; i < leadIds.length; i += 100) {
     const batch = leadIds.slice(i, i + 100);
     const { data } = await admin
@@ -139,19 +159,31 @@ export async function getThreadsForLeads(
       .in("lead_id", batch);
     for (const r of data ?? []) {
       const leadId = r.lead_id as string;
+      if (!leadId) continue;
+      seenLeads.add(leadId);
       const tid = (r.tid as string | null) || null;
       const pagePid = (r.page_pid as string | null) || null;
-      if (!leadId || !pagePid) continue;
       let arr = result.get(leadId);
       if (!arr) { arr = []; result.set(leadId, arr); }
-      if (tid && !arr.some((t) => t.tid === tid)) {
+      if (tid && pagePid && !arr.some((t) => t.tid === tid)) {
         arr.push({ pagePid, tid });
       } else if (!tid) {
-        // customer-endpoint row: fall back to platform pid as thread tid
+        // customer-endpoint row: thread tid == the customer's platform pid.
+        // Use the row's page_pid when present, else guess from pid prefix.
         const pid = pidByLead.get(leadId);
-        if (pid && !arr.some((t) => t.tid === pid)) arr.push({ pagePid, tid: pid });
+        if (!pid || arr.some((t) => t.tid === pid)) continue;
+        const pages = pagePid ? [pagePid] : guessPagesForPid(pid);
+        for (const p of pages) arr.push({ pagePid: p, tid: pid });
       }
     }
+  }
+  // Leads with no usable touchpoint info at all: last-ditch guess from pid.
+  for (const leadId of leadIds) {
+    if (result.get(leadId)?.length) continue;
+    const pid = pidByLead.get(leadId);
+    if (!pid) continue;
+    const pages = guessPagesForPid(pid);
+    if (pages.length) result.set(leadId, pages.map((p) => ({ pagePid: p, tid: pid })));
   }
   return result;
 }

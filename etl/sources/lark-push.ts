@@ -636,11 +636,12 @@ async function pushSmaxLeadSnapshot(token: string) {
   console.log(`   ↻ UPSERT plan (no-delete): insert=${toInsert.length}  update=${toUpdate.length}  unchanged=${records.length - toInsert.length - toUpdate.length}  total-in-lark-after=${existing.length + toInsert.length}`);
 
   if (toInsert.length) {
-    const n = await insertRecords(token, tableId, toInsert);
+    // Strip the leadId wrapper — Lark rejects unknown "fields.fields" nesting
+    const n = await insertRecords(token, tableId, toInsert.map((r) => r.fields));
     console.log(`   ✅ Inserted ${n} new leads`);
   }
   if (toUpdate.length) {
-    const n = await updateRecords(token, tableId, toUpdate);
+    const n = await updateRecords(token, tableId, toUpdate.map(({ record_id, fields }) => ({ record_id, fields })));
     console.log(`   ✅ Updated ${n} changed leads`);
   }
 }
