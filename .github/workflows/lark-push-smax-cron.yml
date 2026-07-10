@@ -2,9 +2,11 @@ name: Lark Base push (SMAX only, fast)
 
 on:
   schedule:
-    # Every 5 minutes — SMAX pipeline needs near-real-time for Sales team.
+    # Every 15 minutes — balances freshness vs Supabase free-tier Disk IO /
+    # egress budget (5-minute polling caused the 2026-07-10 IO exhaustion).
     # Non-SMAX sources use lark-push-cron.yml (hourly).
-    - cron: '*/5 * * * *'
+    # REMINDER: cron-job.org trigger must also be set to every 15 min.
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 # Concurrency lock: push takes 7-8 min but cron fires every 5 min. Without this

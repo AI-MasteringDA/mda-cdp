@@ -459,109 +459,95 @@ async function pushSmaxLeadSnapshot(token: string) {
   if (!table) tableId = await createTable(token, tableName, SMAX_LEAD_FIELDS);
   else tableId = table.table_id;
 
-  // Pull ALL SMAX leads with their latest touchpoint
-  const cutoffMs = Date.now() - DAYS_TO_PUSH * 86400_000;
-  const cutoff = new Date(cutoffMs).toISOString();
+  // Read Lark's current rows FIRST — needed for the diff anyway, and the max
+  // "Time" value drives the incremental cutoff below. (Lark API traffic does
+  // not count against Supabase's egress/IO budget.)
+  const existing = await listAllRecordsWithFields(token, tableId);
+  const hasKeyCoverage = existing.length === 0 || existing.some(r => typeof r.fields["Lead ID"] === "string" && r.fields["Lead ID"]);
 
-  // 1. Get lead IDs with SMAX touchpoints in window
-  const leadIds = new Set<string>();
+  // Incremental vs full: dim_lead-only changes (e.g. tag re-mirrored without a
+  // new chat) don't bump occurred_at, so a pure-incremental sync would miss
+  // them. Do a FULL view read on the first run of every 6-hour window (and on
+  // LARK_FULL_REFRESH=1 / bootstrap); incremental otherwise.
+  let maxLarkTimeMs = 0;
+  for (const r of existing) {
+    const v = r.fields["Time"];
+    const n = typeof v === "number" ? v : 0;
+    if (n > maxLarkTimeMs) maxLarkTimeMs = n;
+  }
+  const now = new Date();
+  const isFullWindow = now.getUTCHours() % 6 === 0 && now.getUTCMinutes() < 15;
+  const fullRefresh =
+    process.env.LARK_FULL_REFRESH === "1" || !hasKeyCoverage || maxLarkTimeMs === 0 || isFullWindow;
+  // 6h overlap so clock skew / late-arriving rows can't slip through the gap.
+  const cutoffISO = new Date(maxLarkTimeMs - 6 * 3600_000).toISOString();
+  console.log(`   ↳ Mode: ${fullRefresh ? "full" : `incremental (occurred_at > ${cutoffISO.slice(0, 19)})`}`);
+
+  // Read the server-side snapshot view — Postgres does the "latest touchpoint
+  // + chat count + lead metadata" aggregation, we just page the compact result.
+  // (Replaces ~180 batched queries that downloaded every touchpoint to Node.)
+  type SnapshotRow = {
+    lead_id: string;
+    event_type: string | null;
+    title: string | null;
+    detail: string | null;
+    occurred_at: string | null;
+    fallback_name: string | null;
+    total_chats: number | null;
+    full_name: string | null;
+    email: string | null;
+    phone: string | null;
+    company: string | null;
+    stage: string | null;
+    assignee: string | null;
+    smax_tags: string[] | null;
+    external_profile_id: string | null;
+  };
+  const rows: SnapshotRow[] = [];
   let from = 0;
   while (from < 50000) {
-    const { data } = await admin
-      .from("fact_touchpoint")
-      .select("lead_id")
-      .eq("source", "smax")
-      .gte("occurred_at", cutoff)
-      .range(from, from + 999);
+    let q = admin.from("v_smax_lead_snapshot").select("*").range(from, from + 999);
+    if (!fullRefresh) q = q.gt("occurred_at", cutoffISO);
+    const { data, error } = await q;
+    if (error) {
+      console.error(`   ❌ v_smax_lead_snapshot: ${error.message} — is the 2026-07-10 migration applied?`);
+      return;
+    }
     if (!data?.length) break;
-    for (const r of data) if (r.lead_id) leadIds.add(r.lead_id);
+    rows.push(...(data as SnapshotRow[]));
     if (data.length < 1000) break;
     from += 1000;
   }
-  console.log(`   ↳ ${leadIds.size} unique SMAX leads in ${DAYS_TO_PUSH}d window`);
+  console.log(`   ↳ ${rows.length} snapshot rows from view`);
+  if (rows.length === 0) { console.log(`   ✓ Nothing new. Skipping.`); return; }
 
-  if (leadIds.size === 0) return;
-
-  // 2. For each lead, find latest touchpoint + total count
-  // BATCH_LOOKUP=100 because Supabase/PostgREST URL length caps out around ~8KB.
-  // 500 UUIDs (~22KB URL) silently returns empty; 100 UUIDs (~4.5KB) works.
-  // Prior bug: batch=500 caused >98% of leads to be dropped from Lark.
-  const BATCH_LOOKUP = 100;
-  const leadStats = new Map<string, { latest: any; count: number }>();
-  const idsArr = Array.from(leadIds);
-  for (let i = 0; i < idsArr.length; i += BATCH_LOOKUP) {
-    const batch = idsArr.slice(i, i + BATCH_LOOKUP);
-    const { data } = await admin
-      .from("fact_touchpoint")
-      .select("lead_id, event_type, title, detail, occurred_at, payload")
-      .eq("source", "smax")
-      .in("lead_id", batch)
-      .order("occurred_at", { ascending: false });
-    for (const r of data ?? []) {
-      const cur = leadStats.get(r.lead_id);
-      if (!cur) leadStats.set(r.lead_id, { latest: r, count: 1 });
-      else cur.count++;
-    }
-  }
-
-  // 3. Load lead metadata (same URL-length constraint — batch 100)
-  const leadInfo = new Map<string, any>();
-  for (let i = 0; i < idsArr.length; i += BATCH_LOOKUP) {
-    const batch = idsArr.slice(i, i + BATCH_LOOKUP);
-    const { data } = await admin
-      .from("dim_lead")
-      .select("lead_id, full_name, email, phone, company, stage, assignee, smax_tags, external_profile_id")
-      .in("lead_id", batch);
-    for (const l of data ?? []) leadInfo.set(l.lead_id, l);
-  }
-
-  // 4. Build 1 record per lead. Each record carries "Lead ID" (UUID) as the
-  //    stable key that the diff-based UPSERT uses to match Lark rows to DB leads.
-  let orphanCount = 0;
-  const records: Array<{ leadId: string; fields: Record<string, unknown> }> = [];
-  for (const lid of idsArr) {
-    const stats = leadStats.get(lid);
-    if (!stats) continue;
-    const info = leadInfo.get(lid) || {};
-    if (!leadInfo.has(lid)) orphanCount++;
-    const tags: string[] = Array.isArray(info.smax_tags) ? info.smax_tags : [];
-    const timeMs = stats.latest.occurred_at ? new Date(stats.latest.occurred_at).getTime() : null;
-    const fallbackName =
-      (stats.latest as { payload?: { customer_name?: string } })?.payload?.customer_name || "";
-    records.push({
-      leadId: lid,
+  const records: Array<{ leadId: string; fields: Record<string, unknown> }> = rows.map((r) => {
+    const tags: string[] = Array.isArray(r.smax_tags) ? r.smax_tags : [];
+    const timeMs = r.occurred_at ? new Date(r.occurred_at).getTime() : null;
+    return {
+      leadId: r.lead_id,
       fields: {
         "Time": timeMs || null,
-        "Event": stats.latest.event_type || "",
-        "Lead Name": info.full_name || fallbackName || "",
-        "ID": stripSmaxIdPrefix(info.external_profile_id),
-        "Email": info.email || "",
-        "Phone": info.phone || "",
-        "Company": info.company || (info.email?.includes("@") ? info.email.split("@")[1] : ""),
-        "Stage": info.stage || "",
-        "TVV": info.assignee || "",
+        "Event": r.event_type || "",
+        "Lead Name": r.full_name || r.fallback_name || "",
+        "ID": stripSmaxIdPrefix(r.external_profile_id),
+        "Email": r.email || "",
+        "Phone": r.phone || "",
+        "Company": r.company || (r.email?.includes("@") ? r.email.split("@")[1] : ""),
+        "Stage": r.stage || "",
+        "TVV": r.assignee || "",
         "Tag SMAX": tags.length > 0 ? tags : null,
-        "Total Chats": stats.count,
-        "Title": (stats.latest.title || "").slice(0, 500),
-        "Detail": (stats.latest.detail || "").slice(0, 500),
-        "Lead ID": lid,
+        "Total Chats": Number(r.total_chats ?? 0),
+        "Title": (r.title || "").slice(0, 500),
+        "Detail": (r.detail || "").slice(0, 500),
+        "Lead ID": r.lead_id,
       },
-    });
-  }
-  if (orphanCount > 0) {
-    console.log(`   ⚠️  ${orphanCount} SMAX leads have no dim_lead row (pushed with fallback name from payload)`);
-  }
+    };
+  });
   console.log(`   ↳ Building ${records.length} lead-snapshot rows`);
 
-  // 5. Ensure schema (adds new fields; no-op once table is set up).
+  // Ensure schema (adds new fields; no-op once table is set up).
   await ensureFieldsExist(token, tableId, SMAX_LEAD_FIELDS);
-
-  // 6. Diff-based UPSERT — avoids the empty flash of delete+reinsert.
-  //    Match Lark rows to DB rows by "Lead ID". If no existing row has a
-  //    "Lead ID" populated (first run after this refactor), fall back to
-  //    delete-all + insert to bootstrap the key on every row.
-  const existing = await listAllRecordsWithFields(token, tableId);
-  const hasKeyCoverage = existing.length === 0 || existing.some(r => typeof r.fields["Lead ID"] === "string" && r.fields["Lead ID"]);
 
   if (!hasKeyCoverage) {
     console.log(`   ⚙️  First run after UPSERT refactor — bootstrapping "Lead ID" key via full refresh`);

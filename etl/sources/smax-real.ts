@@ -276,15 +276,21 @@ export async function pullFromSmaxReal() {
       tags?: (string | { id?: string; name?: string; alias?: string; time?: string })[];
     };
     const CUSTOMER_SIZE = Number(process.env.SMAX_CUSTOMER_SIZE || 10000);
+    // Incremental runs only need customers whose last interaction is newer than
+    // the cutoff — processing all 9k+ historic customers EVERY run was the
+    // single biggest Disk-IO burner (9k identity lookups × every 5 minutes).
+    // Backfill mode (SMAX_LOOKBACK_DAYS set / empty DB) still takes the full window.
     const customerLookbackDays = lookbackDays || 365;
-    const customerCutoffMs = Date.now() - customerLookbackDays * 86400_000;
-    console.log(`   ↳ Pulling /customers (size=${CUSTOMER_SIZE}, filter last ${customerLookbackDays}d)...`);
+    const customerCutoffMs = cutoffMs > 0
+      ? cutoffMs
+      : Date.now() - customerLookbackDays * 86400_000;
+    console.log(`   ↳ Pulling /customers (size=${CUSTOMER_SIZE}, filter interaction.last > ${new Date(customerCutoffMs).toISOString().slice(0, 19)})...`);
     const custRes = await smaxPost(`/bizs/${BIZ_SLUG}/customers`, { size: CUSTOMER_SIZE }) as { data?: SmaxCustomer[]; total?: number };
     const allCustomers = (custRes.data || []).filter((c) => {
       const t = c.interaction?.last || c.updated_at || c.created_at;
       return t ? new Date(t).getTime() >= customerCutoffMs : false;
     });
-    console.log(`   ↳ /customers: ${custRes.data?.length || 0} pulled, ${allCustomers.length} in last ${customerLookbackDays}d (SMAX total: ${custRes.total})`);
+    console.log(`   ↳ /customers: ${custRes.data?.length || 0} pulled, ${allCustomers.length} past cutoff (SMAX total: ${custRes.total})`);
 
     // Identity resolution — merge threads + customers, with regex extraction
     // from name/message so "Nguyễn A_x@y.com" or "call me 0912345678" gets picked up.
@@ -430,6 +436,7 @@ export async function pullFromSmaxReal() {
           title: `Chat: ${displayName.slice(0, 60)}`,
           detail: null as string | null,
           occurred_at: occurred,
+          dedup_key: `cust-${c.id}`,
           payload: {
             thread_id: `cust-${c.id}`,
             smax_customer_id: c.id,
@@ -474,6 +481,7 @@ export async function pullFromSmaxReal() {
           title: `${titlePrefix}: ${msg}${ellipsis}`,
           detail: t.message || null,
           occurred_at: t.last_message_at || t.last_message_by_customer_at || new Date().toISOString(),
+          dedup_key: t.id,
           payload: {
             thread_id: t.id,
             tid: t.tid,
@@ -493,56 +501,27 @@ export async function pullFromSmaxReal() {
     const allTouchpoints = [...touchpoints, ...customerTouchpoints];
 
     if (allTouchpoints.length > 0) {
-      // PAGINATED fetch existing thread_ids (handle >1000 rows)
-      const existingThreadIds = new Set<string>();
-      let from = 0;
-      while (true) {
+      // DB-level dedup via UNIQUE INDEX ux_ft_source_dedup(source, dedup_key).
+      // upsert + ignoreDuplicates = insert new rows, silently skip existing —
+      // no more downloading 72k payloads every run just to pre-check dups.
+      const BATCH = 100;
+      let inserted = 0;
+      let failed = 0;
+      for (let i = 0; i < allTouchpoints.length; i += BATCH) {
+        const batch = allTouchpoints.slice(i, i + BATCH);
         const { data, error } = await admin
           .from("fact_touchpoint")
-          .select("payload")
-          .eq("source", "smax")
-          .range(from, from + 999);
-        if (error || !data || data.length === 0) break;
-        for (const t of data) {
-          const tid = (t.payload as { thread_id?: string })?.thread_id;
-          if (tid) existingThreadIds.add(tid);
+          .upsert(batch, { onConflict: "source,dedup_key", ignoreDuplicates: true })
+          .select("id");
+        if (error) {
+          console.warn(`   ⚠️ upsert batch ${i}: ${error.message.slice(0, 120)}`);
+          failed += batch.length;
+          continue;
         }
-        if (data.length < 1000) break;
-        from += 1000;
+        inserted += data?.length ?? 0;
       }
-      console.log(`   ↳ Cache ${existingThreadIds.size} existing thread_ids`);
-
-      const newTouchpoints = allTouchpoints.filter(
-        (t) => !existingThreadIds.has((t.payload as { thread_id: string }).thread_id)
-      );
-      const skipped = touchpoints.length - newTouchpoints.length;
-      if (skipped > 0) {
-        console.log(`   ↳ Skip ${skipped} touchpoint đã tồn tại (dedupe by thread_id)`);
-      }
-
-      if (newTouchpoints.length > 0) {
-        const BATCH = 100;
-        let inserted = 0;
-        let failed = 0;
-        for (let i = 0; i < newTouchpoints.length; i += BATCH) {
-          const batch = newTouchpoints.slice(i, i + BATCH);
-          const { error } = await admin.from("fact_touchpoint").insert(batch);
-          if (error) {
-            // Fallback: one-by-one để skip rows bị conflict
-            for (const tp of batch) {
-              const { error: e } = await admin.from("fact_touchpoint").insert([tp]);
-              if (!e) inserted++;
-              else failed++;
-            }
-            continue;
-          }
-          inserted += batch.length;
-        }
-        if (failed > 0) console.log(`   ⚠️ ${failed} touchpoint skip do conflict`);
-        console.log(`✅ [SMAX REAL] Insert ${inserted} fact_touchpoint mới (${allThreads.length} threads + ${allCustomers.length} customers)`);
-      } else {
-        console.log(`✅ [SMAX REAL] 0 touchpoint mới — DB đã up-to-date`);
-      }
+      if (failed > 0) console.log(`   ⚠️ ${failed} touchpoint failed`);
+      console.log(`✅ [SMAX REAL] Insert ${inserted} fact_touchpoint mới, skip ${allTouchpoints.length - inserted - failed} đã có (${allThreads.length} threads + ${allCustomers.length} customers)`);
     }
 
     // ═══════════════════════════════════════════════════════════════════════

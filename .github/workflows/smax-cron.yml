@@ -2,8 +2,11 @@ name: SMAX incremental sync
 
 on:
   schedule:
-    # Every 5 minutes — near-real-time polling (no need for SMAX webhook config)
-    - cron: '*/5 * * * *'
+    # Every 15 minutes — balances freshness vs Supabase free-tier Disk IO /
+    # egress budget. 5-minute polling exhausted the Nano instance's IO budget
+    # (2026-07-10 outage). REMINDER: cron-job.org triggers must also be set
+    # to every 15 min — its workflow_dispatch calls override this schedule.
+    - cron: '*/15 * * * *'
   # Allow manual trigger from GitHub UI
   workflow_dispatch:
 
