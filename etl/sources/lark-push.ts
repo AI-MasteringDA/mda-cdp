@@ -83,7 +83,6 @@ const SMAX_LEAD_FIELDS = [
   // columns and ticks/fills these itself. Ticked = PROBLEM, so Lark
   // automations can trigger on checkbox-checked → remind TVV.
   { field_name: "Chưa xin info", type: 7 },   // Checkbox — chưa xin thông tin khách
-  { field_name: "Đủ tag SMAX", type: 7 },     // Checkbox
   { field_name: "Cần follow-up", type: 7 },   // Checkbox
   { field_name: "AI Note", type: 1 },
 ];
