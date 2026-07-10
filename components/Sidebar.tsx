@@ -26,6 +26,7 @@ import {
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
+  ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +52,7 @@ const GROWTH: NavItem[] = [
 ];
 
 const OPERATIONS: NavItem[] = [
+  { href: "/smax-audit", label: "SMAX Audit",    icon: ShieldAlert },
   { href: "/sync-jobs", label: "Hoạt động sync", icon: History },
   { href: "/alerts",    label: "Cảnh báo",       icon: Bell },
   { href: "/audit",     label: "Audit AI",       icon: ListChecks },
