@@ -61,6 +61,18 @@ function toStringOrNull(v: unknown): string | null {
   return null;
 }
 
+// Strip null bytes + lone UTF-16 surrogates that Postgres rejects as invalid
+// JSON ("invalid input syntax for type json"). Chat messages from Zalo/FB
+// occasionally carry these (broken emoji, control chars).
+const NULL_BYTE = String.fromCharCode(0);
+function sanitizeText(s: string | null | undefined): string {
+  if (!s) return "";
+  return s
+    .split(NULL_BYTE).join("")
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, "")
+    .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
+}
+
 const PAGE_PIDS = [
   "fb102323788540150",      // FB Brand
   "fb107203051058856",      // FB KOL
@@ -428,7 +440,7 @@ export async function pullFromSmaxReal() {
         const leadId = matchMap.get(`smax-cust-${c.id}`);
         if (!leadId) return null;
         const occurred = c.interaction?.last || c.updated_at || c.created_at || new Date().toISOString();
-        const displayName = c.name || c.profile_name || "(anonymous)";
+        const displayName = sanitizeText(c.name || c.profile_name) || "(anonymous)";
         return {
           lead_id: leadId,
           source: "smax",
@@ -443,7 +455,7 @@ export async function pullFromSmaxReal() {
             page_pid: c.page_pid,
             platform: c.platform,
             tags: c.tags || [],
-            customer_name: c.name || c.profile_name,
+            customer_name: sanitizeText(c.name || c.profile_name),
             source_endpoint: "customers",
             interaction_first: c.interaction?.first,
             interaction_last: c.interaction?.last,
@@ -462,8 +474,9 @@ export async function pullFromSmaxReal() {
       .filter((t) => matchMap.get(t.id))
       .map((t) => {
         const customer = t.customer;
-        const msg = t.message?.slice(0, 60) || "(no message)";
-        const ellipsis = (t.message?.length || 0) > 60 ? "..." : "";
+        const cleanMsg = sanitizeText(t.message);
+        const msg = cleanMsg.slice(0, 60) || "(no message)";
+        const ellipsis = cleanMsg.length > 60 ? "..." : "";
 
         // Determine sender: TVV or Lead?
         const lastMsgMs = t.last_message_at ? new Date(t.last_message_at).getTime() : 0;
@@ -479,7 +492,7 @@ export async function pullFromSmaxReal() {
           source: "smax",
           event_type: eventType,
           title: `${titlePrefix}: ${msg}${ellipsis}`,
-          detail: t.message || null,
+          detail: cleanMsg || null,
           occurred_at: t.last_message_at || t.last_message_by_customer_at || new Date().toISOString(),
           dedup_key: t.id,
           payload: {
@@ -488,7 +501,7 @@ export async function pullFromSmaxReal() {
             page_pid: t.page_pid,
             platform: t.platform,
             tag_aliases: t.tag_aliases || [],
-            customer_name: customer?.name || customer?.profile_name,
+            customer_name: sanitizeText(customer?.name || customer?.profile_name),
             sender_is_staff: senderIsStaff || noCustomerMsg,
             last_msg_at: t.last_message_at,
             last_customer_msg_at: t.last_message_by_customer_at,
@@ -513,14 +526,20 @@ export async function pullFromSmaxReal() {
           .from("fact_touchpoint")
           .upsert(batch, { onConflict: "source,dedup_key", ignoreDuplicates: true })
           .select("id");
-        if (error) {
-          console.warn(`   ⚠️ upsert batch ${i}: ${error.message.slice(0, 120)}`);
-          failed += batch.length;
-          continue;
+        if (!error) { inserted += data?.length ?? 0; continue; }
+        // A single bad row (invalid JSON despite sanitize) shouldn't sink the
+        // whole batch — retry one-by-one so the rest still land.
+        console.warn(`   ⚠️ batch ${i} failed (${error.message.slice(0, 80)}), retrying row-by-row...`);
+        for (const tp of batch) {
+          const { data: d1, error: e1 } = await admin
+            .from("fact_touchpoint")
+            .upsert([tp], { onConflict: "source,dedup_key", ignoreDuplicates: true })
+            .select("id");
+          if (!e1) inserted += d1?.length ?? 0;
+          else failed++;
         }
-        inserted += data?.length ?? 0;
       }
-      if (failed > 0) console.log(`   ⚠️ ${failed} touchpoint failed`);
+      if (failed > 0) console.log(`   ⚠️ ${failed} touchpoint failed (bad data, skipped)`);
       console.log(`✅ [SMAX REAL] Insert ${inserted} fact_touchpoint mới, skip ${allTouchpoints.length - inserted - failed} đã có (${allThreads.length} threads + ${allCustomers.length} customers)`);
     }
 
