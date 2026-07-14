@@ -1,6 +1,28 @@
 import { unstable_cache } from "next/cache";
 import { cache } from "react";
 import { createClient } from "./server";
+
+/**
+ * Promise.all nhưng giới hạn số request chạy cùng lúc.
+ *
+ * Một trang lead gọi 3-4 hàm, mỗi hàm bắn 28 query .in() song song → hơn 80
+ * request PostgREST đồng thời. Connection pool của Supabase Free tier nhỏ hơn
+ * thế nhiều, nên phần dư bị xếp hàng và cả trang timeout. 8 request một lượt
+ * vẫn nhanh mà không làm nghẽn pool.
+ */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => PromiseLike<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
 import { getAnalyticsClient } from "./analytics";
 import type { Lead, LeadTier, ScoreReason, Touchpoint } from "@/types/lead";
 import { scoreToTier } from "@/types/lead";
@@ -302,8 +324,8 @@ async function joinLeads(
   const IN_BATCH = 100;
   const batches: string[][] = [];
   for (let i = 0; i < leadIds.length; i += IN_BATCH) batches.push(leadIds.slice(i, i + IN_BATCH));
-  const pages = await Promise.all(
-    batches.map((b) => supabase.from("dim_lead").select("*").in("lead_id", b))
+  const pages = await mapLimit(batches, 8, (b) =>
+    supabase.from("dim_lead").select("*").in("lead_id", b)
   );
   const leadsAll: Record<string, unknown>[] = [];
   for (const p of pages) if (p.data?.length) leadsAll.push(...(p.data as Record<string, unknown>[]));
@@ -383,18 +405,16 @@ async function countLeadsByScoreRange(min: number, max: number, filter?: LeadLis
   const cols = filter?.engagement
     ? "chat_count, email_click_count, email_reply_count, form_submit_count, conversion_count"
     : "*";
-  const results = await Promise.all(
-    countBatches.map((batch) => {
-      let q = supabase
-        .from("dim_lead")
-        .select(cols, filter?.engagement ? undefined : { count: "exact", head: true })
-        .in("lead_id", batch);
-      if (filter?.source) q = q.eq("source", filter.source);
-      if (filter?.stage) q = q.eq("stage", filter.stage);
-      if (filter?.product) q = q.ilike("sf_product", `%${filter.product}%`);
-      return q;
-    })
-  );
+  const results = await mapLimit(countBatches, 8, (batch) => {
+    let q = supabase
+      .from("dim_lead")
+      .select(cols, filter?.engagement ? undefined : { count: "exact", head: true })
+      .in("lead_id", batch);
+    if (filter?.source) q = q.eq("source", filter.source);
+    if (filter?.stage) q = q.eq("stage", filter.stage);
+    if (filter?.product) q = q.ilike("sf_product", `%${filter.product}%`);
+    return q;
+  });
   let total = 0;
   for (const { data, count } of results) {
     if (!filter?.engagement) { total += count ?? 0; continue; }
@@ -490,10 +510,8 @@ export async function getTopHotProducts(limit = 15, activeCourses: string[] = []
   // 100 per .in(), song song — xem ghi chú ở joinLeads
   const prodBatches: string[][] = [];
   for (let i = 0; i < leadIds.length; i += 100) prodBatches.push(leadIds.slice(i, i + 100));
-  const prodPages = await Promise.all(
-    prodBatches.map((b) =>
-      supabase.from("dim_lead").select("sf_product").in("lead_id", b).not("sf_product", "is", null)
-    )
+  const prodPages = await mapLimit(prodBatches, 8, (b) =>
+    supabase.from("dim_lead").select("sf_product").in("lead_id", b).not("sf_product", "is", null)
   );
   for (const { data: leads } of prodPages) {
     for (const l of leads ?? []) {

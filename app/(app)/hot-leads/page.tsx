@@ -31,13 +31,25 @@ export default async function HotLeadsPage({
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const [hotLeads, total, stages, products, listViews] = await Promise.all([
-    getHotLeads(PAGE_SIZE, offset, filter),
-    getHotLeadsCount(filter),
-    getAvailableStages(),
-    getTopHotProducts(15, activeCourses),
-    getHotListViews(),
-  ]);
+  // Tuần tự, không Promise.all: 4 hàm chạy song song sẽ bắn >80 request
+  // PostgREST cùng lúc và làm nghẽn connection pool của Supabase Free tier.
+  // Mỗi phần tự bắt lỗi để một truy vấn hỏng không làm trắng cả trang —
+  // trước đây trang trả 500 mà không nói gì.
+  const errors: string[] = [];
+  const guard = async <T,>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> => {
+    try {
+      return await fn();
+    } catch (e) {
+      errors.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
+      return fallback;
+    }
+  };
+
+  const hotLeads = await guard("danh sách lead", () => getHotLeads(PAGE_SIZE, offset, filter), []);
+  const total = await guard("đếm tổng", () => getHotLeadsCount(filter), hotLeads.length);
+  const stages = await guard("stage", () => getAvailableStages(), []);
+  const products = await guard("sản phẩm", () => getTopHotProducts(15, activeCourses), []);
+  const listViews = await guard("list view", () => getHotListViews(), []);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const qsBase = new URLSearchParams();
@@ -79,6 +91,17 @@ export default async function HotLeadsPage({
             (chat, reply, click, form) trong 30 ngày qua.
           </p>
         </div>
+
+        {errors.length > 0 && (
+          <div className="mb-5 rounded-xl border border-[#fecaca] bg-[#fee2e2] px-4 py-3 text-[13px] text-[#991b1b]">
+            <div className="font-semibold">Một số dữ liệu không tải được</div>
+            <ul className="mt-1 list-inside list-disc space-y-0.5 font-mono text-[12px]">
+              {errors.map((e) => (
+                <li key={e}>{e}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Lọc theo hành vi — tách lead "tag NÓNG nhưng im lặng" khỏi lead có tương tác thật */}
         <div className="mb-5 flex flex-wrap items-center gap-2">
