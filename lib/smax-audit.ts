@@ -35,12 +35,51 @@ export type AuditData = {
   leads: AuditLead[];
   larkOk: boolean;
   generatedAt: string;
+  from: string; // YYYY-MM-DD (giờ VN)
+  to: string;   // YYYY-MM-DD (giờ VN)
   windowDays: number;
 };
 
+/** Khoảng thời gian đọc từ ?from&to trên URL — mặc định 14 ngày gần nhất. */
+export type DateRange = { from: string; to: string };
+
+const VN_OFFSET_MS = 7 * 3600_000;
+const DEFAULT_DAYS = 14;
+const MAX_DAYS = 400; // chặn range vô lý
+
+function isoDay(ms: number) {
+  return new Date(ms + VN_OFFSET_MS).toISOString().slice(0, 10);
+}
+const isValidDay = (s: unknown): s is string =>
+  typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s));
+
+/** Chuẩn hoá searchParams thành range hợp lệ (sai/thiếu → mặc định 14 ngày). */
+export function parseRange(params?: { from?: string | string[]; to?: string | string[] }): DateRange {
+  const pick = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+  const today = isoDay(Date.now());
+  let from = pick(params?.from);
+  let to = pick(params?.to);
+  if (!isValidDay(from) || !isValidDay(to) || from > to) {
+    from = isoDay(Date.now() - DEFAULT_DAYS * 86400_000);
+    to = today;
+  }
+  if (to > today) to = today;
+  const span = (Date.parse(to) - Date.parse(from)) / 86400_000;
+  if (span > MAX_DAYS) from = isoDay(Date.parse(to) - MAX_DAYS * 86400_000);
+  return { from, to };
+}
+
+/** Biên UTC của range VN: [from 00:00 VN, to 24:00 VN) */
+function rangeBounds(r: DateRange) {
+  return {
+    startISO: new Date(Date.parse(`${r.from}T00:00:00`) - VN_OFFSET_MS).toISOString(),
+    endISO: new Date(Date.parse(`${r.to}T00:00:00`) - VN_OFFSET_MS + 86400_000).toISOString(),
+  };
+}
+
 const LARK_BASE = "https://open.larksuite.com/open-apis";
 const CACHE_TTL_MS = 5 * 60_000;
-let cache: { at: number; days: number; data: AuditData } | null = null;
+let cache: { at: number; key: string; data: AuditData } | null = null;
 
 function lifecycleOf(tags: string[]): AuditLead["lifecycle"] {
   if (tags.includes("Hot Lead")) return "hot";
@@ -50,7 +89,8 @@ function lifecycleOf(tags: string[]): AuditLead["lifecycle"] {
 }
 
 async function fetchLarkFlags(
-  cutoffMs: number
+  startMs: number,
+  endMs: number
 ): Promise<Map<string, { chuaXinInfo: boolean; unreplied: boolean; aiNote: string }> | null> {
   const appId = process.env.LARK_APP_ID;
   const appSecret = process.env.LARK_APP_SECRET;
@@ -88,7 +128,8 @@ async function fetchLarkFlags(
             filter: {
               conjunction: "and",
               conditions: [
-                { field_name: "Time", operator: "isGreater", value: ["ExactDate", String(cutoffMs)] },
+                { field_name: "Time", operator: "isGreater", value: ["ExactDate", String(startMs)] },
+                { field_name: "Time", operator: "isLess", value: ["ExactDate", String(endMs)] },
               ],
             },
             page_size: 500,
@@ -120,13 +161,17 @@ async function fetchLarkFlags(
   }
 }
 
-export async function getAuditData(windowDays = 14): Promise<AuditData> {
-  if (cache && cache.days === windowDays && Date.now() - cache.at < CACHE_TTL_MS) {
+export async function getAuditData(range: DateRange): Promise<AuditData> {
+  const key = `${range.from}_${range.to}`;
+  if (cache && cache.key === key && Date.now() - cache.at < CACHE_TTL_MS) {
     return cache.data;
   }
 
-  const cutoffMs = Date.now() - windowDays * 86400_000;
-  const cutoffISO = new Date(cutoffMs).toISOString();
+  const { startISO, endISO } = rangeBounds(range);
+  const windowDays = Math.max(
+    1,
+    Math.round((Date.parse(range.to) - Date.parse(range.from)) / 86400_000) + 1
+  );
 
   type ViewRow = {
     lead_id: string;
@@ -142,24 +187,25 @@ export async function getAuditData(windowDays = 14): Promise<AuditData> {
   const rows: ViewRow[] = [];
   try {
     const supabase = await createClient();
-    let from = 0;
-    while (from < 20000) {
+    let offset = 0;
+    while (offset < 30000) {
       const { data, error } = await supabase
         .from("v_smax_lead_snapshot")
         .select("lead_id, event_type, occurred_at, fallback_name, total_chats, full_name, email, phone, smax_tags")
-        .gte("occurred_at", cutoffISO)
+        .gte("occurred_at", startISO)
+        .lt("occurred_at", endISO)
         .order("occurred_at", { ascending: false })
-        .range(from, from + 999);
+        .range(offset, offset + 999);
       if (error || !data?.length) break;
       rows.push(...(data as ViewRow[]));
       if (data.length < 1000) break;
-      from += 1000;
+      offset += 1000;
     }
   } catch {
     /* trang hiển thị rỗng + ghi chú thay vì crash */
   }
 
-  const larkFlags = await fetchLarkFlags(cutoffMs);
+  const larkFlags = await fetchLarkFlags(Date.parse(startISO), Date.parse(endISO));
 
   const leads: AuditLead[] = rows.map((r) => {
     const tags = Array.isArray(r.smax_tags) ? r.smax_tags : [];
@@ -172,7 +218,7 @@ export async function getAuditData(windowDays = 14): Promise<AuditData> {
       tags,
       lifecycle: lifecycleOf(tags),
       hasContact: !!(r.email || r.phone),
-      lastActivity: r.occurred_at ?? cutoffISO,
+      lastActivity: r.occurred_at ?? startISO,
       lastEventType: r.event_type ?? "",
       totalChats: Number(r.total_chats ?? 0),
       unreplied: lark ? lark.unreplied : r.event_type === "chat",
@@ -185,9 +231,11 @@ export async function getAuditData(windowDays = 14): Promise<AuditData> {
     leads,
     larkOk: larkFlags !== null,
     generatedAt: new Date().toISOString(),
+    from: range.from,
+    to: range.to,
     windowDays,
   };
-  cache = { at: Date.now(), days: windowDays, data };
+  cache = { at: Date.now(), key, data };
   return data;
 }
 

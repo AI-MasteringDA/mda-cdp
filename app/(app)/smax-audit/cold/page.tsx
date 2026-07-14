@@ -1,14 +1,18 @@
 import { Chip } from "@/components/ui/Chip";
 import { EmptyConfigCard } from "@/components/EmptyConfigCard";
-import { getAuditData } from "@/lib/smax-audit";
+import { AuditDateFilter } from "@/components/AuditDateFilter";
+import { getAuditData, parseRange } from "@/lib/smax-audit";
 import { formatRelativeVi } from "@/lib/utils";
 import { PhoneMissed, Tags } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export default async function ColdAuditPage() {
-  const data = await getAuditData(14);
+type SP = Promise<{ from?: string; to?: string }>;
+
+export default async function ColdAuditPage({ searchParams }: { searchParams: SP }) {
+  const range = parseRange(await searchParams);
+  const data = await getAuditData(range);
   // (a) TVV chưa từng xin thông tin liên hệ (AI đọc hội thoại xác nhận)
   const chuaXin = data.leads
     .filter((l) => l.chuaXinInfo === true)
@@ -20,11 +24,14 @@ export default async function ColdAuditPage() {
 
   return (
     <main className="mx-auto max-w-[1280px] px-8 py-8">
-      <div className="mb-6">
-        <h1 className="text-[28px] font-semibold tracking-tight">Cold Lead Audit</h1>
-        <p className="mt-1 text-[14px] text-muted">
-          Hai lỗ hổng của cold lead: (a) chưa từng xin info · (b) có info rồi nhưng quên gắn tag.
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-[28px] font-semibold tracking-tight">Cold Lead Audit</h1>
+          <p className="mt-1 text-[14px] text-muted">
+            Hai lỗ hổng của cold lead: (a) chưa từng xin info · (b) có info rồi nhưng quên gắn tag.
+          </p>
+        </div>
+        <AuditDateFilter from={range.from} to={range.to} />
       </div>
 
       <section className="mb-10">

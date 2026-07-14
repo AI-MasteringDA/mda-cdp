@@ -1,11 +1,14 @@
 import { Chip } from "@/components/ui/Chip";
 import { EmptyConfigCard } from "@/components/EmptyConfigCard";
-import { getAuditData, type AuditLead } from "@/lib/smax-audit";
+import { AuditDateFilter } from "@/components/AuditDateFilter";
+import { getAuditData, parseRange, type AuditLead } from "@/lib/smax-audit";
 import { formatRelativeVi } from "@/lib/utils";
 import { MessageCircleWarning } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+type SP = Promise<{ from?: string; to?: string }>;
 
 const LIFECYCLE_CHIP: Record<AuditLead["lifecycle"], { label: string; variant: "hot" | "warm" | "cool" | "outline" }> = {
   hot: { label: "Hot", variant: "hot" },
@@ -14,11 +17,10 @@ const LIFECYCLE_CHIP: Record<AuditLead["lifecycle"], { label: string; variant: "
   none: { label: "Chưa tag", variant: "outline" },
 };
 
-export default async function UnrepliedPage() {
-  const data = await getAuditData(14);
-  const list = data.leads
-    .filter((l) => l.unreplied)
-    .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
+export default async function UnrepliedPage({ searchParams }: { searchParams: SP }) {
+  const range = parseRange(await searchParams);
+  const data = await getAuditData(range);
+  const list = data.leads.filter((l) => l.unreplied);
   const hotFirst = [...list].sort((a, b) => {
     const rank = { hot: 0, warm: 1, none: 2, cold: 3 } as const;
     return rank[a.lifecycle] - rank[b.lifecycle] || b.lastActivity.localeCompare(a.lastActivity);
@@ -26,14 +28,17 @@ export default async function UnrepliedPage() {
 
   return (
     <main className="mx-auto max-w-[1280px] px-8 py-8">
-      <div className="mb-6">
-        <h1 className="text-[28px] font-semibold tracking-tight">
-          Chưa phản hồi <span className="text-muted font-normal">— {list.length} khách đang chờ</span>
-        </h1>
-        <p className="mt-1 text-[14px] text-muted">
-          Tin nhắn cuối cùng là của khách, TVV chưa trả lời. Sắp theo mức ưu tiên: Hot → Warm → chưa tag → Cold.
-          Cờ tự xoá khi TVV rep (sync 15 phút).
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-[28px] font-semibold tracking-tight">
+            Chưa phản hồi <span className="text-muted font-normal">— {list.length} khách đang chờ</span>
+          </h1>
+          <p className="mt-1 text-[14px] text-muted">
+            Tin nhắn cuối cùng là của khách, TVV chưa trả lời. Sắp theo mức ưu tiên: Hot → Warm → chưa tag → Cold.
+            Cờ tự xoá khi TVV rep (sync 15 phút).
+          </p>
+        </div>
+        <AuditDateFilter from={range.from} to={range.to} />
       </div>
 
       {list.length === 0 ? (

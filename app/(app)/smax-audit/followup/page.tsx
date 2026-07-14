@@ -1,14 +1,18 @@
 import { Chip } from "@/components/ui/Chip";
 import { EmptyConfigCard } from "@/components/EmptyConfigCard";
-import { getAuditData, needsFollowup } from "@/lib/smax-audit";
+import { AuditDateFilter } from "@/components/AuditDateFilter";
+import { getAuditData, needsFollowup, parseRange } from "@/lib/smax-audit";
 import { formatRelativeVi } from "@/lib/utils";
 import { BellRing, Flame, Thermometer } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export default async function FollowupPage() {
-  const data = await getAuditData(14);
+type SP = Promise<{ from?: string; to?: string }>;
+
+export default async function FollowupPage({ searchParams }: { searchParams: SP }) {
+  const range = parseRange(await searchParams);
+  const data = await getAuditData(range);
   const candidates = needsFollowup(data, 3).sort(
     (a, b) => a.lastActivity.localeCompare(b.lastActivity) // im ắng lâu nhất lên đầu
   );
@@ -77,12 +81,15 @@ export default async function FollowupPage() {
 
   return (
     <main className="mx-auto max-w-[1280px] px-8 py-8">
-      <div className="mb-6">
-        <h1 className="text-[28px] font-semibold tracking-tight">Follow-up Hot &amp; Warm</h1>
-        <p className="mt-1 text-[14px] text-muted">
-          Lead Hot/Warm không có tin nhắn mới ≥ 3 ngày (đã loại &quot;Đã chốt&quot;) — im ắng lâu nhất
-          xếp trên. Đây là danh sách gọi lại tuần này của TVV.
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-[28px] font-semibold tracking-tight">Follow-up Hot &amp; Warm</h1>
+          <p className="mt-1 text-[14px] text-muted">
+            Lead Hot/Warm không có tin nhắn mới ≥ 3 ngày (đã loại &quot;Đã chốt&quot;) — im ắng lâu nhất
+            xếp trên. Đây là danh sách gọi lại tuần này của TVV.
+          </p>
+        </div>
+        <AuditDateFilter from={range.from} to={range.to} />
       </div>
       {candidates.length === 0 ? (
         <EmptyConfigCard
