@@ -563,6 +563,11 @@ async function pushSmaxLeadSnapshot(token: string) {
         "Title": (r.title || "").slice(0, 500),
         "Detail": (r.detail || "").slice(0, 500),
         "Lead ID": r.lead_id,
+        // "Chưa phản hồi" từ Event: 'chat' = khách nhắn cuối → tick.
+        // Cập nhật mỗi push cho MỌI lead thay đổi (không phụ thuộc fetch chat).
+        // Khối chat-refresh phía dưới sẽ ghi đè bằng kết quả merge đa-thread
+        // (chính xác hơn) cho các lead được refresh chat trong run này.
+        "Chưa phản hồi": r.event_type === "chat",
       },
     };
   });
