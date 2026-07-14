@@ -4,6 +4,7 @@ import { LeadListItem } from "@/components/LeadListItem";
 import { getAllLeads, getAllLeadsCount } from "@/lib/supabase/queries";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const PAGE_SIZE = 100;
 

@@ -5,6 +5,7 @@ import { LeadListToolbar } from "@/components/LeadListToolbar";
 import { getCoolLeads, getCoolLeadsCount, getAvailableStages, type LeadListFilter } from "@/lib/supabase/queries";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const PAGE_SIZE = 100;
 

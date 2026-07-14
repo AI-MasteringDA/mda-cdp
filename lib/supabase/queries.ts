@@ -273,14 +273,18 @@ async function joinLeads(
   sort: LeadListFilter["sort"]
 ): Promise<Lead[]> {
   const leadIds = scores.map((s) => s.lead_id);
-  // Batch .in() at 500 IDs per call — Supabase rejects URL when list exceeds ~1000 IDs
+  // 100 IDs per .in(), not 500: PostgREST caps the request URL around 8KB, and
+  // 500 UUIDs blows past it — the query then takes ~45s and silently returns a
+  // FRACTION of the rows (209 of 2,709 when scoring v12 grew the hot list).
+  // Batches run in parallel; 28 short queries beat 6 huge ones by ~10x.
+  const IN_BATCH = 100;
+  const batches: string[][] = [];
+  for (let i = 0; i < leadIds.length; i += IN_BATCH) batches.push(leadIds.slice(i, i + IN_BATCH));
+  const pages = await Promise.all(
+    batches.map((b) => supabase.from("dim_lead").select("*").in("lead_id", b))
+  );
   const leadsAll: Record<string, unknown>[] = [];
-  const IN_BATCH = 500;
-  for (let i = 0; i < leadIds.length; i += IN_BATCH) {
-    const batch = leadIds.slice(i, i + IN_BATCH);
-    const { data } = await supabase.from("dim_lead").select("*").in("lead_id", batch);
-    if (data?.length) leadsAll.push(...(data as Record<string, unknown>[]));
-  }
+  for (const p of pages) if (p.data?.length) leadsAll.push(...(p.data as Record<string, unknown>[]));
   if (leadsAll.length === 0) return [];
   const leadMap = new Map(leadsAll.map((l) => [l.lead_id as string, l as unknown as LeadRow]));
   const merged = scores
@@ -350,21 +354,27 @@ async function countLeadsByScoreRange(min: number, max: number, filter?: LeadLis
     if (leadIds.length === 0) return 0;
   }
 
+  // 100 per .in() (URL-length cap) và chạy song song — xem ghi chú ở joinLeads
+  const countBatches: string[][] = [];
+  for (let i = 0; i < leadIds.length; i += 100) countBatches.push(leadIds.slice(i, i + 100));
+  // engagement lọc trên các cột đếm → phải đọc row, không head-count được
+  const cols = filter?.engagement
+    ? "chat_count, email_click_count, email_reply_count, form_submit_count, conversion_count"
+    : "*";
+  const results = await Promise.all(
+    countBatches.map((batch) => {
+      let q = supabase
+        .from("dim_lead")
+        .select(cols, filter?.engagement ? undefined : { count: "exact", head: true })
+        .in("lead_id", batch);
+      if (filter?.source) q = q.eq("source", filter.source);
+      if (filter?.stage) q = q.eq("stage", filter.stage);
+      if (filter?.product) q = q.ilike("sf_product", `%${filter.product}%`);
+      return q;
+    })
+  );
   let total = 0;
-  for (let i = 0; i < leadIds.length; i += 500) {
-    const batch = leadIds.slice(i, i + 500);
-    // engagement lọc trên các cột đếm → phải đọc row, không head-count được
-    const cols = filter?.engagement
-      ? "chat_count, email_click_count, email_reply_count, form_submit_count, conversion_count"
-      : "*";
-    let q = supabase
-      .from("dim_lead")
-      .select(cols, filter?.engagement ? undefined : { count: "exact", head: true })
-      .in("lead_id", batch);
-    if (filter?.source) q = q.eq("source", filter.source);
-    if (filter?.stage) q = q.eq("stage", filter.stage);
-    if (filter?.product) q = q.ilike("sf_product", `%${filter.product}%`);
-    const { data, count } = await q;
+  for (const { data, count } of results) {
     if (!filter?.engagement) { total += count ?? 0; continue; }
     for (const r of (data ?? []) as unknown as Record<string, number | null>[]) {
       const engaged =
@@ -455,13 +465,15 @@ export async function getTopHotProducts(limit = 15, activeCourses: string[] = []
   if (scoresAll.length === 0) return [];
   const leadIds = scoresAll.map((s) => s.lead_id);
   const productCounts = new Map<string, number>();
-  for (let i = 0; i < leadIds.length; i += 500) {
-    const batch = leadIds.slice(i, i + 500);
-    const { data: leads } = await supabase
-      .from("dim_lead")
-      .select("sf_product")
-      .in("lead_id", batch)
-      .not("sf_product", "is", null);
+  // 100 per .in(), song song — xem ghi chú ở joinLeads
+  const prodBatches: string[][] = [];
+  for (let i = 0; i < leadIds.length; i += 100) prodBatches.push(leadIds.slice(i, i + 100));
+  const prodPages = await Promise.all(
+    prodBatches.map((b) =>
+      supabase.from("dim_lead").select("sf_product").in("lead_id", b).not("sf_product", "is", null)
+    )
+  );
+  for (const { data: leads } of prodPages) {
     for (const l of leads ?? []) {
       const p = (l.sf_product || "").trim();
       if (!p || p === "Data Analytics Training") continue;
