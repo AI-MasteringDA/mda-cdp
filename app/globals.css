@@ -331,3 +331,15 @@ body::before {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Thanh tiến trình bất định của bộ lọc ngày (SMAX Audit) */
+@keyframes audit-bar-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.audit-bar-indeterminate {
+  animation: audit-bar-slide 1.1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .audit-bar-indeterminate { animation: none; width: 100%; opacity: 0.6; }
+}

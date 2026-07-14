@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { Calendar, ChevronDown, Check } from "lucide-react";
+import { Calendar, ChevronDown, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PRESETS = [
@@ -37,9 +37,16 @@ export function AuditDateFilter({ from, to }: { from: string; to: string }) {
   const [open, setOpen] = useState(false);
   const [customFrom, setCustomFrom] = useState(from);
   const [customTo, setCustomTo] = useState(to);
+  // Server component fetch mất vài giây với khoảng dài — useTransition cho biết
+  // khi nào dữ liệu mới đang về, và `pending` là khoảng người dùng vừa chọn
+  // (khác `from/to` vì props chỉ đổi sau khi server trả xong).
+  const [isPending, startTransition] = useTransition();
+  const [pendingRange, setPendingRange] = useState<{ f: string; t: string } | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setCustomFrom(from); setCustomTo(to); }, [from, to]);
+  // Dữ liệu đã về → bỏ trạng thái chờ
+  useEffect(() => { if (!isPending) setPendingRange(null); }, [isPending]);
 
   useEffect(() => {
     if (!open) return;
@@ -56,36 +63,57 @@ export function AuditDateFilter({ from, to }: { from: string; to: string }) {
   }, [open]);
 
   const apply = (f: string, t: string) => {
+    if (f === from && t === to) { setOpen(false); return; }
     const next = new URLSearchParams(params.toString());
     next.set("from", f);
     next.set("to", t);
     setOpen(false);
-    router.push(`${pathname}?${next.toString()}`);
+    setPendingRange({ f, t });
+    startTransition(() => router.push(`${pathname}?${next.toString()}`));
   };
 
-  // preset nào đang active?
+  // Trong lúc chờ server, hiển thị khoảng NGƯỜI DÙNG VỪA CHỌN, không phải khoảng cũ
+  const shownFrom = pendingRange?.f ?? from;
+  const shownTo = pendingRange?.t ?? to;
   const today = isoToday();
-  const activePreset = to === today
-    ? PRESETS.find((p) => isoDaysAgo(p.days) === from)?.days
+  const activePreset = shownTo === today
+    ? PRESETS.find((p) => isoDaysAgo(p.days) === shownFrom)?.days
     : undefined;
   const label = activePreset
     ? PRESETS.find((p) => p.days === activePreset)!.label
-    : `${fmt(from)} → ${fmt(to)}`;
+    : `${fmt(shownFrom)} → ${fmt(shownTo)}`;
 
   return (
     <div className="relative" ref={boxRef}>
+      {/* Thanh tiến trình mảnh chạy ngang phía trên nút khi đang tải */}
+      {isPending && (
+        <span className="pointer-events-none absolute -top-1.5 left-0 right-0 h-[2px] overflow-hidden rounded-full bg-[var(--border-subtle)]">
+          <span className="audit-bar-indeterminate block h-full w-1/3 rounded-full bg-[var(--cool)]" />
+        </span>
+      )}
       <button
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
+        aria-busy={isPending}
         className={cn(
-          "press flex items-center gap-2 rounded-lg border border-[var(--border-subtle)]",
-          "bg-[var(--background)] px-3.5 py-2 text-[13px] font-medium",
-          "hover:bg-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          "press flex items-center gap-2 rounded-lg border px-3.5 py-2 text-[13px] font-medium",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
+          isPending
+            ? "border-[var(--cool)] bg-[color-mix(in_srgb,var(--cool)_8%,transparent)]"
+            : "border-[var(--border-subtle)] bg-[var(--background)] hover:bg-subtle"
         )}
       >
-        <Calendar className="h-4 w-4 text-muted" strokeWidth={1.75} />
+        {isPending ? (
+          <Loader2 className="h-4 w-4 animate-spin text-[var(--cool)]" strokeWidth={2} />
+        ) : (
+          <Calendar className="h-4 w-4 text-muted" strokeWidth={1.75} />
+        )}
         <span className="tabular-nums">{label}</span>
-        <ChevronDown className={cn("h-3.5 w-3.5 text-muted-2 transition-transform", open && "rotate-180")} />
+        {isPending ? (
+          <span className="text-[12px] font-semibold text-[var(--cool)]">đang lọc…</span>
+        ) : (
+          <ChevronDown className={cn("h-3.5 w-3.5 text-muted-2 transition-transform", open && "rotate-180")} />
+        )}
       </button>
 
       {open && (
