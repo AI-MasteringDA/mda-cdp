@@ -45,6 +45,16 @@ type LeadRow = {
   sf_product?: string | null;
   sf_rating?: string | null;
   sf_status?: string | null;
+  /** Tag Giàu gắn trên SMAX — scoring v12 coi "Hot Lead" ngang sf_rating='Hot' */
+  smax_tags?: string[] | null;
+  /** Cột aggregate (recompute_lead_aggregates) — tương tác thật của lead từng kênh */
+  email_open_count?: number | null;
+  email_click_count?: number | null;
+  email_reply_count?: number | null;
+  web_page_view_count?: number | null;
+  form_submit_count?: number | null;
+  chat_count?: number | null;
+  conversion_count?: number | null;
 };
 
 type ScoreRow = {
@@ -116,6 +126,23 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
     sfProduct: row.sf_product || null,
     sfRating: row.sf_rating || null,
     sfStatus: row.sf_status || null,
+    smaxTags: Array.isArray(row.smax_tags) ? (row.smax_tags as string[]) : [],
+    signals: {
+      emailOpens: Number(row.email_open_count ?? 0),
+      emailClicks: Number(row.email_click_count ?? 0),
+      emailReplies: Number(row.email_reply_count ?? 0),
+      webViews: Number(row.web_page_view_count ?? 0),
+      formSubmits: Number(row.form_submit_count ?? 0),
+      chats: Number(row.chat_count ?? 0),
+      conversions: Number(row.conversion_count ?? 0),
+      hasRealEngagement:
+        Number(row.chat_count ?? 0) +
+          Number(row.email_click_count ?? 0) +
+          Number(row.email_reply_count ?? 0) +
+          Number(row.form_submit_count ?? 0) +
+          Number(row.conversion_count ?? 0) >
+        0,
+    },
     touchpoints: touchpoints.map<Touchpoint>((t) => ({
       id: t.id,
       source: t.source as Touchpoint["source"],
@@ -147,6 +174,11 @@ export type LeadListFilter = {
   product?: string;
   /** Filter by SF ListView id (Sales' saved filter). Membership auto-synced hourly. */
   listView?: string;
+  /**
+   * "engaged": chỉ giữ lead CÓ hành vi chủ động (chat / click / reply / form / đã mua).
+   * Dùng để tách lead Sales tag NÓNG nhưng CDP chưa thấy tương tác nào.
+   */
+  engagement?: "engaged" | "silent";
   sort?: "score-desc" | "score-asc" | "recent" | "oldest" | "name";
 };
 
@@ -228,6 +260,8 @@ async function fetchLeadsByScoreRange(
     if (filter?.stage && l.stage !== filter.stage) return false;
     if (productLower && !(l.sfProduct || "").toLowerCase().includes(productLower)) return false;
     if (listViewLeadIds && !listViewLeadIds.has(l.id)) return false;
+    if (filter?.engagement === "engaged" && !l.signals?.hasRealEngagement) return false;
+    if (filter?.engagement === "silent" && l.signals?.hasRealEngagement) return false;
     return true;
   });
   return filtered.slice(offset, offset + limit);
@@ -267,7 +301,7 @@ async function countLeadsByScoreRange(min: number, max: number, filter?: LeadLis
   const supabase = await createClient();
   const latestDate = await getLatestScoredAt(supabase);
   // No meta filter → exact count fast
-  if (!filter?.source && !filter?.stage && !filter?.product && !filter?.listView) {
+  if (!filter?.source && !filter?.stage && !filter?.product && !filter?.listView && !filter?.engagement) {
     const { count } = await supabase
       .from("fact_lead_score")
       .select("*", { count: "exact", head: true })
@@ -319,12 +353,25 @@ async function countLeadsByScoreRange(min: number, max: number, filter?: LeadLis
   let total = 0;
   for (let i = 0; i < leadIds.length; i += 500) {
     const batch = leadIds.slice(i, i + 500);
-    let q = supabase.from("dim_lead").select("*", { count: "exact", head: true }).in("lead_id", batch);
+    // engagement lọc trên các cột đếm → phải đọc row, không head-count được
+    const cols = filter?.engagement
+      ? "chat_count, email_click_count, email_reply_count, form_submit_count, conversion_count"
+      : "*";
+    let q = supabase
+      .from("dim_lead")
+      .select(cols, filter?.engagement ? undefined : { count: "exact", head: true })
+      .in("lead_id", batch);
     if (filter?.source) q = q.eq("source", filter.source);
     if (filter?.stage) q = q.eq("stage", filter.stage);
     if (filter?.product) q = q.ilike("sf_product", `%${filter.product}%`);
-    const { count } = await q;
-    total += count ?? 0;
+    const { data, count } = await q;
+    if (!filter?.engagement) { total += count ?? 0; continue; }
+    for (const r of (data ?? []) as unknown as Record<string, number | null>[]) {
+      const engaged =
+        (r.chat_count ?? 0) + (r.email_click_count ?? 0) + (r.email_reply_count ?? 0) +
+        (r.form_submit_count ?? 0) + (r.conversion_count ?? 0) > 0;
+      if (filter.engagement === "engaged" ? engaged : !engaged) total++;
+    }
   }
   return total;
 }

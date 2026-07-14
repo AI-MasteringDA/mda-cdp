@@ -11,16 +11,19 @@ const PAGE_SIZE = 100;
 export default async function HotLeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; src?: string; stage?: string; product?: string; listView?: string; sort?: string }>;
+  searchParams: Promise<{ page?: string; src?: string; stage?: string; product?: string; listView?: string; sort?: string; eng?: string }>;
 }) {
   const params = await searchParams;
   const page = Math.max(1, Number(params.page || 1));
   const offset = (page - 1) * PAGE_SIZE;
+  const engagement =
+    params.eng === "engaged" || params.eng === "silent" ? (params.eng as "engaged" | "silent") : undefined;
   const filter: LeadListFilter = {
     source: params.src,
     stage: params.stage,
     product: params.product,
     listView: params.listView,
+    engagement,
     sort: (params.sort as LeadListFilter["sort"]) || "score-desc",
   };
   const activeCourses = (process.env.ACTIVE_COURSES || "K61,F3 - 2026")
@@ -41,24 +44,61 @@ export default async function HotLeadsPage({
   if (params.stage) qsBase.set("stage", params.stage);
   if (params.product) qsBase.set("product", params.product);
   if (params.listView) qsBase.set("listView", params.listView);
+  if (params.eng) qsBase.set("eng", params.eng);
   if (params.sort && params.sort !== "score-desc") qsBase.set("sort", params.sort);
   const buildPageUrl = (p: number) => {
     const qs = new URLSearchParams(qsBase);
     if (p > 1) qs.set("page", String(p));
     return `/hot-leads${qs.toString() ? "?" + qs.toString() : ""}`;
   };
+  // Link cho 3 nút lọc theo hành vi (giữ nguyên các filter khác)
+  const engUrl = (v?: "engaged" | "silent") => {
+    const qs = new URLSearchParams(qsBase);
+    qs.delete("page");
+    if (v) qs.set("eng", v);
+    else qs.delete("eng");
+    return `/hot-leads${qs.toString() ? "?" + qs.toString() : ""}`;
+  };
+  const ENG_TABS: { v?: "engaged" | "silent"; label: string; hint: string }[] = [
+    { v: undefined, label: "Tất cả", hint: "Mọi lead điểm ≥70" },
+    { v: "engaged", label: "✅ Có hành vi", hint: "Lead đã chat / click / reply / submit form / mua — intent được xác nhận" },
+    { v: "silent", label: "⚠ Chỉ có tag", hint: "Sales tag NÓNG nhưng CDP chưa ghi nhận hành vi nào (có thể chat Zalo / gọi điện — kênh không track)" },
+  ];
 
   return (
     <>
       <Topbar title="Lead NÓNG" />
       <main className="mx-auto max-w-[1280px] px-8 py-8">
-        <div className="mb-6">
+        <div className="mb-4">
           <h1 className="text-[28px] font-semibold tracking-tight">
             🔥 {total.toLocaleString("vi-VN")} lead NÓNG — gọi NGAY hôm nay
           </h1>
           <p className="mt-1 text-[14px] text-muted">
-            Điểm 70-100 · có LEAD-INITIATED signal (chat, reply, click, form) trong 30 ngày qua. Actionable close deal.
+            Điểm 70-100 · lead Sales tag NÓNG (SMAX/Salesforce) HOẶC có hành vi intent mạnh
+            (chat, reply, click, form) trong 30 ngày qua.
           </p>
+        </div>
+
+        {/* Lọc theo hành vi — tách lead "tag NÓNG nhưng im lặng" khỏi lead có tương tác thật */}
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          {ENG_TABS.map((t) => {
+            const active = (params.eng ?? undefined) === t.v;
+            return (
+              <Link
+                key={t.label}
+                href={engUrl(t.v)}
+                title={t.hint}
+                className={
+                  "press rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition-colors " +
+                  (active
+                    ? "border-foreground bg-foreground text-[var(--background)]"
+                    : "border-[var(--border-subtle)] text-muted hover:bg-subtle hover:text-foreground")
+                }
+              >
+                {t.label}
+              </Link>
+            );
+          })}
         </div>
 
         <LeadListToolbar leads={hotLeads} total={total} availableStages={stages} availableProducts={products} activeCourses={activeCourses} availableListViews={listViews} exportFilename="hot-leads.csv" />

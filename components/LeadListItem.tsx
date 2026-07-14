@@ -3,6 +3,7 @@ import { ChevronRight } from "lucide-react";
 import type { Lead } from "@/types/lead";
 import { Avatar } from "./ui/Avatar";
 import { Chip, ScoreBadge, TierChip } from "./ui/Chip";
+import { SignalChips } from "./SignalChips";
 import { formatRelativeVi } from "@/lib/utils";
 
 export function LeadListItem({ lead }: { lead: Lead }) {
@@ -39,6 +40,13 @@ export function LeadListItem({ lead }: { lead: Lead }) {
             · 👤 {formatRelativeVi(lead.lastContactAt)}
           </span>
         </div>
+        {/* Tag Sales gắn + hành vi thật ở từng kênh — để biết NÓNG có được xác nhận không */}
+        <SignalChips
+          className="mt-1.5"
+          signals={lead.signals}
+          smaxTags={lead.smaxTags}
+          sfRating={lead.sfRating}
+        />
       </div>
 
       <TierChip tier={lead.tier} />

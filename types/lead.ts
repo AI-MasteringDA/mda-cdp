@@ -64,7 +64,24 @@ export interface Lead {
   sfProduct?: string | null;
   sfRating?: string | null;
   sfStatus?: string | null;
+  /** Tag SMAX Giàu gắn — "Hot Lead" ở đây cũng đẩy lead lên NÓNG (scoring v12) */
+  smaxTags?: string[];
+  /** Lead có thật sự tương tác ở từng kênh không — để biết tag NÓNG có được hành vi xác nhận */
+  signals?: LeadSignals;
   touchpoints: Touchpoint[];
+}
+
+/** Tương tác thật của lead ở từng kênh (đọc từ cột aggregate của dim_lead). */
+export interface LeadSignals {
+  emailOpens: number;
+  emailClicks: number;
+  emailReplies: number;
+  webViews: number;
+  formSubmits: number;
+  chats: number;
+  conversions: number;
+  /** Lead CHỦ ĐỘNG làm gì đó (không tính email/chat do MDA gửi đi) */
+  hasRealEngagement: boolean;
 }
 
 export function scoreToTier(score: number): LeadTier {
