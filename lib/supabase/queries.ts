@@ -48,9 +48,10 @@ export const TIER_RANGE: Record<LeadTier, [number, number]> = {
 
 type LeadRow = {
   lead_id: string;
-  email: string;
-  phone: string;
-  full_name: string;
+  // NULL được — lead SMAX ẩn danh chỉ có smax_customer_id
+  email: string | null;
+  phone: string | null;
+  full_name: string | null;
   source: string;
   avatar_color: string;
   stage: string;
@@ -118,9 +119,12 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
   const reasons = parseReasons(score?.hot_reasons);
   return {
     id: row.lead_id,
-    name: row.full_name,
-    email: row.email,
-    phone: row.phone,
+    // dim_lead cho phép NULL ở name/email/phone — lead SMAX ẩn danh không có gì
+    // cả. Phải điền mặc định ở đây, nếu không component render sẽ ném lỗi và
+    // làm trắng cả trang (initials(null) → TypeError).
+    name: row.full_name || "(không tên)",
+    email: row.email || "",
+    phone: row.phone || "",
     source: row.source as Lead["source"],
     avatarColor: row.avatar_color,
     score: unifiedScore,
