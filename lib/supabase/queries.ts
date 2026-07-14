@@ -1,4 +1,5 @@
 import { unstable_cache } from "next/cache";
+import { cache } from "react";
 import { createClient } from "./server";
 import { getAnalyticsClient } from "./analytics";
 import type { Lead, LeadTier, ScoreReason, Touchpoint } from "@/types/lead";
@@ -157,15 +158,36 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
   };
 }
 
-async function getLatestScoredAt(supabase: Awaited<ReturnType<typeof createClient>>): Promise<string> {
-  const { data } = await supabase
-    .from("fact_lead_score")
-    .select("scored_at")
-    .order("scored_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  return data?.scored_at || new Date().toISOString().slice(0, 10);
-}
+/**
+ * Ngày scoring mới nhất.
+ *
+ * Mỗi trang lead gọi hàm này 4-5 lần (getHotLeads, count, products, list views).
+ * `ORDER BY scored_at DESC LIMIT 1` trên fact_lead_score (230k+ dòng) vốn phải
+ * quét toàn bảng — với statement_timeout của role app thì query CHẾT, khiến
+ * trang trả 500. Hai lớp phòng thủ:
+ *   1. Index idx_fls_scored_at (xem supabase/fix-scoring-indexes.sql).
+ *   2. cache() — dùng lại kết quả trong cùng một request thay vì hỏi 5 lần.
+ * Fallback: hôm nay, rồi hôm qua (scoring cron có thể chưa chạy hôm nay).
+ */
+const getLatestScoredAt = cache(
+  async (supabase: Awaited<ReturnType<typeof createClient>>): Promise<string> => {
+    const { data, error } = await supabase
+      .from("fact_lead_score")
+      .select("scored_at")
+      .order("scored_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!error && data?.scored_at) return data.scored_at;
+    const today = new Date().toISOString().slice(0, 10);
+    // Query lỗi/timeout → thử hôm nay, nếu bảng chưa có thì hôm qua
+    const { count } = await supabase
+      .from("fact_lead_score")
+      .select("*", { count: "exact", head: true })
+      .eq("scored_at", today);
+    if ((count ?? 0) > 0) return today;
+    return new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+  }
+);
 
 export type LeadListFilter = {
   source?: string;
