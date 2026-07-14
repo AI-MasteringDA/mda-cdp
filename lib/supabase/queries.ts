@@ -227,17 +227,41 @@ export type LeadListFilter = {
    * Dùng để tách lead Sales tag NÓNG nhưng CDP chưa thấy tương tác nào.
    */
   engagement?: "engaged" | "silent";
+  /**
+   * Lọc theo LẦN TƯƠNG TÁC CUỐI (YYYY-MM-DD, giờ VN).
+   * Scoring miễn phạt im lặng cho lead Sales tag NÓNG, nên danh sách NÓNG có cả
+   * lead im 6-12 tháng. Bộ lọc này để chỉ lấy lead còn "sống".
+   */
+  from?: string;
+  to?: string;
   sort?: "score-desc" | "score-asc" | "recent" | "oldest" | "name";
 };
 
-async function fetchLeadsByScoreRange(
+const VN_MS = 7 * 3600_000;
+/** [from 00:00, to 24:00) giờ VN → mốc epoch */
+function rangeMs(filter?: LeadListFilter): { fromMs?: number; toMs?: number } {
+  const ok = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  return {
+    fromMs: ok(filter?.from) ? Date.parse(`${filter!.from}T00:00:00`) - VN_MS : undefined,
+    toMs: ok(filter?.to) ? Date.parse(`${filter!.to}T00:00:00`) - VN_MS + 86400_000 : undefined,
+  };
+}
+
+/**
+ * Một trang lead + tổng số sau khi lọc, trong MỘT lần đọc.
+ *
+ * Trước đây trang gọi cả getHotLeads lẫn getHotLeadsCount, mỗi hàm tự kéo lại
+ * toàn bộ danh sách khi có filter — làm gấp đôi việc. Ở đây fetch một lần rồi
+ * vừa cắt trang vừa đếm.
+ */
+async function fetchLeadsPage(
   minScore: number,
   maxScore: number,
   limit: number,
   offset: number,
-  scoreAsc = false, // for cold/dormant, ascending = "most dormant first"
+  scoreAsc = false, // cold/dormant: tăng dần = "ngủ sâu nhất trước"
   filter?: LeadListFilter
-): Promise<Lead[]> {
+): Promise<{ leads: Lead[]; total: number }> {
   const supabase = await createClient();
   const latestDate = await getLatestScoredAt(supabase);
   let query = supabase
@@ -252,12 +276,26 @@ async function fetchLeadsByScoreRange(
   if (sort === "score-asc") query = query.order("hot_score", { ascending: true });
   else query = query.order("hot_score", { ascending: false });
 
-  // If no source/stage/product/listView filter, paginate at SQL level
-  const hasMetaFilter = !!(filter?.source || filter?.stage || filter?.product || filter?.listView);
+  const { fromMs, toMs } = rangeMs(filter);
+  // engagement + from/to lọc trên dữ liệu đã ghép, nên không phân trang ở tầng
+  // SQL được — phải kéo hết rồi lọc. (Thiếu chúng ở đây là lý do ?eng= từng
+  // không có tác dụng.)
+  const hasMetaFilter = !!(
+    filter?.source || filter?.stage || filter?.product || filter?.listView ||
+    filter?.engagement || fromMs || toMs
+  );
   if (!hasMetaFilter) {
-    const { data: scores } = await query.range(offset, offset + limit - 1);
-    if (!scores || scores.length === 0) return [];
-    return joinLeads(supabase, scores, sort);
+    const [{ data: scores }, { count }] = await Promise.all([
+      query.range(offset, offset + limit - 1),
+      supabase
+        .from("fact_lead_score")
+        .select("*", { count: "exact", head: true })
+        .eq("scored_at", latestDate)
+        .gte("hot_score", minScore)
+        .lte("hot_score", maxScore),
+    ]);
+    if (!scores || scores.length === 0) return { leads: [], total: count ?? 0 };
+    return { leads: await joinLeads(supabase, scores, sort), total: count ?? 0 };
   }
 
   // Pre-filter by list view membership (if filter is set) — reduces scores to intersect
@@ -300,7 +338,7 @@ async function fetchLeadsByScoreRange(
     scoreFrom += CHUNK;
   }
   const scores = scoresAll;
-  if (scores.length === 0) return [];
+  if (scores.length === 0) return { leads: [], total: 0 };
   const all = await joinLeads(supabase, scores, sort);
   const productLower = filter?.product?.toLowerCase();
   const filtered = all.filter((l) => {
@@ -310,9 +348,12 @@ async function fetchLeadsByScoreRange(
     if (listViewLeadIds && !listViewLeadIds.has(l.id)) return false;
     if (filter?.engagement === "engaged" && !l.signals?.hasRealEngagement) return false;
     if (filter?.engagement === "silent" && l.signals?.hasRealEngagement) return false;
+    const last = l.lastContactAt.getTime();
+    if (fromMs && last < fromMs) return false;
+    if (toMs && last >= toMs) return false;
     return true;
   });
-  return filtered.slice(offset, offset + limit);
+  return { leads: filtered.slice(offset, offset + limit), total: filtered.length };
 }
 
 async function joinLeads(
@@ -485,7 +526,11 @@ export async function getHotListViews(): Promise<{ viewId: string; viewName: str
 }
 
 export const getHotLeads = (limit = 50, offset = 0, filter?: LeadListFilter) =>
-  fetchLeadsByScoreRange(70, 100, limit, offset, false, filter);
+  fetchLeadsPage(70, 100, limit, offset, false, filter).then((r) => r.leads);
+
+/** Danh sách + tổng trong một lần đọc — dùng cho trang Lead NÓNG. */
+export const getHotLeadsPage = (limit = 100, offset = 0, filter?: LeadListFilter) =>
+  fetchLeadsPage(70, 100, limit, offset, false, filter);
 
 /**
  * Auto-discover top products in Hot leads (for filter dropdown).
@@ -605,20 +650,20 @@ export async function getCrossSellStats() {
 }
 
 export const getWarmLeads = (limit = 100, offset = 0, filter?: LeadListFilter) =>
-  fetchLeadsByScoreRange(40, 69, limit, offset, false, filter);
+  fetchLeadsPage(40, 69, limit, offset, false, filter).then((r) => r.leads);
 export const getWarmLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(40, 69, filter);
 
 export const getCoolLeads = (limit = 100, offset = 0, filter?: LeadListFilter) =>
-  fetchLeadsByScoreRange(20, 39, limit, offset, false, filter);
+  fetchLeadsPage(20, 39, limit, offset, false, filter).then((r) => r.leads);
 export const getCoolLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(20, 39, filter);
 
 export const getDormantLeads = (limit = 100, offset = 0, filter?: LeadListFilter) =>
-  fetchLeadsByScoreRange(0, 19, limit, offset, true, filter);
+  fetchLeadsPage(0, 19, limit, offset, true, filter).then((r) => r.leads);
 export const getDormantLeadsCount = (filter?: LeadListFilter) => countLeadsByScoreRange(0, 19, filter);
 
 // Deprecated aliases — old /cold-leads route still uses these
 export const getColdLeads = (limit = 100, offset = 0) =>
-  fetchLeadsByScoreRange(0, 39, limit, offset, true);
+  fetchLeadsPage(0, 39, limit, offset, true).then((r) => r.leads);
 export const getColdLeadsCount = () => countLeadsByScoreRange(0, 39);
 
 function buildSearchOrClause(q: string): string {

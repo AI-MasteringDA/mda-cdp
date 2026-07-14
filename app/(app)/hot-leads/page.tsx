@@ -2,29 +2,37 @@ import Link from "next/link";
 import { Topbar } from "@/components/Topbar";
 import { LeadListItem } from "@/components/LeadListItem";
 import { LeadListToolbar } from "@/components/LeadListToolbar";
-import { getHotLeads, getHotLeadsCount, getAvailableStages, getTopHotProducts, getHotListViews, type LeadListFilter } from "@/lib/supabase/queries";
+import { LeadActivityFilter } from "@/components/LeadActivityFilter";
+import { getHotLeadsPage, getAvailableStages, getTopHotProducts, getHotListViews, type LeadListFilter } from "@/lib/supabase/queries";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const PAGE_SIZE = 100;
+const isDay = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 export default async function HotLeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; src?: string; stage?: string; product?: string; listView?: string; sort?: string; eng?: string }>;
+  searchParams: Promise<{ page?: string; src?: string; stage?: string; product?: string; listView?: string; sort?: string; eng?: string; from?: string; to?: string }>;
 }) {
   const params = await searchParams;
   const page = Math.max(1, Number(params.page || 1));
   const offset = (page - 1) * PAGE_SIZE;
   const engagement =
     params.eng === "engaged" || params.eng === "silent" ? (params.eng as "engaged" | "silent") : undefined;
+  // Khoảng ngày chỉ nhận khi ĐỦ CẢ HAI và hợp lệ
+  const dateOk = isDay(params.from) && isDay(params.to) && params.from! <= params.to!;
+  const from = dateOk ? params.from : undefined;
+  const to = dateOk ? params.to : undefined;
   const filter: LeadListFilter = {
     source: params.src,
     stage: params.stage,
     product: params.product,
     listView: params.listView,
     engagement,
+    from,
+    to,
     sort: (params.sort as LeadListFilter["sort"]) || "score-desc",
   };
   const activeCourses = (process.env.ACTIVE_COURSES || "K61,F3 - 2026")
@@ -45,8 +53,12 @@ export default async function HotLeadsPage({
     }
   };
 
-  const hotLeads = await guard("danh sách lead", () => getHotLeads(PAGE_SIZE, offset, filter), []);
-  const total = await guard("đếm tổng", () => getHotLeadsCount(filter), hotLeads.length);
+  // Một lần đọc trả cả trang lẫn tổng (trước đây list và count fetch trùng nhau)
+  const { leads: hotLeads, total } = await guard(
+    "danh sách lead",
+    () => getHotLeadsPage(PAGE_SIZE, offset, filter),
+    { leads: [], total: 0 }
+  );
   const stages = await guard("stage", () => getAvailableStages(), []);
   const products = await guard("sản phẩm", () => getTopHotProducts(15, activeCourses), []);
   const listViews = await guard("list view", () => getHotListViews(), []);
@@ -58,6 +70,7 @@ export default async function HotLeadsPage({
   if (params.product) qsBase.set("product", params.product);
   if (params.listView) qsBase.set("listView", params.listView);
   if (params.eng) qsBase.set("eng", params.eng);
+  if (from && to) { qsBase.set("from", from); qsBase.set("to", to); }
   if (params.sort && params.sort !== "score-desc") qsBase.set("sort", params.sort);
   const buildPageUrl = (p: number) => {
     const qs = new URLSearchParams(qsBase);
@@ -88,7 +101,12 @@ export default async function HotLeadsPage({
           </h1>
           <p className="mt-1 text-[14px] text-muted">
             Điểm 70-100 · lead Sales tag NÓNG (SMAX/Salesforce) HOẶC có hành vi intent mạnh
-            (chat, reply, click, form) trong 30 ngày qua.
+            (chat, reply, click, form).{" "}
+            {from && to ? (
+              <>Đang lọc: tương tác lần cuối từ <b className="text-foreground tabular-nums">{from.split("-").reverse().join("/")}</b> đến <b className="text-foreground tabular-nums">{to.split("-").reverse().join("/")}</b>.</>
+            ) : (
+              <>Chưa lọc thời gian — danh sách gồm cả lead im lặng nhiều tháng (tag NÓNG được miễn phạt im lặng).</>
+            )}
           </p>
         </div>
 
@@ -103,7 +121,7 @@ export default async function HotLeadsPage({
           </div>
         )}
 
-        {/* Lọc theo hành vi — tách lead "tag NÓNG nhưng im lặng" khỏi lead có tương tác thật */}
+        {/* Lọc hành vi + lọc theo lần tương tác cuối */}
         <div className="mb-5 flex flex-wrap items-center gap-2">
           {ENG_TABS.map((t) => {
             const active = (params.eng ?? undefined) === t.v;
@@ -123,6 +141,8 @@ export default async function HotLeadsPage({
               </Link>
             );
           })}
+          <span className="mx-1 h-5 w-px bg-[var(--border-subtle)]" />
+          <LeadActivityFilter from={from} to={to} />
         </div>
 
         <LeadListToolbar leads={hotLeads} total={total} availableStages={stages} availableProducts={products} activeCourses={activeCourses} availableListViews={listViews} exportFilename="hot-leads.csv" />
