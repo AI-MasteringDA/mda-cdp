@@ -27,7 +27,8 @@
     "etl:multi:source": "tsx etl/debug/find-multi-source.ts",
     "etl:verify:scoring": "tsx etl/debug/verify-scoring.ts",
     "etl:wix:inspect": "tsx etl/debug/wix-inspect.ts",
-    "etl:wix:real": "tsx etl/run-all.ts wix:real"
+    "etl:wix:real": "tsx etl/run-all.ts wix:real",
+    "etl:health": "tsx etl/monitor/health-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",

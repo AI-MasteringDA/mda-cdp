@@ -4,6 +4,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useState, useEffect, useTransition } from "react";
 import { Search, Loader2 } from "lucide-react";
 import { NotificationsBell } from "./NotificationsBell";
+import { DataHealthBell } from "./DataHealthBell";
 import { ApiKeyButton } from "./ApiKeyButton";
 
 export function Topbar({ title }: { title: string }) {
@@ -68,6 +69,7 @@ export function Topbar({ title }: { title: string }) {
             />
           </div>
           <ApiKeyButton />
+          <DataHealthBell />
           <NotificationsBell />
         </div>
       </div>

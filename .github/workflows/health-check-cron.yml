@@ -1,0 +1,37 @@
+name: Data health check
+
+on:
+  schedule:
+    # Mỗi 3 giờ — phát hiện mất data / cron hỏng sớm.
+    - cron: '30 */3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: health-check
+  cancel-in-progress: false
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund --prefer-offline
+
+      - name: Run health check
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          # Custom Bot webhook của group Lark (thiếu → chỉ log, không lỗi)
+          LARK_ALERT_WEBHOOK: ${{ secrets.LARK_ALERT_WEBHOOK }}
+        run: npm run etl:health
