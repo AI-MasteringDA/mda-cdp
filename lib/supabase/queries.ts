@@ -71,6 +71,8 @@ type LeadRow = {
   sf_status?: string | null;
   /** Tag Giàu gắn trên SMAX — scoring v12 coi "Hot Lead" ngang sf_rating='Hot' */
   smax_tags?: string[] | null;
+  /** Thời điểm Sales gắn tag "Hot Lead" trên SMAX (customer.tags[].time) */
+  hot_tag_at?: string | null;
   /** Cột aggregate (recompute_lead_aggregates) — tương tác thật của lead từng kênh */
   email_open_count?: number | null;
   email_click_count?: number | null;
@@ -144,6 +146,18 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
       row.last_email_at ??
       row.last_touch_at ??
       row.first_seen_at
+    ),
+    // "Nóng tính đến": mốc MỚI HƠN giữa tương tác thật cuối và lần Sales gắn
+    // tag Hot. Lọc thời gian dùng mốc này để không bỏ sót cả hai trường hợp:
+    // tag lâu nhưng vẫn chat, và mới tag nhưng chat lần cuối đã lâu.
+    hotAsOf: new Date(
+      Math.max(
+        new Date(
+          row.last_engagement_at ?? row.last_chat_at ?? row.last_chat_staff_at ??
+          row.last_email_at ?? row.last_touch_at ?? row.first_seen_at
+        ).getTime(),
+        row.hot_tag_at ? new Date(row.hot_tag_at).getTime() : 0
+      )
     ),
     firstSeenAt: new Date(row.first_seen_at),
     stage: row.stage as Lead["stage"],
@@ -348,9 +362,11 @@ async function fetchLeadsPage(
     if (listViewLeadIds && !listViewLeadIds.has(l.id)) return false;
     if (filter?.engagement === "engaged" && !l.signals?.hasRealEngagement) return false;
     if (filter?.engagement === "silent" && l.signals?.hasRealEngagement) return false;
-    const last = l.lastContactAt.getTime();
-    if (fromMs && last < fromMs) return false;
-    if (toMs && last >= toMs) return false;
+    // Lọc theo "nóng tính đến" = MAX(tương tác cuối, tag Hot) — không phải chỉ
+    // tương tác cuối, để lead vừa được tag nóng (dù chat lâu) vẫn lọt filter.
+    const hotAsOf = (l.hotAsOf ?? l.lastContactAt).getTime();
+    if (fromMs && hotAsOf < fromMs) return false;
+    if (toMs && hotAsOf >= toMs) return false;
     return true;
   });
   return { leads: filtered.slice(offset, offset + limit), total: filtered.length };

@@ -399,6 +399,11 @@ export async function pullFromSmaxReal() {
     // 0 tags → empty array → dim_lead.smax_tags will be reset to []).
     // Customers NOT in this ETL batch keep their existing tags (no update).
     const leadTagMap = new Map<string, Set<string>>();
+    // Thời điểm gắn tag "Hot Lead" mới nhất cho mỗi lead. SMAX trả về
+    // customer.tags[].time = khi Giàu bấm tag → giữ lại để lọc "nóng tính đến".
+    const hotTagAtMap = new Map<string, string>();
+    const isHotTag = (name: string) =>
+      name.toLowerCase().replace(/[\s_-]/g, "") === "hotlead";
     const extractTagName = (raw: unknown): string | null => {
       if (!raw) return null;
       if (typeof raw === "string") return raw.trim() || null;
@@ -406,6 +411,13 @@ export async function pullFromSmaxReal() {
         const obj = raw as Record<string, unknown>;
         const name = obj.name ?? obj.alias ?? obj.tag_name;
         if (typeof name === "string") return name.trim() || null;
+      }
+      return null;
+    };
+    const tagTime = (raw: unknown): string | null => {
+      if (raw && typeof raw === "object") {
+        const t = (raw as Record<string, unknown>).time;
+        if (typeof t === "string" && !isNaN(Date.parse(t))) return t;
       }
       return null;
     };
@@ -418,7 +430,13 @@ export async function pullFromSmaxReal() {
       const set = leadTagMap.get(leadId)!;
       for (const tag of c.tags ?? []) {
         const name = extractTagName(tag);
-        if (name) set.add(name);
+        if (!name) continue;
+        set.add(name);
+        if (isHotTag(name)) {
+          const time = tagTime(tag);
+          const prev = hotTagAtMap.get(leadId);
+          if (time && (!prev || time > prev)) hotTagAtMap.set(leadId, time);
+        }
       }
     }
     for (const t of allThreads) {
@@ -563,22 +581,32 @@ export async function pullFromSmaxReal() {
     if (leadTagMap.size > 0) {
       const leadIds = Array.from(leadTagMap.keys());
       const existingTagsByLead = new Map<string, string[]>();
+      const existingHotAt = new Map<string, string | null>();
       for (let i = 0; i < leadIds.length; i += 100) {
         const batch = leadIds.slice(i, i + 100);
-        const { data } = await admin.from("dim_lead").select("lead_id, smax_tags").in("lead_id", batch);
+        const { data } = await admin.from("dim_lead").select("lead_id, smax_tags, hot_tag_at").in("lead_id", batch);
         for (const row of data ?? []) {
           existingTagsByLead.set(row.lead_id, Array.isArray(row.smax_tags) ? row.smax_tags : []);
+          existingHotAt.set(row.lead_id, (row as { hot_tag_at?: string | null }).hot_tag_at ?? null);
         }
       }
 
-      const changed: { lead_id: string; smax_tags: string[] }[] = [];
+      const changed: { lead_id: string; smax_tags: string[]; hot_tag_at?: string }[] = [];
       for (const [lead_id, tagSet] of leadTagMap.entries()) {
         const smaxNow = Array.from(tagSet).sort();
         const existing = (existingTagsByLead.get(lead_id) ?? []).slice().sort();
-        // Skip if no diff (arrays equal element-wise after sort)
         const sameLen = smaxNow.length === existing.length;
-        const same = sameLen && smaxNow.every((t, i) => t === existing[i]);
-        if (!same) changed.push({ lead_id, smax_tags: smaxNow });
+        const tagsSame = sameLen && smaxNow.every((t, i) => t === existing[i]);
+
+        // hot_tag_at: chỉ tiến lên (giữ mốc mới nhất), không lùi/không xoá.
+        const newHotAt = hotTagAtMap.get(lead_id);
+        const curHotAt = existingHotAt.get(lead_id) ?? null;
+        const hotAtChanged = !!newHotAt && (!curHotAt || newHotAt > curHotAt);
+
+        if (tagsSame && !hotAtChanged) continue;
+        const row: { lead_id: string; smax_tags: string[]; hot_tag_at?: string } = { lead_id, smax_tags: smaxNow };
+        if (hotAtChanged) row.hot_tag_at = newHotAt;
+        changed.push(row);
       }
       console.log(`   ↳ smax_tags mirror: ${leadTagMap.size} touched leads → ${changed.length} diffs → batch upserting...`);
 

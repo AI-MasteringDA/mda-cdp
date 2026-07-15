@@ -92,7 +92,7 @@ export function LeadActivityFilter({ from, to }: { from?: string; to?: string })
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-busy={isPending}
-        title="Lọc theo lần tương tác cuối của lead"
+        title="Lọc theo mốc nóng gần nhất = mới hơn giữa (tương tác thật cuối) và (lần Sales tag Hot)"
         className={cn(
           "press flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[12.5px] font-medium",
           "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
@@ -114,7 +114,7 @@ export function LeadActivityFilter({ from, to }: { from?: string; to?: string })
 
       {open && (
         <div className="absolute left-0 z-50 mt-2 w-[280px] rounded-xl border border-[var(--border-subtle)] bg-[var(--background)] p-2 shadow-xl">
-          <div className="px-2 pb-1.5 pt-1 eyebrow">Tương tác lần cuối trong</div>
+          <div className="px-2 pb-1.5 pt-1 eyebrow">Nóng gần nhất trong</div>
           {PRESETS.map((p) => {
             const on = activePreset === p.days;
             return (

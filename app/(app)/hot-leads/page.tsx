@@ -103,9 +103,9 @@ export default async function HotLeadsPage({
             Điểm 70-100 · lead Sales tag NÓNG (SMAX/Salesforce) HOẶC có hành vi intent mạnh
             (chat, reply, click, form).{" "}
             {from && to ? (
-              <>Đang lọc: tương tác lần cuối từ <b className="text-foreground tabular-nums">{from.split("-").reverse().join("/")}</b> đến <b className="text-foreground tabular-nums">{to.split("-").reverse().join("/")}</b>.</>
+              <>Đang lọc: nóng (tương tác thật <b>hoặc</b> Sales tag Hot) từ <b className="text-foreground tabular-nums">{from.split("-").reverse().join("/")}</b> đến <b className="text-foreground tabular-nums">{to.split("-").reverse().join("/")}</b>.</>
             ) : (
-              <>Chưa lọc thời gian — danh sách gồm cả lead im lặng nhiều tháng (tag NÓNG được miễn phạt im lặng).</>
+              <>Chưa lọc thời gian — danh sách gồm cả lead im lặng nhiều tháng. Bấm 📅 để lọc theo mốc nóng gần nhất.</>
             )}
           </p>
         </div>

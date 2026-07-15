@@ -56,6 +56,8 @@ export interface Lead {
   hotReasons: string[];
   coldReasons: string[];
   lastContactAt: Date;
+  /** "Nóng tính đến" = MAX(tương tác cuối, thời điểm Sales tag Hot). Dùng cho lọc thời gian. */
+  hotAsOf?: Date;
   firstSeenAt: Date;
   stage: "Mới" | "Đang tư vấn" | "Đang cân nhắc" | "Im lặng" | "Đã chốt";
   assignee: string;
