@@ -1,4 +1,25 @@
+import { createHash } from "crypto";
 import { admin } from "./supabase-admin";
+
+// ── Danh tính bền: mã lead theo CÔNG THỨC, không ngẫu nhiên ──────────────────
+// Trước đây lead mới được DB gán gen_random_uuid() → mỗi lần backfill lại sinh
+// mã KHÁC → Lark trỏ sai (sự cố 2026-07-14, phải remap 7,041 dòng).
+//
+// Giờ mã = UUIDv5(natural_key). Cùng email / cùng smax_customer_id → LUÔN ra
+// cùng một mã, dù xoá rồi tạo lại bao nhiêu lần. Chỉ áp cho lead MỚI; 50k lead
+// cũ giữ nguyên mã ngẫu nhiên (an toàn tuyệt đối, không đụng dữ liệu cũ).
+const CDP_NAMESPACE = "6f4a3d2e-1b9c-4e57-8a10-mda000cdp000"; // cố định cho MDA CDP
+function deterministicLeadId(naturalKey: string): string {
+  // UUIDv5 chuẩn: SHA-1(namespace_bytes + name), set version=5 + variant.
+  const nsHex = CDP_NAMESPACE.replace(/[^0-9a-f]/gi, "").padEnd(32, "0").slice(0, 32);
+  const nsBytes = Buffer.from(nsHex, "hex");
+  const hash = createHash("sha1").update(nsBytes).update(naturalKey).digest();
+  const b = hash.subarray(0, 16);
+  b[6] = (b[6] & 0x0f) | 0x50; // version 5
+  b[8] = (b[8] & 0x3f) | 0x80; // variant RFC 4122
+  const h = b.toString("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
 
 export type RawRecord = {
   id: string;
@@ -74,6 +95,7 @@ export async function batchResolveOrCreate(
 
   // 2. Build new lead records để upsert (dedupe by email)
   const newLeads: Array<{
+    lead_id: string;
     email: string;
     full_name: string;
     source: string;
@@ -87,6 +109,8 @@ export async function batchResolveOrCreate(
     if (!email || seenEmails.has(email)) continue;
     seenEmails.add(email);
     newLeads.push({
+      // Mã theo công thức từ email → tạo lại luôn ra cùng mã
+      lead_id: deterministicLeadId(`email:${email}`),
       email,
       full_name: r.name || email.split("@")[0],
       source: options.source,
@@ -129,6 +153,7 @@ export async function batchResolveOrCreate(
 
   // 3b. Create leads for records with SMAX customer_id but no email/phone
   const anonLeads: Array<{
+    lead_id: string;
     smax_customer_id: string;
     full_name: string;
     source: string;
@@ -145,6 +170,9 @@ export async function batchResolveOrCreate(
     if (seenSmaxIds.has(r.smax_customer_id)) continue;
     seenSmaxIds.add(r.smax_customer_id);
     anonLeads.push({
+      // Mã theo công thức từ smax_customer_id → tạo lại luôn ra cùng mã.
+      // Đây là lớp bảo vệ chính cho lead ẩn danh (nhóm bị xoá/tạo lại nhiều nhất).
+      lead_id: deterministicLeadId(`smax:${r.smax_customer_id}`),
       smax_customer_id: r.smax_customer_id,
       full_name: r.name || `Anonymous (${r.external_platform || "chat"})`,
       source: options.source,
