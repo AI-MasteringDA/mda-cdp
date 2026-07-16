@@ -6,7 +6,7 @@
  * LARK_ALERT_WEBHOOK. Thiếu webhook thì chỉ log ra console (không lỗi).
  */
 import { admin } from "../lib/supabase-admin";
-import { evaluateHealth, reportToLarkText, type Snapshot } from "../lib/health-metrics";
+import { evaluateHealth, reportToLarkText, type Snapshot } from "../../lib/health-metrics";
 
 const SOURCES = ["smax", "salesforce", "instantly", "web"] as const;
 const WEBHOOK = process.env.LARK_ALERT_WEBHOOK?.trim();
