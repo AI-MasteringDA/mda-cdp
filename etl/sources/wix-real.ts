@@ -100,7 +100,34 @@ async function pullAllMembers(): Promise<WixMember[]> {
 
 export async function pullFromWixReal() {
   console.log("📡 [Wix REAL] Đang gọi API thật...");
+  const { data: job } = await admin
+    .from("sync_job")
+    .insert({ source: "wix", status: "running" })
+    .select("id")
+    .single();
+  const jobId = job?.id as string | undefined;
 
+  try {
+    await runWixSync(jobId);
+  } catch (e) {
+    // Trước đây hàm này KHÔNG có try/catch bao ngoài — mọi lỗi (API rate
+    // limit, token hết hạn, ...) làm cả job throw và thoát, GitHub Actions vẫn
+    // báo "failed" nhưng KHÔNG có dòng nào trong sync_job ghi lại — không ai
+    // biết Wix có đang chạy đúng hay không. Giờ luôn ghi lại kết quả.
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`❌ [Wix REAL] Lỗi: ${msg}`);
+    if (jobId) {
+      await admin.from("sync_job").update({
+        status: "failed",
+        finished_at: new Date().toISOString(),
+        error_message: msg.slice(0, 500),
+      }).eq("id", jobId);
+    }
+    throw e;
+  }
+}
+
+async function runWixSync(jobId: string | undefined) {
   // 1. CONTACTS
   console.log("   ↳ Pulling Contacts (CRM)...");
   const contacts = await pullAllContacts();
@@ -337,13 +364,20 @@ export async function pullFromWixReal() {
   }
   console.log(`   ✓ Updated ${updated} leads with Wix metadata`);
 
-  // Sync job log
-  await admin.from("sync_job").insert({
-    source: "wix",
-    status: "success",
-    records_synced: touchpoints.length,
-    finished_at: new Date().toISOString(),
-  });
+  // Sync job log — CỘT ĐÚNG là records_in/records_merged (không phải
+  // records_synced, cột đó không tồn tại trong bảng sync_job). Bug cũ: insert
+  // với cột sai bị PostgREST từ chối, nhưng code không đọc `error` nên lỗi bị
+  // nuốt âm thầm — sync_job CHƯA TỪNG có 1 dòng "success" nào cho Wix dù data
+  // vẫn chảy vào bình thường.
+  if (jobId) {
+    const { error } = await admin.from("sync_job").update({
+      status: "success",
+      finished_at: new Date().toISOString(),
+      records_in: contacts.length + members.length,
+      records_merged: inserted,
+    }).eq("id", jobId);
+    if (error) console.warn(`   ⚠️ sync_job update failed: ${error.message}`);
+  }
 
   console.log(`✅ Wix REAL done: ${contacts.length} contacts, ${members.length} members, ${touchpoints.length} touchpoints`);
 }
