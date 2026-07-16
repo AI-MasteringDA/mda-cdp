@@ -2,11 +2,14 @@ name: SMAX incremental sync
 
 on:
   schedule:
-    # Every 15 minutes — balances freshness vs Supabase free-tier Disk IO /
-    # egress budget. 5-minute polling exhausted the Nano instance's IO budget
-    # (2026-07-10 outage). REMINDER: cron-job.org triggers must also be set
-    # to every 15 min — its workflow_dispatch calls override this schedule.
-    - cron: '*/15 * * * *'
+    # Every ~7 minutes (2026-07-16: bumped from 15 back down, requested by
+    # user). NOTE: 5-minute polling exhausted the Nano instance's IO budget on
+    # 2026-07-10 — this is roughly 2x that failed rate, not 3x, but if the
+    # Data Health bell flags SMAX again, drop back to */15 first.
+    # REMINDER: cron-job.org trigger must also be set to every 7 min — its
+    # workflow_dispatch calls are the actual driver of real-world cadence,
+    # this native schedule is just a redundant fallback.
+    - cron: '*/7 * * * *'
   # Allow manual trigger from GitHub UI
   workflow_dispatch:
 
