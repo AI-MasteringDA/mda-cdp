@@ -20,6 +20,29 @@ const DAYS_PER_SOURCE: Record<string, number> = {
   instantly: Number(process.env.LARK_DAYS_INSTANTLY || 60),
 };
 
+/**
+ * "Chốt" quyền chạy 1 tác vụ nặng — tác vụ chỉ thực sự thực thi nếu đã cách
+ * lần trước ÍT NHẤT `minGapMs`, bất kể cron ngoài gọi function này thường
+ * xuyên thế nào. Dùng lại bảng etl_state đã có sẵn (không cần bảng mới).
+ *
+ * Vì sao cần: hai việc nặng trong file này (full-refresh snapshot 9k lead,
+ * pull toàn bộ hot-leads) vốn được "khoá nhịp" ngầm bằng chu kỳ cron 15 phút
+ * (đủ chậm để chúng không lặp vô ích). Khi cron được bơm nhanh hơn (7 phút),
+ * khoá ngầm đó mất tác dụng — các việc nặng lặp lại nhiều lần trong cùng 1
+ * cửa sổ, nhân egress lên đúng lúc Supabase đã vượt quota (phát hiện
+ * 2026-07-16). Giờ khoá tường minh bằng etl_state thay vì dựa vào nhịp cron.
+ */
+async function claimIfDue(source: string, key: string, minGapMs: number): Promise<boolean> {
+  const { data } = await admin.from("etl_state").select("value").eq("source", source).eq("key", key).maybeSingle();
+  const lastMs = data?.value ? new Date(data.value).getTime() : 0;
+  if (Date.now() - lastMs < minGapMs) return false;
+  await admin.from("etl_state").upsert(
+    { source, key, value: new Date().toISOString(), updated_at: new Date().toISOString() },
+    { onConflict: "source,key" }
+  );
+  return true;
+}
+
 function daysForSource(source: string): number {
   return DAYS_PER_SOURCE[source] || DAYS_TO_PUSH;
 }
@@ -499,8 +522,12 @@ async function pushSmaxLeadSnapshot(token: string) {
   }
   const now = new Date();
   const isFullWindow = now.getUTCHours() % 6 === 0 && now.getUTCMinutes() < 15;
+  const forcedFullRefresh = process.env.LARK_FULL_REFRESH === "1" || !hasKeyCoverage || maxLarkTimeMs === 0;
+  // isFullWindow chỉ là "đủ điều kiện" — còn có THỰC SỰ làm hay không do
+  // claimIfDue quyết định, để tránh lặp lại nhiều lần khi cron chạy nhanh
+  // hơn 15 phút (xem comment ở claimIfDue).
   const fullRefresh =
-    process.env.LARK_FULL_REFRESH === "1" || !hasKeyCoverage || maxLarkTimeMs === 0 || isFullWindow;
+    forcedFullRefresh || (isFullWindow && await claimIfDue("lark_push", "smax_snapshot_full_refresh_at", 5.5 * 3600_000));
   // 6h overlap so clock skew / late-arriving rows can't slip through the gap.
   const cutoffISO = new Date(maxLarkTimeMs - 6 * 3600_000).toISOString();
   console.log(`   ↳ Mode: ${fullRefresh ? "full" : `incremental (occurred_at > ${cutoffISO.slice(0, 19)})`}`);
@@ -668,6 +695,19 @@ async function pushSmaxLeadSnapshot(token: string) {
 async function pushSmaxHotleads(token: string) {
   const tableName = "SMAX_Hotleads";
   console.log(`\n🔥 [SMAX Hotleads] → ${tableName}`);
+
+  // Hàm này đọc lại TOÀN BỘ hot-lead (fact_lead_score + dim_lead) mỗi lần
+  // chạy — không incremental, ~1.16MB/lần đo thực tế (2709 lead × ~448B).
+  // Ở nhịp 15 phút: ~3.3GB/tháng. Ở 7 phút sẽ thành ~7GB/tháng CHỈ RIÊNG hàm
+  // này — phát hiện 2026-07-16 khi Supabase đã vượt egress quota. Danh sách
+  // hot-lead thực ra chỉ đổi 1 lần/ngày (scored_at là cột DATE, scoring chạy
+  // 1 lần/ngày), nên chạy dày hơn ~15 phút không mang lại data mới hơn — chốt
+  // lại để job cha (Lark push) có thể chạy nhanh cho các phần khác mà không
+  // kéo egress của riêng hàm này lên theo.
+  if (!(await claimIfDue("lark_push", "smax_hotleads_pull_at", 14 * 60_000))) {
+    console.log(`   ↳ Đã pull hot-leads <14 phút trước, skip (chống egress dư thừa)`);
+    return;
+  }
 
   // Get or create table
   const tables = await listTables(token);
