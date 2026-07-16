@@ -2,17 +2,19 @@ name: Lark Base push (SMAX only, fast)
 
 on:
   schedule:
-    # Every 15 minutes — balances freshness vs Supabase free-tier Disk IO /
-    # egress budget (5-minute polling caused the 2026-07-10 IO exhaustion).
-    # Non-SMAX sources use lark-push-cron.yml (hourly).
-    # REMINDER: cron-job.org trigger must also be set to every 15 min.
-    - cron: '*/15 * * * *'
+    # Every ~7 minutes (2026-07-16, requested by user — matches smax-cron.yml).
+    # Actual run time measured at ~2-3.5 min (the old "7-8 min" estimate here
+    # was stale — verified against real GitHub Actions run durations before
+    # bumping, since a job this short has no risk of overlapping itself at a
+    # 7-min cadence). Non-SMAX sources use lark-push-cron.yml (hourly).
+    # REMINDER: cron-job.org trigger must also be set to every 7 min.
+    - cron: '*/7 * * * *'
   workflow_dispatch:
 
-# Concurrency lock: push takes 7-8 min but cron fires every 5 min. Without this
-# lock, run N+1 starts `deleteAllRecords` while run N is still inserting, wiping
-# the fresh data. `cancel-in-progress: false` queues the next run until the
-# current finishes (safer than cancel: no half-written state in Lark).
+# Concurrency lock: kept as a safety net even though real run time (~2-3.5 min)
+# is well under the 7-min cadence — cheap insurance if SMAX API ever gets slow
+# and a run runs long. `cancel-in-progress: false` queues the next run until
+# the current finishes (safer than cancel: no half-written state in Lark).
 concurrency:
   group: lark-push-smax
   cancel-in-progress: false
