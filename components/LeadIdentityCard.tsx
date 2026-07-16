@@ -1,17 +1,53 @@
-import { Tag, Database, User, Package, Star, GitBranch } from "lucide-react";
+import Link from "next/link";
+import { Tag, Database, User, Package, Star, GitBranch, Target } from "lucide-react";
 import type { Lead } from "@/types/lead";
 
 /** Panel danh tính gọn (segments + tag + thuộc tính) — cột trái của Antsomi. */
-export function LeadIdentityCard({ lead }: { lead: Lead }) {
+export function LeadIdentityCard({
+  lead,
+  audiences = [],
+}: {
+  lead: Lead;
+  /** Audience (segment builder /audiences) mà lead này hiện đang khớp */
+  audiences?: { id: string; name: string }[];
+}) {
   const tags = lead.smaxTags ?? [];
 
   return (
     <div className="hairline rounded-2xl bg-white p-5">
       <h3 className="mb-3 text-[13px] font-semibold">Hồ sơ & phân nhóm</h3>
 
-      {/* Segments / Tags — thay "Segments" + "Industry vertical" của Antsomi */}
+      {/* Audiences — segment builder /audiences (giống "Segments" của Antsomi) */}
       <div className="mb-4">
-        <div className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-2 font-medium">Nhóm & Tag</div>
+        <div className="mb-1.5 flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-2 font-medium">
+          <Target className="h-3 w-3" strokeWidth={2} />
+          Audience khớp
+        </div>
+        {audiences.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {audiences.map((a) => (
+              <Link
+                key={a.id}
+                href={`/audiences/${a.id}`}
+                className="inline-flex items-center gap-1 rounded-full bg-[var(--subtle)] px-2.5 py-0.5 text-[11px] font-medium text-foreground hover:bg-[var(--border-subtle)]"
+              >
+                {a.name}
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="text-[12px] text-muted-2">
+            Chưa thuộc audience nào —{" "}
+            <Link href="/audiences/new" className="underline hover:text-foreground">
+              tạo audience
+            </Link>
+          </div>
+        )}
+      </div>
+
+      {/* Tag SMAX */}
+      <div className="mb-4">
+        <div className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-2 font-medium">Tag SMAX</div>
         {tags.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {tags.map((t) => (
@@ -24,7 +60,7 @@ export function LeadIdentityCard({ lead }: { lead: Lead }) {
             ))}
           </div>
         ) : (
-          <div className="text-[12px] text-muted-2">Chưa gắn tag/nhóm nào</div>
+          <div className="text-[12px] text-muted-2">Chưa gắn tag nào</div>
         )}
       </div>
 

@@ -8,7 +8,7 @@ import { LeadActivityHeatmap } from "@/components/LeadActivityHeatmap";
 import { LeadIdentityCard } from "@/components/LeadIdentityCard";
 import { LeadDetailTabs } from "@/components/LeadDetailTabs";
 import { AiInsightsPanel } from "@/components/AiInsightsPanel";
-import { getLeadById, getLeadPercentile } from "@/lib/supabase/queries";
+import { getLeadById, getLeadPercentile, getLeadAudiences } from "@/lib/supabase/queries";
 import { getCached, cacheKey } from "@/lib/ai/cache";
 import type { LeadInsight } from "@/lib/ai/claude";
 
@@ -26,7 +26,10 @@ export default async function LeadDetailPage({
   ]);
   if (!lead) notFound();
 
-  const percentile = await getLeadPercentile(lead.score);
+  const [percentile, audiences] = await Promise.all([
+    getLeadPercentile(lead.score),
+    getLeadAudiences(lead.id),
+  ]);
   const initialInsight = cachedInsight?.payload ?? null;
   const initialGeneratedAt = (cachedInsight?.metadata?.generated_at as string | undefined) ?? null;
 
@@ -65,7 +68,7 @@ export default async function LeadDetailPage({
               initialInsight={initialInsight}
               initialGeneratedAt={initialGeneratedAt}
             />
-            <LeadIdentityCard lead={lead} />
+            <LeadIdentityCard lead={lead} audiences={audiences} />
           </aside>
         </div>
       </main>

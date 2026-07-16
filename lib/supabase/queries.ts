@@ -804,6 +804,31 @@ export async function getLeadById(id: string): Promise<Lead | null> {
 }
 
 /**
+ * Audience/segment mà lead này hiện đang khớp (từ /audiences — segment builder).
+ * Bọc try/catch: bảng dim_segment/fact_segment_member có thể chưa được tạo
+ * (migration supabase/segments-schema.sql chưa chạy) → trả [] thay vì lỗi trang.
+ */
+export async function getLeadAudiences(leadId: string): Promise<{ id: string; name: string }[]> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("fact_segment_member")
+      .select("segment_id, dim_segment(name)")
+      .eq("lead_id", leadId);
+    if (error || !data) return [];
+    return data
+      .map((r) => {
+        const seg = r.dim_segment as unknown as { name: string } | { name: string }[] | null;
+        const name = Array.isArray(seg) ? seg[0]?.name : seg?.name;
+        return name ? { id: r.segment_id as string, name } : null;
+      })
+      .filter((x): x is { id: string; name: string } => x !== null);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Xếp hạng percentile của 1 lead so với toàn bộ lead (theo điểm scoring của
  * ngày mới nhất) — dùng cho block "Nóng hơn X% lead khác" trên hồ sơ 360°.
  * Bọc try/catch: nếu count timeout thì trả null, UI ẩn block thay vì 500 trang.
