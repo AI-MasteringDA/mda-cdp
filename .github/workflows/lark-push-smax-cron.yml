@@ -2,13 +2,18 @@ name: Lark Base push (SMAX only, fast)
 
 on:
   schedule:
-    # Every ~7 minutes (2026-07-16, requested by user — matches smax-cron.yml).
-    # Actual run time measured at ~2-3.5 min (the old "7-8 min" estimate here
-    # was stale — verified against real GitHub Actions run durations before
-    # bumping, since a job this short has no risk of overlapping itself at a
-    # 7-min cadence). Non-SMAX sources use lark-push-cron.yml (hourly).
-    # REMINDER: cron-job.org trigger must also be set to every 7 min.
-    - cron: '*/7 * * * *'
+    # Every 15 minutes. REVERTED from a same-day */7 attempt (2026-07-16):
+    # this job has a "full refresh" path below (deleteAllRecords + re-read all
+    # ~9k leads from v_smax_lead_snapshot) that fires during the first 15 min
+    # of every 6-hour UTC block (00/06/12/18:00). At */15 exactly ONE run lands
+    # in that window per block. At */7, TWO-THREE runs land in it → the full
+    # refresh (the most expensive thing this job does) fires 2-3x instead of
+    # once, right when the Supabase org is already over its egress quota
+    # (7.04GB used this billing cycle, per Dashboard → Usage, 2026-07-16).
+    # smax-cron.yml (the actual SMAX->Supabase ingest) stays at */7 — its cost
+    # scales down with a shorter window, no equivalent fixed-window multiplier.
+    # REMINDER: cron-job.org trigger must also be set back to every 15 min.
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 # Concurrency lock: kept as a safety net even though real run time (~2-3.5 min)
