@@ -15,7 +15,7 @@ export function LeadListItem({ lead }: { lead: Lead }) {
       href={`/lead/${lead.id}`}
       className="group row-hover flex items-center gap-4 rounded-xl px-3 py-3"
     >
-      <Avatar name={lead.name} color={lead.avatarColor} size={40} />
+      <Avatar name={lead.name} color={lead.avatarColor} size={40} src={lead.avatarUrl} />
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">

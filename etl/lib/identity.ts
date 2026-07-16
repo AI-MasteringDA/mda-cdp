@@ -33,6 +33,13 @@ export type RawRecord = {
   external_platform?: string | null;
   /** Optional platform profile ID (fb user id, zalo pid, etc) */
   external_profile_id?: string | null;
+  /**
+   * Mốc tương tác ĐẦU TIÊN thật (vd SMAX customer.interaction.first) — nếu có,
+   * dùng thay cho "giờ ETL chạy" khi tạo lead mới. Thiếu field này thì
+   * first_seen_at trước đây = lúc ETL insert record, không phải lúc khách xuất
+   * hiện thật — khiến "Khách từ..." trên hồ sơ sai lệch tới hàng tháng.
+   */
+  first_seen_at?: string | null;
 };
 
 export type IdentityMatch = {
@@ -116,7 +123,7 @@ export async function batchResolveOrCreate(
       source: options.source,
       stage: "Mới",
       avatar_color: pickAvatarColor(email),
-      first_seen_at: new Date().toISOString(),
+      first_seen_at: r.first_seen_at || new Date().toISOString(),
     });
   }
 
@@ -178,7 +185,7 @@ export async function batchResolveOrCreate(
       source: options.source,
       stage: "Mới",
       avatar_color: pickAvatarColor(r.smax_customer_id),
-      first_seen_at: new Date().toISOString(),
+      first_seen_at: r.first_seen_at || new Date().toISOString(),
       external_platform: r.external_platform || null,
       external_profile_id: r.external_profile_id || null,
       phone: r.phone ? normalizePhone(r.phone) : null,

@@ -362,6 +362,9 @@ export async function pullFromSmaxReal() {
           smax_customer_id: c.id,
           external_platform: c.platform || null,
           external_profile_id: c.pid || null,
+          // Lần tương tác ĐẦU thật (SMAX interaction.first) thay vì giờ ETL
+          // chạy — cứu-cánh created_at nếu SMAX thiếu interaction.
+          first_seen_at: c.interaction?.first || c.created_at || null,
         };
       });
     console.log(`   ↳ Regex extraction: +${regexEmailWin} emails, +${regexPhoneWin} phones from name/message`);
@@ -402,6 +405,9 @@ export async function pullFromSmaxReal() {
     // Thời điểm gắn tag "Hot Lead" mới nhất cho mỗi lead. SMAX trả về
     // customer.tags[].time = khi Giàu bấm tag → giữ lại để lọc "nóng tính đến".
     const hotTagAtMap = new Map<string, string>();
+    // Ảnh đại diện thật (Zalo/Facebook) — link SMAX trả về có chữ ký hết hạn,
+    // nên ghi đè mỗi lần ETL chạy để luôn tươi (xem add-avatar-url.sql).
+    const avatarUrlMap = new Map<string, string>();
     const isHotTag = (name: string) =>
       name.toLowerCase().replace(/[\s_-]/g, "") === "hotlead";
     const extractTagName = (raw: unknown): string | null => {
@@ -425,6 +431,7 @@ export async function pullFromSmaxReal() {
     for (const c of allCustomers) {
       const leadId = customerIdToLeadId.get(c.id);
       if (!leadId) continue;
+      if (c.picture) avatarUrlMap.set(leadId, c.picture);
       // Always initialize (even for 0 tags) so overwrite semantics work.
       if (!leadTagMap.has(leadId)) leadTagMap.set(leadId, new Set());
       const set = leadTagMap.get(leadId)!;
@@ -443,6 +450,7 @@ export async function pullFromSmaxReal() {
       if (!t.customer?.id) continue;
       const leadId = customerIdToLeadId.get(t.customer.id);
       if (!leadId) continue;
+      if (t.customer.picture) avatarUrlMap.set(leadId, t.customer.picture);
       if (!leadTagMap.has(leadId)) leadTagMap.set(leadId, new Set());
       const set = leadTagMap.get(leadId)!;
       for (const tag of t.tag_aliases ?? []) {
@@ -591,7 +599,7 @@ export async function pullFromSmaxReal() {
         }
       }
 
-      const changed: { lead_id: string; smax_tags: string[]; hot_tag_at?: string }[] = [];
+      const changed: { lead_id: string; smax_tags: string[]; hot_tag_at?: string; avatar_url?: string }[] = [];
       for (const [lead_id, tagSet] of leadTagMap.entries()) {
         const smaxNow = Array.from(tagSet).sort();
         const existing = (existingTagsByLead.get(lead_id) ?? []).slice().sort();
@@ -603,9 +611,15 @@ export async function pullFromSmaxReal() {
         const curHotAt = existingHotAt.get(lead_id) ?? null;
         const hotAtChanged = !!newHotAt && (!curHotAt || newHotAt > curHotAt);
 
-        if (tagsSame && !hotAtChanged) continue;
-        const row: { lead_id: string; smax_tags: string[]; hot_tag_at?: string } = { lead_id, smax_tags: smaxNow };
+        // avatar_url: link SMAX có chữ ký hết hạn → ghi đè bất cứ khi nào SMAX
+        // trả picture cho customer này, kể cả tag/hot_tag không đổi (để link
+        // luôn tươi, không đợi có diff khác mới refresh ảnh).
+        const newAvatar = avatarUrlMap.get(lead_id);
+
+        if (tagsSame && !hotAtChanged && !newAvatar) continue;
+        const row: { lead_id: string; smax_tags: string[]; hot_tag_at?: string; avatar_url?: string } = { lead_id, smax_tags: smaxNow };
         if (hotAtChanged) row.hot_tag_at = newHotAt;
+        if (newAvatar) row.avatar_url = newAvatar;
         changed.push(row);
       }
       console.log(`   ↳ smax_tags mirror: ${leadTagMap.size} touched leads → ${changed.length} diffs → batch upserting...`);

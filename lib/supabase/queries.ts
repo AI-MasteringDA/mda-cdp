@@ -54,6 +54,7 @@ type LeadRow = {
   full_name: string | null;
   source: string;
   avatar_color: string;
+  avatar_url?: string | null;
   stage: string;
   /** DEPRECATED — no ETL maintains this column. Use last_engagement_at instead. */
   last_touch_at: string | null;
@@ -129,6 +130,7 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
     phone: row.phone || "",
     source: row.source as Lead["source"],
     avatarColor: row.avatar_color,
+    avatarUrl: row.avatar_url || null,
     score: unifiedScore,
     tier: scoreToTier(unifiedScore),
     reasons,
@@ -147,18 +149,31 @@ function mergeToLead(row: LeadRow, score?: ScoreRow, touchpoints: TouchRow[] = [
       row.last_touch_at ??
       row.first_seen_at
     ),
-    // "Nóng tính đến": mốc MỚI HƠN giữa tương tác thật cuối và lần Sales gắn
-    // tag Hot. Lọc thời gian dùng mốc này để không bỏ sót cả hai trường hợp:
-    // tag lâu nhưng vẫn chat, và mới tag nhưng chat lần cuối đã lâu.
-    hotAsOf: new Date(
-      Math.max(
-        new Date(
-          row.last_engagement_at ?? row.last_chat_at ?? row.last_chat_staff_at ??
-          row.last_email_at ?? row.last_touch_at ?? row.first_seen_at
-        ).getTime(),
-        row.hot_tag_at ? new Date(row.hot_tag_at).getTime() : 0
-      )
-    ),
+    // "Nóng tính đến" = MAX(tương tác THẬT của KHÁCH cuối cùng, lần Sales gắn tag Hot).
+    //
+    // Hai thứ CỐ Ý loại khỏi công thức (sự cố 2026-07-15 — "1503 lead nóng/3 ngày"
+    // trong khi 90% chưa có tương tác nào):
+    //   1. first_seen_at — đó là giờ ETL import record, KHÔNG phải lúc khách hoạt
+    //      động. Lead vừa kéo từ SMAX /customers (chưa có tin nhắn) trước đây rơi
+    //      vào đây → phồng ảo. Bỏ hẳn fallback này.
+    //   2. chat_staff — tin TVV gửi ĐI là hành động của MDA, không phải khách chủ
+    //      động. Nếu mốc engagement mới nhất chính là chat_staff thì lột ra, lùi về
+    //      tín hiệu KHÁCH gần nhất (chat khách / email).
+    // Lead không có cả tương tác khách lẫn tag Hot → hotAsOf = undefined → KHÔNG
+    // lọt bộ lọc thời gian (vẫn nằm trong tổng lead Hot).
+    hotAsOf: (() => {
+      const engTs = row.last_engagement_at ? new Date(row.last_engagement_at).getTime() : 0;
+      const staffTs = row.last_chat_staff_at ? new Date(row.last_chat_staff_at).getTime() : 0;
+      const chatTs = row.last_chat_at ? new Date(row.last_chat_at).getTime() : 0;
+      const emailTs = row.last_email_at ? new Date(row.last_email_at).getTime() : 0;
+      // last_engagement_at là MAX gồm cả chat_staff → nếu nó == last_chat_staff_at
+      // thì tin mới nhất là TVV gửi đi, phải lùi về mốc khách gần nhất.
+      const staffIsLatest = staffTs > 0 && engTs > 0 && staffTs >= engTs;
+      const customerRecency = staffIsLatest ? Math.max(chatTs, emailTs) : engTs;
+      const tagTs = row.hot_tag_at ? new Date(row.hot_tag_at).getTime() : 0;
+      const hotMs = Math.max(customerRecency, tagTs);
+      return hotMs > 0 ? new Date(hotMs) : undefined;
+    })(),
     firstSeenAt: new Date(row.first_seen_at),
     stage: row.stage as Lead["stage"],
     assignee: row.assignee || "—",
@@ -362,11 +377,15 @@ async function fetchLeadsPage(
     if (listViewLeadIds && !listViewLeadIds.has(l.id)) return false;
     if (filter?.engagement === "engaged" && !l.signals?.hasRealEngagement) return false;
     if (filter?.engagement === "silent" && l.signals?.hasRealEngagement) return false;
-    // Lọc theo "nóng tính đến" = MAX(tương tác cuối, tag Hot) — không phải chỉ
-    // tương tác cuối, để lead vừa được tag nóng (dù chat lâu) vẫn lọt filter.
-    const hotAsOf = (l.hotAsOf ?? l.lastContactAt).getTime();
-    if (fromMs && hotAsOf < fromMs) return false;
-    if (toMs && hotAsOf >= toMs) return false;
+    // Lọc theo "nóng tính đến" = MAX(tương tác KHÁCH cuối, tag Hot). Lead không
+    // có mốc nào (hotAsOf undefined) → recency chưa xác định → KHÔNG lọt filter
+    // thời gian (không dùng first_seen_at/import time làm cứu cánh nữa).
+    if (fromMs || toMs) {
+      if (!l.hotAsOf) return false;
+      const hotAsOf = l.hotAsOf.getTime();
+      if (fromMs && hotAsOf < fromMs) return false;
+      if (toMs && hotAsOf >= toMs) return false;
+    }
     return true;
   });
   return { leads: filtered.slice(offset, offset + limit), total: filtered.length };
@@ -782,6 +801,31 @@ export async function getLeadById(id: string): Promise<Lead | null> {
     .limit(50);
 
   return mergeToLead(lead, score ?? undefined, touchpoints ?? []);
+}
+
+/**
+ * Xếp hạng percentile của 1 lead so với toàn bộ lead (theo điểm scoring của
+ * ngày mới nhất) — dùng cho block "Nóng hơn X% lead khác" trên hồ sơ 360°.
+ * Bọc try/catch: nếu count timeout thì trả null, UI ẩn block thay vì 500 trang.
+ */
+export async function getLeadPercentile(score: number): Promise<number | null> {
+  try {
+    const supabase = await createClient();
+    const scoredAt = await getLatestScoredAt(supabase);
+    const { count: total } = await supabase
+      .from("fact_lead_score")
+      .select("*", { count: "exact", head: true })
+      .eq("scored_at", scoredAt);
+    if (!total) return null;
+    const { count: below } = await supabase
+      .from("fact_lead_score")
+      .select("*", { count: "exact", head: true })
+      .eq("scored_at", scoredAt)
+      .lt("hot_score", score);
+    return Math.round(((below ?? 0) / total) * 100);
+  } catch {
+    return null;
+  }
 }
 
 export async function getDashboardKPI() {

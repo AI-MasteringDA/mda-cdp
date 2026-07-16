@@ -46,6 +46,8 @@ export interface Lead {
   phone: string;
   source: LeadSource;
   avatarColor: string;
+  /** Ảnh đại diện thật từ Zalo/Facebook (SMAX customer.picture) — có thể null nếu chưa pull được hoặc lead không từ SMAX */
+  avatarUrl?: string | null;
   // V5: unified score 0-100 + categorical tier
   score: number;
   tier: LeadTier;
