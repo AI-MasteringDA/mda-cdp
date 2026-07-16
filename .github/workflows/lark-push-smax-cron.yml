@@ -2,18 +2,17 @@ name: Lark Base push (SMAX only, fast)
 
 on:
   schedule:
-    # Every 15 minutes. REVERTED from a same-day */7 attempt (2026-07-16):
-    # this job has a "full refresh" path below (deleteAllRecords + re-read all
-    # ~9k leads from v_smax_lead_snapshot) that fires during the first 15 min
-    # of every 6-hour UTC block (00/06/12/18:00). At */15 exactly ONE run lands
-    # in that window per block. At */7, TWO-THREE runs land in it → the full
-    # refresh (the most expensive thing this job does) fires 2-3x instead of
-    # once, right when the Supabase org is already over its egress quota
-    # (7.04GB used this billing cycle, per Dashboard → Usage, 2026-07-16).
-    # smax-cron.yml (the actual SMAX->Supabase ingest) stays at */7 — its cost
-    # scales down with a shorter window, no equivalent fixed-window multiplier.
-    # REMINDER: cron-job.org trigger must also be set back to every 15 min.
-    - cron: '*/15 * * * *'
+    # Every ~7 minutes (2026-07-16). Two expensive full-pulls in lark-push.ts
+    # used to be implicitly rate-limited by the 15-min cron itself — bumping
+    # cadence alone (first attempted same day) would have made them fire 2-3x
+    # too often, adding real egress right when the org is already over quota.
+    # Both are now explicitly rate-limited via etl_state (claimIfDue()) instead
+    # of relying on cron cadence, verified live by running back-to-back:
+    #   - Full snapshot refresh (~9k rows): real cap once per 6h.
+    #   - Hot-leads pull (~2709 rows, ~1.16MB): real cap once per ~14 min —
+    #     confirmed run #2 logs "Đã pull hot-leads <14 phút trước, skip".
+    # REMINDER: cron-job.org trigger must also be set to every 7 min.
+    - cron: '*/7 * * * *'
   workflow_dispatch:
 
 # Concurrency lock: kept as a safety net even though real run time (~2-3.5 min)
