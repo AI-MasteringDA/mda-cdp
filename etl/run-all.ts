@@ -70,11 +70,31 @@ async function main() {
       console.log("");
     }
 
-    // Recompute scores 1 lần ở cuối (không cần gọi sau mỗi source)
-    console.log("⚙️  [Scoring] Gọi recompute_lead_scores()...");
-    const { error } = await admin.rpc("recompute_lead_scores");
-    if (error) console.warn(`   ⚠️ ${error.message}`);
-    else console.log("✅ [Scoring] Scores đã update");
+    // Recompute scores — CHẶN TẦN SUẤT. recompute_lead_scores() chấm lại toàn
+    // bộ ~50k lead, tốn ~9s CPU. Trước đây gọi sau MỖI lần ETL; SMAX chạy 7
+    // phút/lần nên nó chấm 50k lead mỗi 7 phút → vắt kiệt CPU của Nano instance
+    // (2026-07-18: "exhausting multiple resources"), tạo vòng lặp tự bóp nghẹt
+    // (recompute dày → CPU cạn → recompute chậm → timeout → đốt CPU vô ích).
+    // Tier/điểm lead không đổi từng phút, nên chỉ cần chấm lại mỗi ~30 phút.
+    // Dùng etl_state làm khoá nhịp (giống lark-push). CLAIM TRƯỚC khi chạy để
+    // dù lần này có timeout thì cũng không thử lại ngay — cho CPU nghỉ để hồi.
+    const GATE_MIN = Number(process.env.RECOMPUTE_GATE_MIN || 30);
+    const { data: gate } = await admin
+      .from("etl_state").select("value").eq("source", "_recompute").eq("key", "last_run_at").maybeSingle();
+    const lastMs = gate?.value ? new Date(gate.value).getTime() : 0;
+    const sinceMin = Math.round((Date.now() - lastMs) / 60_000);
+    if (Date.now() - lastMs >= GATE_MIN * 60_000) {
+      await admin.from("etl_state").upsert(
+        { source: "_recompute", key: "last_run_at", value: new Date().toISOString(), updated_at: new Date().toISOString() },
+        { onConflict: "source,key" }
+      );
+      console.log("⚙️  [Scoring] Gọi recompute_lead_scores()...");
+      const { error } = await admin.rpc("recompute_lead_scores");
+      if (error) console.warn(`   ⚠️ ${error.message}`);
+      else console.log("✅ [Scoring] Scores đã update");
+    } else {
+      console.log(`⏭  [Scoring] Bỏ qua recompute (mới chạy ${sinceMin} phút trước, gate ${GATE_MIN} phút)`);
+    }
 
     const duration = ((Date.now() - startedAt) / 1000).toFixed(1);
     console.log("=".repeat(60));
