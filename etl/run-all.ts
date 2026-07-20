@@ -70,31 +70,15 @@ async function main() {
       console.log("");
     }
 
-    // Recompute scores — CHẶN TẦN SUẤT. recompute_lead_scores() chấm lại toàn
-    // bộ ~50k lead, tốn ~9s CPU. Trước đây gọi sau MỖI lần ETL; SMAX chạy 7
-    // phút/lần nên nó chấm 50k lead mỗi 7 phút → vắt kiệt CPU của Nano instance
-    // (2026-07-18: "exhausting multiple resources"), tạo vòng lặp tự bóp nghẹt
-    // (recompute dày → CPU cạn → recompute chậm → timeout → đốt CPU vô ích).
-    // Tier/điểm lead không đổi từng phút, nên chỉ cần chấm lại mỗi ~30 phút.
-    // Dùng etl_state làm khoá nhịp (giống lark-push). CLAIM TRƯỚC khi chạy để
-    // dù lần này có timeout thì cũng không thử lại ngay — cho CPU nghỉ để hồi.
-    const GATE_MIN = Number(process.env.RECOMPUTE_GATE_MIN || 30);
-    const { data: gate } = await admin
-      .from("etl_state").select("value").eq("source", "_recompute").eq("key", "last_run_at").maybeSingle();
-    const lastMs = gate?.value ? new Date(gate.value).getTime() : 0;
-    const sinceMin = Math.round((Date.now() - lastMs) / 60_000);
-    if (Date.now() - lastMs >= GATE_MIN * 60_000) {
-      await admin.from("etl_state").upsert(
-        { source: "_recompute", key: "last_run_at", value: new Date().toISOString(), updated_at: new Date().toISOString() },
-        { onConflict: "source,key" }
-      );
-      console.log("⚙️  [Scoring] Gọi recompute_lead_scores()...");
-      const { error } = await admin.rpc("recompute_lead_scores");
-      if (error) console.warn(`   ⚠️ ${error.message}`);
-      else console.log("✅ [Scoring] Scores đã update");
-    } else {
-      console.log(`⏭  [Scoring] Bỏ qua recompute (mới chạy ${sinceMin} phút trước, gate ${GATE_MIN} phút)`);
-    }
+    // Recompute scores — KHÔNG gọi từ ETL nữa (2026-07-20).
+    // recompute_lead_scores() chấm lại ~50k lead (~9.5s). Gọi qua API/PostgREST
+    // thì luôn bị cắt ở statement_timeout ~8s (ALTER ROLE service_role không áp
+    // được cho đường "SET ROLE" của PostgREST) → mỗi lần gọi đốt 9s CPU rồi
+    // timeout vô ích, góp phần làm sập instance free-tier. Giờ recompute chạy
+    // BÊN TRONG database bằng pg_cron (như SQL Editor — không dính giới hạn API,
+    // luôn chạy xong). Xem supabase/setup-recompute-cron.sql.
+    // Đặt LARK khỏi lo: ETL giờ chỉ ingest, nhẹ và không giữ connection lâu.
+    console.log("ℹ️  [Scoring] recompute do pg_cron trong DB xử lý (không gọi từ ETL).");
 
     const duration = ((Date.now() - startedAt) / 1000).toFixed(1);
     console.log("=".repeat(60));
