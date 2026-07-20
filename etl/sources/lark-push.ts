@@ -20,6 +20,12 @@ const DAYS_PER_SOURCE: Record<string, number> = {
   instantly: Number(process.env.LARK_DAYS_INSTANTLY || 60),
 };
 
+// Bảng nào cần tự "xoay vòng" (xoá cũ nhất khi gần chạm giới hạn cứng của
+// Lark). Chừa biên 500 dưới mức 20.000 thật để không bao giờ chạm sát cạnh.
+const MAX_RECORDS_PER_SOURCE: Record<string, number> = {
+  instantly: 19_500,
+};
+
 /**
  * "Chốt" quyền chạy 1 tác vụ nặng — tác vụ chỉ thực sự thực thi nếu đã cách
  * lần trước ÍT NHẤT `minGapMs`, bất kể cron ngoài gọi function này thường
@@ -236,6 +242,55 @@ async function listAllRecords(token: string, tableId: string): Promise<string[]>
   return ids;
 }
 
+/**
+ * Xoay vòng bảng Lark khi gần chạm giới hạn cứng 20.000 dòng/bảng của Lark.
+ *
+ * Phát hiện 2026-07-20: Instantly_Database đã ĐẦY 20.000 dòng — MỌI insert từ
+ * đó bị Lark từ chối ("RecordExceedLimit"), nên mốc "mới nhất" kẹt cứng ở
+ * 07/07 mãi mãi (insert luôn fail nên incremental cutoff không bao giờ tiến
+ * lên), và mỗi lần chạy vẫn tải lại HÀNG CHỤC NGÀN dòng từ Supabase cho một
+ * việc luôn thất bại — lãng phí egress đúng lúc cần tiết kiệm.
+ *
+ * Cửa sổ theo NGÀY (DAYS_PER_SOURCE) không đáng tin vì lượng phát sinh dao
+ * động (~1.6k-4.4k/ngày, đang tăng) — dùng cửa sổ theo SỐ DÒNG tự xoay vòng:
+ * trước khi thêm mới, xoá bớt dòng CŨ NHẤT để luôn có chỗ, bất kể lượng data
+ * tăng thế nào trong tương lai.
+ */
+async function pruneTableToFit(token: string, tableId: string, incomingCount: number, maxRecords: number) {
+  const items: Array<{ record_id: string; time: number }> = [];
+  let pageToken: string | undefined;
+  while (true) {
+    const url = new URL(`${BASE_URL}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/records`);
+    url.searchParams.set("page_size", "500");
+    url.searchParams.set("field_names", JSON.stringify(["Time"]));
+    if (pageToken) url.searchParams.set("page_token", pageToken);
+    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    for (const r of data.data?.items || []) {
+      const v = r.fields?.["Time"];
+      items.push({ record_id: r.record_id, time: typeof v === "number" ? v : 0 });
+    }
+    if (!data.data?.has_more) break;
+    pageToken = data.data.page_token;
+  }
+
+  const overBy = items.length + incomingCount - maxRecords;
+  if (overBy <= 0) return;
+
+  items.sort((a, b) => a.time - b.time); // cũ nhất trước
+  const toDelete = items.slice(0, overBy).map((i) => i.record_id);
+  console.log(`   ↳ Bảng có ${items.length} dòng, sắp thêm ${incomingCount} → vượt giới hạn ${maxRecords}. Xoá ${toDelete.length} dòng cũ nhất để lấy chỗ.`);
+  for (let i = 0; i < toDelete.length; i += 500) {
+    const batch = toDelete.slice(i, i + 500);
+    await fetch(`${BASE_URL}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/records/batch_delete`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ records: batch }),
+    });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+
 async function deleteAllRecords(token: string, tableId: string) {
   const ids = await listAllRecords(token, tableId);
   console.log(`   ↳ Delete ${ids.length} existing records...`);
@@ -438,7 +493,12 @@ async function pushChannel(token: string, source: string, tableName: string) {
   const cutoff = new Date(cutoffMs).toISOString();
   console.log(`   ↳ Mode: ${mode} · cutoff: ${cutoff}`);
 
-  // Pull touchpoints (paginated, Supabase 1000-row cap)
+  // Pull touchpoints (paginated, Supabase 1000-row cap). Nếu nguồn có giới hạn
+  // cứng số dòng trên Lark (maxRecords), DỪNG SỚM ngay khi đã đủ — bảng chỉ
+  // giữ được tối đa maxRecords dòng nên kéo thêm cũng không bao giờ được chèn,
+  // chỉ tốn egress Supabase vô ích (phát hiện 2026-07-20: Instantly kéo lại
+  // 55k+ dòng mỗi lần chạy dù bảng Lark đã đầy, insert luôn fail).
+  const maxRecords = MAX_RECORDS_PER_SOURCE[source];
   const rows: any[] = [];
   let from = 0;
   while (true) {
@@ -451,13 +511,20 @@ async function pushChannel(token: string, source: string, tableName: string) {
     if (!data || data.length === 0) break;
     rows.push(...data);
     if (data.length < 1000) break;
+    if (maxRecords && rows.length >= maxRecords) break; // đủ dòng mới nhất rồi, dừng sớm
     from += 1000;
   }
-  console.log(`   ↳ Loaded ${rows.length} touchpoints ${mode === "incremental" ? "(new since last push)" : `(last ${daysForThis} days)`}`);
+  const truncated = maxRecords && rows.length > maxRecords;
+  if (truncated) rows.length = maxRecords; // chỉ giữ mới nhất, phần cũ hơn vẫn an toàn trong Supabase
+  console.log(`   ↳ Loaded ${rows.length} touchpoints ${mode === "incremental" ? "(new since last push)" : `(last ${daysForThis} days)`}${truncated ? ` — cắt bớt, bảng Lark chỉ giữ tối đa ${maxRecords} dòng` : ""}`);
 
   if (rows.length === 0) {
     console.log(`   ✓ Nothing new. Skipping.`);
     return;
+  }
+
+  if (maxRecords) {
+    await pruneTableToFit(token, tableId, rows.length, maxRecords);
   }
 
   // Transform to Lark records — DateTime fields as Unix milliseconds
