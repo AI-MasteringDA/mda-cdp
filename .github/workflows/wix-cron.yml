@@ -6,6 +6,12 @@ on:
     - cron: '0 */6 * * *'
   workflow_dispatch:
 
+# 2026-07-20: prevent overlapping runs from piling up on a slow DB (see
+# salesforce-cron.yml). Queue instead of overlap.
+concurrency:
+  group: wix-etl
+  cancel-in-progress: false
+
 jobs:
   wix-etl:
     runs-on: ubuntu-latest

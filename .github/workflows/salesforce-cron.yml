@@ -6,6 +6,14 @@ on:
     - cron: '0 * * * *'
   workflow_dispatch:
 
+# 2026-07-20: SF ETL takes ~9 min normally, longer when the DB is slow. Without
+# this guard, cron-job.org firing every 15 min stacked 4+ overlapping SF runs
+# that each held DB connections → connection-pool exhaustion → whole DB timed
+# out. Queue instead of overlap: at most one SF run at a time.
+concurrency:
+  group: salesforce-etl
+  cancel-in-progress: false
+
 jobs:
   sf-etl:
     runs-on: ubuntu-latest

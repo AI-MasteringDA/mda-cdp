@@ -7,6 +7,12 @@ on:
     - cron: '15 * * * *'
   workflow_dispatch:
 
+# 2026-07-20: prevent overlapping runs from piling up on a slow DB (see
+# salesforce-cron.yml). Queue instead of overlap.
+concurrency:
+  group: lark-push-nonsmax
+  cancel-in-progress: false
+
 jobs:
   lark-push:
     runs-on: ubuntu-latest
