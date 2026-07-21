@@ -257,7 +257,6 @@ async function processBatch(
   batch: InstantlyEmail[],
   sinceMs: number,
   leadsMap: Map<string, { fullName: string; phone?: string }>,
-  existingRawIds: Set<string>,
   forcedUeType?: number  // NEW: when pulling by ?ue_type=X, API response omits ue_type field
 ): Promise<{ inserted: number; created: number }> {
   const inRange = batch.filter((e) => {
@@ -277,7 +276,7 @@ async function processBatch(
 
   // Use forced ue_type if provided (from filter query) — API response omits ue_type field.
   const touchpoints = inRange
-    .filter((e) => matchMap.get(e.id) && !existingRawIds.has(e.id))
+    .filter((e) => matchMap.get(e.id))
     .map((e) => {
       const ue = forcedUeType ?? e.ue_type;
       return {
@@ -295,6 +294,13 @@ async function processBatch(
           : `Đã gửi email: ${e.subject || "(no subject)"}`,
         detail: null,
         occurred_at: e.timestamp_email || e.timestamp_created || new Date().toISOString(),
+        // DB-level dedup via UNIQUE INDEX ux_ft_source_dedup(source, dedup_key) —
+        // trước đây đọc lại TOÀN BỘ touchpoint instantly (87k+ dòng, tăng
+        // ~4k/ngày) mỗi lần chạy chỉ để dò trùng thủ công. Vừa tốn egress vô ích,
+        // vừa dễ vỡ: nếu lần đọc đó bị cắt ngang (DB quá tải, 2026-07-17/18) thì
+        // dòng đã tồn tại "biến mất" khỏi danh sách dò trùng → bị chèn lại y
+        // hệt, tạo bản ghi trùng (đã bắt được thực tế: hist-open trùng raw_id).
+        dedup_key: e.id,
         payload: {
           raw_id: e.id,
           subject: e.subject,
@@ -307,12 +313,8 @@ async function processBatch(
     });
 
   if (touchpoints.length > 0) {
-    const { error } = await admin.from("fact_touchpoint").insert(touchpoints);
-    if (error) throw new Error(`Insert fact_touchpoint: ${error.message}`);
-    // Track for next batches in this run
-    for (const t of touchpoints) {
-      existingRawIds.add((t.payload as { raw_id: string }).raw_id);
-    }
+    const { error } = await admin.from("fact_touchpoint").upsert(touchpoints, { onConflict: "source,dedup_key" });
+    if (error) throw new Error(`Upsert fact_touchpoint: ${error.message}`);
   }
   return { inserted: touchpoints.length, created };
 }
@@ -337,27 +339,10 @@ export async function pullFromInstantlyReal() {
     // 2. Pull /leads parallel để enrich names
     const leadsMap = await pullInstantlyLeadsMap();
 
-    // Pre-load existing raw_ids for dedupe (single fetch, then track in-memory)
-    console.log("   ↳ Loading existing Instantly raw_ids for dedupe...");
-    const existingRawIds = new Set<string>();
-    {
-      let fromRow = 0;
-      while (true) {
-        const { data } = await admin
-          .from("fact_touchpoint")
-          .select("payload")
-          .eq("source", "instantly")
-          .range(fromRow, fromRow + 999);
-        if (!data || data.length === 0) break;
-        for (const t of data) {
-          const rawId = (t.payload as { raw_id?: string })?.raw_id;
-          if (rawId) existingRawIds.add(rawId);
-        }
-        if (data.length < 1000) break;
-        fromRow += 1000;
-      }
-    }
-    console.log(`   ↳ ${existingRawIds.size} email đã có trong DB → sẽ skip dedupe`);
+    // Dedup giờ ở tầng DB (UNIQUE INDEX ux_ft_source_dedup(source, dedup_key),
+    // xem processBatch's .upsert()) — không cần đọc lại toàn bộ touchpoint cũ
+    // nữa. Trước đây bước này đọc lại 87k+ dòng mỗi lần chạy, và nếu bị cắt
+    // ngang lúc DB quá tải thì dò trùng thiếu, gây chèn trùng dữ liệu.
 
     // 3. Pull /emails with pagination — SEPARATE per ue_type to avoid
     //    Instantly returning only sent events (newest-first ordering makes
@@ -402,7 +387,7 @@ export async function pullFromInstantlyReal() {
 
       // INSERT BATCH every N pages + save cursor
       if (page % BATCH_PAGES === 0 && pendingBatch.length > 0) {
-        const { inserted, created } = await processBatch(pendingBatch, sinceMs, leadsMap, existingRawIds, ueType);
+        const { inserted, created } = await processBatch(pendingBatch, sinceMs, leadsMap, ueType);
         totalInserted += inserted;
         totalCreated += created;
         pendingBatch = [];
@@ -424,7 +409,7 @@ export async function pullFromInstantlyReal() {
     }
       // Flush remaining batch for THIS ueType before moving to next
       if (pendingBatch.length > 0) {
-        const { inserted, created } = await processBatch(pendingBatch, sinceMs, leadsMap, existingRawIds, ueType);
+        const { inserted, created } = await processBatch(pendingBatch, sinceMs, leadsMap, ueType);
         totalInserted += inserted;
         totalCreated += created;
         pendingBatch = [];
@@ -435,7 +420,7 @@ export async function pullFromInstantlyReal() {
 
     // Flush remaining batch (uses last ueType — should be 5 or last iterated)
     if (pendingBatch.length > 0) {
-      const { inserted, created } = await processBatch(pendingBatch, sinceMs, leadsMap, existingRawIds, UE_TYPES_TO_PULL[UE_TYPES_TO_PULL.length - 1]);
+      const { inserted, created } = await processBatch(pendingBatch, sinceMs, leadsMap, UE_TYPES_TO_PULL[UE_TYPES_TO_PULL.length - 1]);
       totalInserted += inserted;
       totalCreated += created;
       console.log(`   💾 Final flush: +${inserted} touchpoints (+${created} new leads)`);

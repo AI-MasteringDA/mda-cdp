@@ -111,7 +111,7 @@ export async function pullFromInstantlyHistorical() {
   // Build touchpoints - 1 per (lead, event_type)
   const touchpoints: Array<{
     lead_id: string; source: string; event_type: string;
-    title: string; occurred_at: string; payload: Record<string, unknown>;
+    title: string; occurred_at: string; dedup_key: string; payload: Record<string, unknown>;
   }> = [];
 
   for (const lead of engaged) {
@@ -131,6 +131,7 @@ export async function pullFromInstantlyHistorical() {
         lead_id: leadId, source: "instantly", event_type: "email_open",
         title: `Đã mở email (${lead.email_open_count} lần)`,
         occurred_at: occurredAt,
+        dedup_key: `hist-open-${lead.id}`,
         payload: { ...basePayload, count: lead.email_open_count, raw_id: `hist-open-${lead.id}` },
       });
     }
@@ -139,6 +140,7 @@ export async function pullFromInstantlyHistorical() {
         lead_id: leadId, source: "instantly", event_type: "email_click",
         title: `Đã click email (${lead.email_click_count} lần)`,
         occurred_at: occurredAt,
+        dedup_key: `hist-click-${lead.id}`,
         payload: { ...basePayload, count: lead.email_click_count, raw_id: `hist-click-${lead.id}` },
       });
     }
@@ -147,46 +149,31 @@ export async function pullFromInstantlyHistorical() {
         lead_id: leadId, source: "instantly", event_type: "email_reply",
         title: `Đã reply email (${lead.email_reply_count} lần)`,
         occurred_at: occurredAt,
+        dedup_key: `hist-reply-${lead.id}`,
         payload: { ...basePayload, count: lead.email_reply_count, raw_id: `hist-reply-${lead.id}` },
       });
     }
   }
   console.log(`   ↳ Built ${touchpoints.length} touchpoints`);
 
-  // Dedup vs DB (by raw_id which is deterministic: hist-{type}-{lead_id})
-  const existingKeys = new Set<string>();
-  let from = 0;
-  while (true) {
-    const { data } = await admin.from("fact_touchpoint")
-      .select("payload").eq("source", "instantly").range(from, from + 999);
-    if (!data || data.length === 0) break;
-    for (const r of data) {
-      const rid = (r.payload as any)?.raw_id;
-      if (rid) existingKeys.add(rid);
-    }
-    if (data.length < 1000) break;
-    from += 1000;
-  }
-
-  const newTouchpoints = touchpoints.filter(t => {
-    const rid = (t.payload as any).raw_id;
-    return !existingKeys.has(rid);
-  });
-  console.log(`   ↳ ${touchpoints.length - newTouchpoints.length} already in DB, ${newTouchpoints.length} new to insert`);
-
-  // Insert in batches
+  // DB-level dedup via UNIQUE INDEX ux_ft_source_dedup(source, dedup_key) —
+  // trước đây đọc lại TOÀN BỘ touchpoint instantly (87k+ dòng, tăng dần mỗi
+  // ngày) mỗi lần chạy chỉ để dò trùng thủ công trong bộ nhớ. Egress lãng phí,
+  // và nếu lần đọc đó bị cắt ngang lúc DB quá tải (đã xảy ra 2026-07-17/18) thì
+  // dòng đã tồn tại "biến mất" khỏi danh sách dò trùng → chèn lại y hệt, tạo
+  // bản ghi trùng (bắt được thực tế: hist-open trùng raw_id, cách nhau 1 ngày).
   let inserted = 0;
-  for (let i = 0; i < newTouchpoints.length; i += 100) {
-    const batch = newTouchpoints.slice(i, i + 100);
-    const { error } = await admin.from("fact_touchpoint").insert(batch);
+  for (let i = 0; i < touchpoints.length; i += 100) {
+    const batch = touchpoints.slice(i, i + 100);
+    const { error } = await admin.from("fact_touchpoint").upsert(batch, { onConflict: "source,dedup_key" });
     if (error) {
-      console.warn(`   ⚠️ Insert batch ${i}: ${error.message}`);
+      console.warn(`   ⚠️ Upsert batch ${i}: ${error.message}`);
       continue;
     }
     inserted += batch.length;
-    if (inserted % 1000 === 0) console.log(`   💾 Inserted ${inserted}...`);
+    if (inserted % 1000 === 0) console.log(`   💾 Upserted ${inserted}...`);
   }
-  console.log(`✅ [Instantly HISTORICAL] ${inserted} new touchpoints`);
+  console.log(`✅ [Instantly HISTORICAL] ${inserted} touchpoints upserted (mới + refresh count)`);
 
   await admin.from("sync_job").update({
     status: "success", finished_at: new Date().toISOString(),
