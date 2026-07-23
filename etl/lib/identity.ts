@@ -266,6 +266,58 @@ export async function batchResolveOrCreate(
     }
   }
 
+  // ── 5c. FILL-IN-PLACE: điền email/phone mà NGUỒN có nhưng lead đang TRỐNG.
+  // Bug 2026-07-22 (case "Phạm Bình"): 1 record nguồn mang cả email+phone nhưng
+  // nhánh tạo-lead-theo-email chỉ set email, bỏ phone → 291 lead SMAX (32%)
+  // thiếu phone dù SMAX có. Bản vá trước chỉ chặn ca MỚI; bước này CHỮA LÀNH
+  // lead cũ trên mỗi lần sync, cho MỌI nguồn (dùng chung hàm này).
+  // Nguyên tắc an toàn: (1) chỉ điền field ĐANG TRỐNG, không đè dữ liệu có sẵn;
+  // (2) BỎ QUA nếu giá trị đó đã thuộc về 1 lead KHÁC — tránh tạo trùng
+  // email/phone hoặc vô tình gộp 2 account (giữ đúng "mirror SMAX 1:1").
+  {
+    const recToLead = new Map<string, string>();
+    const matchedIds = new Set<string>();
+    for (const r of records) {
+      const email = typeof r.email === "string" ? r.email.toLowerCase().trim() : undefined;
+      let lid: string | undefined;
+      if (email && emailLeadMap.has(email)) lid = emailLeadMap.get(email);
+      else if (r.phone) lid = phoneLeadMap.get(normalizePhone(r.phone));
+      else if (r.smax_customer_id) lid = smaxLeadMap.get(r.smax_customer_id);
+      if (lid) { recToLead.set(r.id, lid); matchedIds.add(lid); }
+    }
+    const cur = new Map<string, { email: string | null; phone: string | null }>();
+    const idArr = [...matchedIds];
+    for (let i = 0; i < idArr.length; i += 100) {
+      const { data } = await admin.from("dim_lead").select("lead_id, email, phone").in("lead_id", idArr.slice(i, i + 100));
+      for (const l of data ?? []) cur.set(l.lead_id, { email: l.email, phone: l.phone });
+    }
+    const patches = new Map<string, { email?: string; phone?: string }>();
+    for (const r of records) {
+      const lid = recToLead.get(r.id);
+      if (!lid) continue;
+      const c = cur.get(lid);
+      if (!c) continue;
+      const p = patches.get(lid) ?? {};
+      const recPhone = r.phone ? normalizePhone(r.phone) : "";
+      const recEmail = typeof r.email === "string" ? r.email.toLowerCase().trim() : "";
+      if (!normalizePhone(c.phone) && recPhone) {
+        const owner = phoneLeadMap.get(recPhone);           // lead nào đang giữ số này?
+        if (!owner || owner === lid) p.phone = recPhone;    // trống → điền; đụng lead khác → bỏ
+      }
+      if (!c.email && recEmail) {
+        const owner = emailLeadMap.get(recEmail);
+        if (!owner || owner === lid) p.email = recEmail;
+      }
+      if (p.phone || p.email) patches.set(lid, p);
+    }
+    let filled = 0;
+    for (const [lid, patch] of patches) {
+      const { error } = await admin.from("dim_lead").update(patch).eq("lead_id", lid);
+      if (!error) filled++;
+    }
+    if (filled > 0) console.log(`   ↳ [Identity] Fill-in-place: điền email/phone thiếu cho ${filled} lead`);
+  }
+
   // 6. Match each record — priority: email > phone > SMAX ID
   return records.map((r) => {
     const email = typeof r.email === "string" ? r.email.toLowerCase().trim() : undefined;
