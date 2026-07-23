@@ -410,6 +410,36 @@ export async function pullFromSalesforceReal() {
       console.log(`   ↳ Updated ${updated} rows, ${updateFailed} failed`);
     }
 
+    // 4b. Reconcile stale "Đã chốt" marks — phát hiện 2026-07-22 (case "Phạm
+    // Bình"): dim_lead.stage chỉ từng được SET "Đã chốt" ở bước trên, KHÔNG BAO
+    // GIỜ được gỡ lại. Khi 1 SF Lead convert thành Contact mới, lead_id mà
+    // identity resolution match TRƯỚC đó (lúc còn là Lead, chưa convert) trở
+    // thành lead_id "mồ côi" — vẫn treo "Đã chốt" mãi mãi dù deal thật đã
+    // chuyển sang gắn ở lead_id MỚI. Audit thực tế: 679/1234 (55%) lead "Đã
+    // chốt" không có touchpoint conversion nào — thổi phồng gần gấp đôi số
+    // liệu chốt deal. Sửa: mỗi lần chạy, đối chiếu lại toàn bộ "Đã chốt" hiện
+    // có với bằng chứng touchpoint thật, gỡ những dòng không có bằng chứng.
+    console.log("🔍 Đối chiếu lại các lead đang 'Đã chốt' với bằng chứng conversion thật...");
+    const { data: closedLeads } = await admin.from("dim_lead").select("lead_id").eq("stage", "Đã chốt");
+    const closedIds = (closedLeads ?? []).map((l) => l.lead_id);
+    let staleReverted = 0;
+    for (let i = 0; i < closedIds.length; i += 100) {
+      const idBatch = closedIds.slice(i, i + 100);
+      const { data: convRows } = await admin
+        .from("fact_touchpoint").select("lead_id")
+        .eq("event_type", "conversion").in("lead_id", idBatch);
+      const hasConv = new Set((convRows ?? []).map((t) => t.lead_id));
+      const stale = idBatch.filter((id) => !hasConv.has(id));
+      if (stale.length > 0) {
+        const { count } = await admin.from("dim_lead")
+          .update({ stage: "Mới" }, { count: "exact" })
+          .in("lead_id", stale).eq("stage", "Đã chốt");
+        staleReverted += count ?? 0;
+      }
+    }
+    if (staleReverted > 0) console.log(`   ↳ Gỡ ${staleReverted} lead "Đã chốt" không có bằng chứng (stale link)`);
+    else console.log(`   ↳ Không có lead nào cần gỡ — data sạch`);
+
     // 5. Tasks
     const taskDays = Number(process.env.SF_TASK_LOOKBACK_DAYS || 365);
     console.log(`📋 Pulling Tasks (last ${taskDays} days)...`);
