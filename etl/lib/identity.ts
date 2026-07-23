@@ -104,6 +104,7 @@ export async function batchResolveOrCreate(
   const newLeads: Array<{
     lead_id: string;
     email: string;
+    phone: string | null;
     full_name: string;
     source: string;
     stage: string;
@@ -119,6 +120,11 @@ export async function batchResolveOrCreate(
       // Mã theo công thức từ email → tạo lại luôn ra cùng mã
       lead_id: deterministicLeadId(`email:${email}`),
       email,
+      // BUG phát hiện 2026-07-22 (case "Phạm Bình"): nguồn trả về CẢ email lẫn
+      // phone trên cùng 1 record (xác nhận qua raw SMAX API), nhưng nhánh tạo
+      // lead-mới-theo-email này trước đây bỏ qua r.phone hoàn toàn → phone bị
+      // rớt vĩnh viễn, tạo cảm giác "2 lead khác nhau" dù cùng 1 nguồn record.
+      phone: r.phone ? normalizePhone(r.phone) : null,
       full_name: r.name || email.split("@")[0],
       source: options.source,
       stage: "Mới",
