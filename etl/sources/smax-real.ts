@@ -259,6 +259,17 @@ export async function pullFromSmaxReal() {
       console.log(`   ↳ De-duped ${beforeDedup - allThreads.length} threads (in-batch dup) → ${allThreads.length} unique`);
     }
 
+    // Bỏ thread kiểu COMMENT quảng cáo: tid dạng "postId_userId" (có '_') là bình
+    // luận công khai dưới ad, KHÔNG phải hội thoại inbox. Trước đây bị tạo thành
+    // lead "chat" → nhiễu Lark + view "chưa phản hồi". Không ingest nữa.
+    const beforeComment = allThreads.length;
+    const noComment = allThreads.filter((t) => !(t.tid && t.tid.includes("_")));
+    allThreads.length = 0;
+    allThreads.push(...noComment);
+    if (beforeComment !== allThreads.length) {
+      console.log(`   ↳ Bỏ ${beforeComment - allThreads.length} thread comment quảng cáo (tid có '_')`);
+    }
+
     const channelStats: Record<string, number> = {};
     for (const t of allThreads) {
       const key = t.platform || "unknown";
