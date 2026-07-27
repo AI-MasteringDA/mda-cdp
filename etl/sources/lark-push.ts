@@ -107,11 +107,9 @@ const SMAX_LEAD_FIELDS = [
   // is from the customer (TVV hasn't replied). Computed deterministically from
   // the chat data during each push — no AI needed.
   { field_name: "Chưa phản hồi", type: 7 },   // Checkbox
-  // AI-audit columns — created here but NEVER written by this push (we don't
-  // send these keys, so the diff leaves them alone). Claude reads the chat
-  // columns and ticks/fills these itself. Ticked = PROBLEM, so Lark
-  // automations can trigger on checkbox-checked → remind TVV.
-  { field_name: "Chưa xin info", type: 7 },   // Checkbox — chưa xin thông tin khách
+  // Optional columns for the Claude connector to fill on-demand (user reads the
+  // base via Claude chat, not a scheduled AI job — see 2026-07-27 decision to
+  // drop the "Chưa xin info" auto-audit and rely on full chat history instead).
   { field_name: "Cần follow-up", type: 7 },   // Checkbox
   { field_name: "AI Note", type: 1 },
 ];
@@ -618,6 +616,7 @@ async function pushSmaxLeadSnapshot(token: string) {
     assignee: string | null;
     smax_tags: string[] | null;
     external_profile_id: string | null;
+    chua_phan_hoi: boolean | null;
   };
   const rows: SnapshotRow[] = [];
   let from = 0;
@@ -653,15 +652,18 @@ async function pushSmaxLeadSnapshot(token: string) {
         "Stage": r.stage || "",
         "TVV": r.assignee || "",
         "Tag SMAX": tags.length > 0 ? tags : null,
-        "Total Chats": Number(r.total_chats ?? 0),
+        // "Total Chats" KHÔNG set ở đây nữa. Trước lấy total_chats từ view =
+        // SỐ THREAD (1 cuộc = 1). Nay = SỐ TIN KHÁCH GỬI, tính từ message fetch
+        // trong khối chat-refresh bên dưới (chat.customerMsgCount).
         "Title": (r.title || "").slice(0, 500),
         "Detail": (r.detail || "").slice(0, 500),
         "Lead ID": r.lead_id,
-        // "Chưa phản hồi" từ Event: 'chat' = khách nhắn cuối → tick.
-        // Cập nhật mỗi push cho MỌI lead thay đổi (không phụ thuộc fetch chat).
-        // Khối chat-refresh phía dưới sẽ ghi đè bằng kết quả merge đa-thread
-        // (chính xác hơn) cho các lead được refresh chat trong run này.
-        "Chưa phản hồi": r.event_type === "chat",
+        // "Chưa phản hồi" tính THUẦN-DB từ view (cột chua_phan_hoi): thread SMAX
+        // mới nhất của lead có nhãn 'chat' (khách nhắn cuối) VÀ trong 7 ngày.
+        // Chỉ dựa trên touchpoint kiểu thread (có thông tin người gửi) — không
+        // đọc history, không nguồn thứ 2. Tự tắt khi TVV rep (thread đổi sang
+        // chat_staff ở lần sync SMAX kế). Xem migrations/2026-07-27-chua-phan-hoi-flag.sql
+        "Chưa phản hồi": r.chua_phan_hoi === true,
       },
     };
   });
@@ -720,13 +722,16 @@ async function pushSmaxLeadSnapshot(token: string) {
       const isInsert = toInsert.includes(item as (typeof toInsert)[number]);
       // Never overwrite existing chat with emptiness (API hiccup protection)
       if (!hasContent && !isInsert) continue;
-      // "Chưa phản hồi": tick when the customer sent the last message
-      const withReplyFlag = { ...chat.fields, "Chưa phản hồi": chat.lastFromCustomer };
+      // LƯU Ý: "Chưa phản hồi" KHÔNG còn ghi đè ở đây. Trước đây khối này set
+      // cờ theo chat.lastFromCustomer (quét live) → tạo NGUỒN THỨ 2 đá nhau với
+      // view và không có luật 7 ngày → tick kẹt. Giờ cờ tính thuần-DB ở dòng 664.
+      // Khối này dựng "Chat History 1..5" + "Total Chats" (= số tin khách gửi).
+      const chatOnly = { ...chat.fields, "Total Chats": chat.customerMsgCount };
       if (isInsert) {
-        Object.assign(item.fields, withReplyFlag);
+        Object.assign(item.fields, chatOnly);
       } else {
         const cur = existingByLeadId.get(item.leadId);
-        const chatPatch = cur ? diffFields(withReplyFlag, cur.fields) : withReplyFlag;
+        const chatPatch = cur ? diffFields(chatOnly, cur.fields) : chatOnly;
         if (chatPatch) Object.assign(item.fields, chatPatch);
       }
       chatUpdated++;

@@ -124,7 +124,7 @@ export async function batchResolveOrCreate(
       // phone trên cùng 1 record (xác nhận qua raw SMAX API), nhưng nhánh tạo
       // lead-mới-theo-email này trước đây bỏ qua r.phone hoàn toàn → phone bị
       // rớt vĩnh viễn, tạo cảm giác "2 lead khác nhau" dù cùng 1 nguồn record.
-      phone: r.phone ? normalizePhone(r.phone) : null,
+      phone: r.phone ? toVNPhone(r.phone) : null,
       full_name: r.name || email.split("@")[0],
       source: options.source,
       stage: "Mới",
@@ -177,11 +177,28 @@ export async function batchResolveOrCreate(
     external_profile_id: string | null;
     phone: string | null;
   }> = [];
+  // ── Bản đồ SĐT→lead HOÀN CHỈNH (chuẩn hóa): fetch toàn bộ để so khớp đúng dù
+  // phone lưu "0965…" hay "965…". Dùng chung cho (a) chặn đẻ anon-lead trùng theo
+  // kênh và (b) bước match cuối. Thay query .in() cũ (trượt khi lệch định dạng).
+  const phoneLeadMap = new Map<string, string>();
+  {
+    const { data: allP } = await admin.from("dim_lead").select("lead_id, phone").not("phone", "is", null);
+    for (const l of allP ?? []) { const np = normalizePhone(l.phone); if (np && !phoneLeadMap.has(np)) phoneLeadMap.set(np, l.lead_id); }
+  }
+
   const seenSmaxIds = new Set<string>();
+  const batchAnonPhones = new Set<string>();
   for (const r of records) {
     if (r.email || !r.smax_customer_id) continue;
+    // GỐC của trùng lặp đa-kênh: nếu SĐT đã thuộc 1 lead (hoặc 1 anon-lead khác
+    // trong batch đã nhận) → KHÔNG đẻ lead mới theo mã kênh; record sẽ khớp về
+    // lead-theo-SĐT ở bước 6. Chặn 1 người nhiều kênh (Zalo/FB/IG) bị tách nhiều
+    // lead và trùng lại mỗi lần sync.
+    const nph = r.phone ? normalizePhone(r.phone) : "";
+    if (nph && (phoneLeadMap.has(nph) || batchAnonPhones.has(nph))) continue;
     if (seenSmaxIds.has(r.smax_customer_id)) continue;
     seenSmaxIds.add(r.smax_customer_id);
+    if (nph) batchAnonPhones.add(nph);
     anonLeads.push({
       // Mã theo công thức từ smax_customer_id → tạo lại luôn ra cùng mã.
       // Đây là lớp bảo vệ chính cho lead ẩn danh (nhóm bị xoá/tạo lại nhiều nhất).
@@ -194,7 +211,7 @@ export async function batchResolveOrCreate(
       first_seen_at: r.first_seen_at || new Date().toISOString(),
       external_platform: r.external_platform || null,
       external_profile_id: r.external_profile_id || null,
-      phone: r.phone ? normalizePhone(r.phone) : null,
+      phone: r.phone ? toVNPhone(r.phone) : null,
     });
   }
   if (anonLeads.length > 0) {
@@ -221,6 +238,8 @@ export async function batchResolveOrCreate(
         console.warn(`   ⚠️ Insert anon batch ${i}: ${error.message}`);
       }
     }
+    // Nạp anon-lead vừa tạo vào phoneLeadMap để bước match cuối khớp ngay lần này.
+    for (const l of trulyNewAnon) { const np = normalizePhone(l.phone); if (np && !phoneLeadMap.has(np)) phoneLeadMap.set(np, l.lead_id); }
   }
 
   // 4. Fetch lead_ids cho ALL emails ta cần (batched IN-query)
@@ -237,19 +256,7 @@ export async function batchResolveOrCreate(
     }
   }
 
-  // 5. Fetch lead_ids cho phones (fallback)
-  const phoneLeadMap = new Map<string, string>();
-  const phoneArr = Array.from(uniquePhones);
-  for (let i = 0; i < phoneArr.length; i += 100) {
-    const batch = phoneArr.slice(i, i + 100);
-    const { data } = await admin
-      .from("dim_lead")
-      .select("lead_id, phone")
-      .in("phone", batch);
-    for (const l of data ?? []) {
-      if (l.phone) phoneLeadMap.set(normalizePhone(l.phone), l.lead_id);
-    }
-  }
+  // 5. (phoneLeadMap đã dựng hoàn chỉnh ở trên, trước nhánh tạo anon-lead)
 
   // 5b. Fetch lead_ids cho SMAX customer_ids
   const smaxLeadMap = new Map<string, string>();
@@ -301,8 +308,8 @@ export async function batchResolveOrCreate(
       const recPhone = r.phone ? normalizePhone(r.phone) : "";
       const recEmail = typeof r.email === "string" ? r.email.toLowerCase().trim() : "";
       if (!normalizePhone(c.phone) && recPhone) {
-        const owner = phoneLeadMap.get(recPhone);           // lead nào đang giữ số này?
-        if (!owner || owner === lid) p.phone = recPhone;    // trống → điền; đụng lead khác → bỏ
+        const owner = phoneLeadMap.get(recPhone);           // recPhone = dạng trần để tra chủ sở hữu
+        if (!owner || owner === lid) p.phone = toVNPhone(r.phone); // trống → điền (dạng có số 0); đụng lead khác → bỏ
       }
       if (!c.email && recEmail) {
         const owner = emailLeadMap.get(recEmail);
@@ -344,9 +351,18 @@ export async function batchResolveOrCreate(
   });
 }
 
+// normalizePhone = dạng "trần" để SO KHỚP (bỏ 0 đầu, +84, khoảng trắng) — chỉ
+// dùng làm KHÓA so sánh, KHÔNG lưu.
 export function normalizePhone(phone: string | number | null | undefined): string {
   if (phone === null || phone === undefined) return "";
   return String(phone).replace(/\s|-|\+84/g, "").replace(/^0/, "");
+}
+
+// toVNPhone = dạng để LƯU/HIỂN THỊ: luôn có số 0 đầu chuẩn VN ("965…" → "0965…").
+// Mọi chỗ ghi phone vào dim_lead phải dùng hàm này để định dạng đồng nhất.
+export function toVNPhone(phone: string | number | null | undefined): string {
+  const bare = normalizePhone(phone);
+  return bare ? "0" + bare : "";
 }
 
 export function logMatches(matches: IdentityMatch[], source: string) {

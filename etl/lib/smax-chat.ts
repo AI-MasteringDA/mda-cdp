@@ -196,6 +196,9 @@ export type ChatHistoryResult = {
    *  hasn't replied yet → drives the "Chưa phản hồi" checkbox. */
   lastFromCustomer: boolean;
   messageCount: number;
+  /** Số tin do KHÁCH gửi (không tính TVV) trong các thread đã fetch — drives cột
+   *  "Total Chats" = tổng tin khách nhắn, thay cho cách đếm số thread cũ. */
+  customerMsgCount: number;
 };
 
 export async function buildChatHistoryFields(
@@ -237,5 +240,6 @@ export async function buildChatHistoryFields(
     fields,
     lastFromCustomer: all.length > 0 && !all[all.length - 1].staff,
     messageCount: all.length,
+    customerMsgCount: all.filter((m) => !m.staff).length,
   };
 }

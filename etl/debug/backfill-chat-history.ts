@@ -98,9 +98,11 @@ async function main() {
       if (!threads.length) return null;
       const chat = await buildChatHistoryFields(threads);
       if (chat.messageCount === 0) return null;
+      // CHỈ ghi transcript. KHÔNG đụng "Chưa phản hồi" — cờ đó nay tính thuần-DB
+      // từ view (chua_phan_hoi), ghi ở đây sẽ tái tạo bug sinh nhật/không-7-ngày.
       return {
         record_id: t.record_id,
-        fields: { ...chat.fields, "Chưa phản hồi": chat.lastFromCustomer },
+        fields: { ...chat.fields, "Total Chats": chat.customerMsgCount },
       };
     }));
     for (const r of results) {

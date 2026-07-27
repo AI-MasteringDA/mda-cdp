@@ -105,8 +105,18 @@ type SmaxThread = {
     gender?: string;
     page_pid?: string;
     platform?: string;
+    last_content_by_user?: string;
+    last_content_by_page?: string;
   };
 };
+
+// Tin tự động SMAX bơm vào thread (thiệp sinh nhật...) bị tính là "tin của khách"
+// → đẩy last_message_by_customer_at & replied=false sai. Nhận diện để KHÔNG coi
+// là "chưa phản hồi". Mẫu: "DD/MM Sinh nhật của <tên>..." + link ecard zadn.
+function isAutoCustomerNote(text: string | undefined | null): boolean {
+  if (!text) return false;
+  return /sinh nh[aậ]t c[uủ]a/i.test(text) || text.includes("res-zalo.zadn.vn");
+}
 
 async function smaxPost(path: string, body: unknown, retries = 3): Promise<unknown> {
   if (!TOKEN) throw new Error("Thiếu SMAX_USER_TOKEN / SMAX_API_KEY trong .env.local");
@@ -515,7 +525,11 @@ export async function pullFromSmaxReal() {
         const senderIsStaff = lastMsgMs > 0 && lastCustomerMs > 0 && lastMsgMs > lastCustomerMs;
         // OR: if no customer time at all → assume TVV broadcast
         const noCustomerMsg = lastMsgMs > 0 && lastCustomerMs === 0;
-        const eventType = senderIsStaff || noCustomerMsg ? "chat_staff" : "chat";
+        // Tin auto (thiệp sinh nhật) bị SMAX tính là tin khách → last_message_by_
+        // customer_at & replied=false sai. Nếu nội-dung-khách cuối là tin auto,
+        // coi như KHÔNG phải khách nhắn thật → 'chat_staff' (không "chưa phản hồi").
+        const autoLastNote = isAutoCustomerNote(customer?.last_content_by_user);
+        const eventType = senderIsStaff || noCustomerMsg || autoLastNote ? "chat_staff" : "chat";
         const titlePrefix = eventType === "chat_staff" ? "TVV chat" : "Chat";
 
         return {
@@ -534,6 +548,7 @@ export async function pullFromSmaxReal() {
             tag_aliases: t.tag_aliases || [],
             customer_name: sanitizeText(customer?.name || customer?.profile_name),
             sender_is_staff: senderIsStaff || noCustomerMsg,
+            auto_last_note: autoLastNote,
             last_msg_at: t.last_message_at,
             last_customer_msg_at: t.last_message_by_customer_at,
             real: true,
