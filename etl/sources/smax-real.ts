@@ -467,6 +467,26 @@ export async function pullFromSmaxReal() {
         }
       }
     }
+    // Bản đồ slug(alias) → tên hiển thị, gom từ customer.tags (mỗi tag có cả
+    // {name, alias}). Dùng để chuẩn hoá thread.tag_aliases (chỉ trả slug) về TÊN
+    // hiển thị → 1 tag SMAX không bị tách 2 dạng ("cold-lead" ↔ "Cold Lead").
+    // Đây vẫn là MIRROR SMAX (hiện đúng tên SMAX UI hiển thị), chỉ bỏ slug trùng.
+    const aliasToName = new Map<string, string>();
+    const normKey = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
+    const addTag = (name?: unknown, alias?: unknown) => {
+      const n = typeof name === "string" ? name.trim() : "";
+      const a = typeof alias === "string" ? alias.trim() : "";
+      if (!n) return;
+      if (a) aliasToName.set(a, n);
+      aliasToName.set(normKey(n), n);
+    };
+    // Nguồn CHUẨN: toàn bộ bảng tag SMAX ({name, alias}) → map slug→tên đầy đủ,
+    // không phụ thuộc batch. Fallback dùng customer.tags nếu endpoint lỗi.
+    try {
+      const tres = await fetch(`${BASE}/bizs/${BIZ_SLUG}/tags`, { headers: { Authorization: `Bearer ${TOKEN}` } });
+      if (tres.ok) { const tj = await tres.json(); for (const tg of (tj.data ?? tj.tags ?? []) as Array<Record<string, unknown>>) addTag(tg.name, tg.alias); }
+    } catch { /* dùng fallback bên dưới */ }
+    for (const c of allCustomers) for (const tag of (c.tags ?? []) as Array<Record<string, unknown>>) addTag(tag?.name, tag?.alias);
     for (const t of allThreads) {
       if (!t.customer?.id) continue;
       const leadId = customerIdToLeadId.get(t.customer.id);
@@ -475,8 +495,10 @@ export async function pullFromSmaxReal() {
       if (!leadTagMap.has(leadId)) leadTagMap.set(leadId, new Set());
       const set = leadTagMap.get(leadId)!;
       for (const tag of t.tag_aliases ?? []) {
-        const name = extractTagName(tag);
-        if (name) set.add(name);
+        const raw = extractTagName(tag);
+        if (!raw) continue;
+        // slug → tên hiển thị (nếu biết); không biết thì giữ nguyên (hiếm)
+        set.add(aliasToName.get(raw) ?? aliasToName.get(normKey(raw)) ?? raw);
       }
     }
 
