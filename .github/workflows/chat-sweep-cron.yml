@@ -1,0 +1,40 @@
+name: Chat transcript sweep (giữ Chat History bám SMAX)
+
+on:
+  schedule:
+    # Mỗi giờ — mỗi lần kéo lại 1 lô (CHAT_SWEEP_BATCH), xoay hết bảng Lark sau
+    # ~1 ngày → không transcript nào cũ quá ~1 ngày. Bù cho chat-refresh trong
+    # lark-push (chỉ chạm lead vừa đổi). Miễn phí (SMAX API), 0 Supabase-IO đáng kể.
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: chat-sweep
+  cancel-in-progress: false
+
+jobs:
+  chat-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund --prefer-offline
+      - name: Sweep chat transcripts
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+          LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+          LARK_BASE_APP_TOKEN: ${{ secrets.LARK_BASE_APP_TOKEN }}
+          SMAX_USER_TOKEN: ${{ secrets.SMAX_USER_TOKEN }}
+          SMAX_API_KEY: ${{ secrets.SMAX_API_KEY }}
+          SMAX_BASE_URL: https://api.smax.ai
+          CHAT_SWEEP_BATCH: '400'
+        run: npm run etl:chat:sweep
