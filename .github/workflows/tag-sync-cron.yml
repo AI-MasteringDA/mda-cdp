@@ -1,0 +1,38 @@
+name: Tag sync (nhật ký gắn tag + cột lead-class)
+
+on:
+  schedule:
+    # Mỗi ngày 1 lần — tag (customer.tags[].time) chỉ đổi khi TVV gắn, không cần
+    # dày. Cập nhật bảng SMAX_Tag_Log + 4 cột lead-class trên SMAX_Database.
+    - cron: '32 1 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: tag-sync
+  cancel-in-progress: false
+
+jobs:
+  tag-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund --prefer-offline
+      - name: Sync tag log
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+          LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+          LARK_BASE_APP_TOKEN: ${{ secrets.LARK_BASE_APP_TOKEN }}
+          SMAX_USER_TOKEN: ${{ secrets.SMAX_USER_TOKEN }}
+          SMAX_API_KEY: ${{ secrets.SMAX_API_KEY }}
+          SMAX_BASE_URL: https://api.smax.ai
+        run: npm run etl:tag:sync
