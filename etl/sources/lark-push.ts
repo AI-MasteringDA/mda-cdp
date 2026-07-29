@@ -683,10 +683,25 @@ async function pushSmaxLeadSnapshot(token: string) {
   // Build map of existing rows: lead_id → {record_id, fields}
   const existingByLeadId = new Map<string, { record_id: string; fields: Record<string, unknown> }>();
   const existingWithoutKey: string[] = []; // record_ids that somehow lost their Lead ID
+  const dupRecordIds: string[] = [];       // dòng TRÙNG cùng Lead ID → tự dọn
   for (const r of existing) {
     const key = normalizeFieldValue(r.fields["Lead ID"]);
-    if (typeof key === "string" && key) existingByLeadId.set(key, r);
-    else existingWithoutKey.push(r.record_id);
+    if (typeof key === "string" && key) {
+      if (existingByLeadId.has(key)) dupRecordIds.push(r.record_id); // đã có 1 dòng → dòng này là dư
+      else existingByLeadId.set(key, r);
+    } else existingWithoutKey.push(r.record_id);
+  }
+  // SELF-HEAL: xóa dòng trùng Lead ID mỗi lần push (idempotent). Chặn bảng phình
+  // do dòng nhân đôi từ BẤT KỲ nguồn nào — 2026-07-29 phát hiện 9.219 dòng trùng
+  // gần chạm cap 20k. Giữ dòng gặp đầu tiên; snapshot bên dưới sẽ refresh dữ liệu.
+  if (dupRecordIds.length) {
+    for (let i = 0; i < dupRecordIds.length; i += 500) {
+      await fetch(`${BASE_URL}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/records/batch_delete`, {
+        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ records: dupRecordIds.slice(i, i + 500) }),
+      });
+    }
+    console.log(`   🧹 Tự dọn ${dupRecordIds.length} dòng TRÙNG Lead ID`);
   }
 
   const toInsert: Array<{ leadId: string; fields: Record<string, unknown> }> = [];
