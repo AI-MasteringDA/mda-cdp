@@ -449,6 +449,19 @@ export async function pullFromSmaxReal() {
       return null;
     };
 
+    // Chỉ GIỮ tag quan trọng (lead-class, khóa K/F, đã-xin-info, trạng thái SF/opp,
+    // BI/FA Student). Bỏ Bot*/broadcast/test... cho cột "Tag SMAX" gọn (2026-07-29
+    // theo yêu cầu user). isHotTag vẫn tính bình thường cho hot_tag_at.
+    const keepTag = (name: string): boolean => {
+      const n = name.toLowerCase().trim();
+      if (/test/.test(n)) return false;
+      if (/^(cold|hot|warm)\s*lead$/.test(n) || n === "prospect") return true;
+      if (/^(k\d{2,3}|f\d(\.\d)?)$/.test(n)) return true;
+      if (/info|infor/.test(n)) return true;
+      if (/sf[_\s-]?done|lead sf|opp|unqualified|reactive/.test(n)) return true;
+      if (/^(bi|fa)\s*student$/.test(n)) return true;
+      return false;
+    };
     for (const c of allCustomers) {
       const leadId = customerIdToLeadId.get(c.id);
       if (!leadId) continue;
@@ -459,7 +472,7 @@ export async function pullFromSmaxReal() {
       for (const tag of c.tags ?? []) {
         const name = extractTagName(tag);
         if (!name) continue;
-        set.add(name);
+        if (keepTag(name)) set.add(name);
         if (isHotTag(name)) {
           const time = tagTime(tag);
           const prev = hotTagAtMap.get(leadId);
@@ -498,7 +511,8 @@ export async function pullFromSmaxReal() {
         const raw = extractTagName(tag);
         if (!raw) continue;
         // slug → tên hiển thị (nếu biết); không biết thì giữ nguyên (hiếm)
-        set.add(aliasToName.get(raw) ?? aliasToName.get(normKey(raw)) ?? raw);
+        const name = aliasToName.get(raw) ?? aliasToName.get(normKey(raw)) ?? raw;
+        if (keepTag(name)) set.add(name);
       }
     }
 
