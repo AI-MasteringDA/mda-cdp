@@ -953,14 +953,10 @@ export async function pushToLark() {
     }
   }
 
-  // SMAX Hotleads table: push only when SMAX is in filter (or filter empty)
-  if (shouldPush("smax")) {
-    try {
-      await pushSmaxHotleads(token);
-    } catch (err) {
-      console.error(`❌ [SMAX Hotleads] failed: ${(err as Error).message}`);
-    }
-  }
+  // SMAX_Hotleads bảng riêng đã BỎ (2026-07-29): hợp nhất về 1 bảng SMAX_Database.
+  // "Hot Score" nay là 1 cột trên SMAX_Database (do tag-sync.ts ghi) — lọc score>=70
+  // trực tiếp. Không push bảng Hotleads riêng nữa (tránh tạo lại bảng đã xoá).
+  void pushSmaxHotleads; // giữ hàm để tham chiếu lịch sử, không gọi
 
   console.log("\n✨ Lark push complete");
 }
