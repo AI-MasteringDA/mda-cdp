@@ -17,6 +17,9 @@ const ID = process.env.LARK_APP_ID || "", SEC = process.env.LARK_APP_SECRET || "
 const U = "https://open.larksuite.com/open-apis";
 
 const normPh = (p: any) => (p ? String(p).replace(/\D/g, "").replace(/^84/, "").replace(/^0/, "") : "");
+// SĐT nằm trong TÊN khách (TVV gõ "Tên_0369…") — nhiều customer để trống field phone
+// nên cần tách từ tên để khớp lead theo SĐT (nếu không → …lúc trống dù có tag).
+const phoneFromName = (name: any) => { const m = String(name || "").match(/0\d{8,10}/); return m ? normPh(m[0]) : ""; };
 function txt(v: unknown): string { return Array.isArray(v) ? (v as { text?: string }[]).map(x => x?.text ?? "").join("") : (v == null ? "" : String(v)); }
 // mốc 00:00 giờ VN của ngày chứa timestamp — để cột date hiển thị đúng NGÀY (VN)
 function vnMidnightMs(iso: string): number {
@@ -52,9 +55,9 @@ export async function runLeadFirstChat() {
   const byCust = new Map<string, string>(), byPid = new Map<string, string>(), byPhone = new Map<string, string>(), byEmail = new Map<string, string>();
   let from = 0;
   while (from < 60000) {
-    const { data } = await admin.from("dim_lead").select("lead_id, phone, email, external_profile_id, smax_customer_id").range(from, from + 999);
+    const { data } = await admin.from("dim_lead").select("lead_id, phone, email, external_profile_id, smax_customer_id, full_name").range(from, from + 999);
     if (!data?.length) break;
-    for (const l of data) { if (l.smax_customer_id) byCust.set(l.smax_customer_id, l.lead_id); if (l.external_profile_id) byPid.set(l.external_profile_id, l.lead_id); if (l.phone) byPhone.set(normPh(l.phone), l.lead_id); if (l.email) byEmail.set(String(l.email).toLowerCase().trim(), l.lead_id); }
+    for (const l of data) { if (l.smax_customer_id) byCust.set(l.smax_customer_id, l.lead_id); if (l.external_profile_id) byPid.set(l.external_profile_id, l.lead_id); if (l.phone) byPhone.set(normPh(l.phone), l.lead_id); const np2 = phoneFromName(l.full_name); if (np2 && !byPhone.has(np2)) byPhone.set(np2, l.lead_id); if (l.email) byEmail.set(String(l.email).toLowerCase().trim(), l.lead_id); }
     if (data.length < 1000) break; from += 1000;
   }
 
@@ -74,7 +77,8 @@ export async function runLeadFirstChat() {
   const lucSet = new Set<string>();
   const chans = new Map<string, Set<string>>(); // lead → {"Facebook MDA", "Zalo MDA"...}
   for (const c of customers) {
-    const lead = (c.id && byCust.get(c.id)) || (c.pid && byPid.get(c.pid)) || (c.phone && byPhone.get(normPh(c.phone))) || (c.email && byEmail.get(String(c.email).toLowerCase().trim()));
+    const namePh = phoneFromName(c.name);
+    const lead = (c.id && byCust.get(c.id)) || (c.pid && byPid.get(c.pid)) || (c.phone && byPhone.get(normPh(c.phone))) || (namePh && byPhone.get(namePh)) || (c.email && byEmail.get(String(c.email).toLowerCase().trim()));
     if (!lead) continue;
     // communication channel của customer này (lead gộp → union nhiều channel)
     const ch = pageLabel.get(c.page_pid) || (c.platform ? channelLabel(c.platform, "") : "");
