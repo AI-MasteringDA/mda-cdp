@@ -45,7 +45,7 @@ export type RawRecord = {
 export type IdentityMatch = {
   rawId: string;
   leadId: string | null;
-  matchedBy: "phone" | "email" | "created" | "none";
+  matchedBy: "phone" | "email" | "created" | "none" | "pid";
 };
 
 const AVATAR_COLORS = [
@@ -186,8 +186,18 @@ export async function batchResolveOrCreate(
     for (const l of allP ?? []) { const np = normalizePhone(l.phone); if (np && !phoneLeadMap.has(np)) phoneLeadMap.set(np, l.lead_id); }
   }
 
+  // Bản đồ pid (external_profile_id)→lead. Chống dup khi SMAX trả 1 pid với NHIỀU
+  // smax_customer_id khác nhau (đổi cid) → không có map này thì mỗi cid mới đẻ 1
+  // lead mới cho cùng 1 người (đã gây 168 dòng dup, dedup 2026-08-04).
+  const pidLeadMap = new Map<string, string>();
+  {
+    const { data: allPid } = await admin.from("dim_lead").select("lead_id, external_profile_id").not("external_profile_id", "is", null);
+    for (const l of allPid ?? []) { if (l.external_profile_id && !pidLeadMap.has(l.external_profile_id)) pidLeadMap.set(l.external_profile_id, l.lead_id); }
+  }
+
   const seenSmaxIds = new Set<string>();
   const batchAnonPhones = new Set<string>();
+  const batchAnonPids = new Set<string>();
   for (const r of records) {
     if (r.email || !r.smax_customer_id) continue;
     // GỐC của trùng lặp đa-kênh: nếu SĐT đã thuộc 1 lead (hoặc 1 anon-lead khác
@@ -196,9 +206,14 @@ export async function batchResolveOrCreate(
     // lead và trùng lại mỗi lần sync.
     const nph = r.phone ? normalizePhone(r.phone) : "";
     if (nph && (phoneLeadMap.has(nph) || batchAnonPhones.has(nph))) continue;
+    // Cùng pid = cùng người/hội thoại → KHÔNG đẻ lead mới theo cid mới; record sẽ
+    // khớp về lead-theo-pid ở bước match. Chống dup khi SMAX đổi smax_customer_id.
+    const pid = r.external_profile_id || "";
+    if (pid && (pidLeadMap.has(pid) || batchAnonPids.has(pid))) continue;
     if (seenSmaxIds.has(r.smax_customer_id)) continue;
     seenSmaxIds.add(r.smax_customer_id);
     if (nph) batchAnonPhones.add(nph);
+    if (pid) batchAnonPids.add(pid);
     anonLeads.push({
       // Mã theo công thức từ smax_customer_id → tạo lại luôn ra cùng mã.
       // Đây là lớp bảo vệ chính cho lead ẩn danh (nhóm bị xoá/tạo lại nhiều nhất).
@@ -239,7 +254,7 @@ export async function batchResolveOrCreate(
       }
     }
     // Nạp anon-lead vừa tạo vào phoneLeadMap để bước match cuối khớp ngay lần này.
-    for (const l of trulyNewAnon) { const np = normalizePhone(l.phone); if (np && !phoneLeadMap.has(np)) phoneLeadMap.set(np, l.lead_id); }
+    for (const l of trulyNewAnon) { const np = normalizePhone(l.phone); if (np && !phoneLeadMap.has(np)) phoneLeadMap.set(np, l.lead_id); if (l.external_profile_id && !pidLeadMap.has(l.external_profile_id)) pidLeadMap.set(l.external_profile_id, l.lead_id); }
   }
 
   // 4. Fetch lead_ids cho ALL emails ta cần (batched IN-query)
@@ -339,6 +354,11 @@ export async function batchResolveOrCreate(
     if (r.phone) {
       const leadId = phoneLeadMap.get(normalizePhone(r.phone));
       if (leadId) return { rawId: r.id, leadId, matchedBy: "phone" };
+    }
+    // pid TRƯỚC cid: nếu pid đã có lead (dù cid mới), khớp về lead đó → không tạo trùng
+    if (r.external_profile_id) {
+      const leadId = pidLeadMap.get(r.external_profile_id);
+      if (leadId) return { rawId: r.id, leadId, matchedBy: "pid" };
     }
     if (r.smax_customer_id) {
       const leadId = smaxLeadMap.get(r.smax_customer_id);

@@ -1,18 +1,19 @@
-name: Tag sync (nhật ký gắn tag + cột lead-class)
+name: Lead first-chat sync (Ngày chat đầu + Hot Score)
 
 on:
   schedule:
-    # Mỗi ngày 1 lần — tag (customer.tags[].time) chỉ đổi khi TVV gắn, không cần
-    # dày. Cập nhật bảng SMAX_Tag_Log + 4 cột lead-class trên SMAX_Database.
-    - cron: '32 1 * * *'
+    # MỖI GIỜ — điền "Ngày chat đầu"/"Báo cáo ngày"/"Ngày check" + Hot Score lên
+    # SMAX_Database. Chạy dày để lead MỚI trong ngày có ngày ngay (không phải chờ
+    # tới hôm sau → tránh count bị thiếu như ca Vương Thanh/lead cold hôm nay).
+    - cron: '32 * * * *'
   workflow_dispatch:
 
 concurrency:
-  group: tag-sync
+  group: lead-first-chat
   cancel-in-progress: false
 
 jobs:
-  tag-sync:
+  lead-first-chat:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -25,7 +26,7 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm install --no-audit --no-fund --prefer-offline
-      - name: Sync tag log
+      - name: Sync first-chat date
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
@@ -35,4 +36,4 @@ jobs:
           SMAX_USER_TOKEN: ${{ secrets.SMAX_USER_TOKEN }}
           SMAX_API_KEY: ${{ secrets.SMAX_API_KEY }}
           SMAX_BASE_URL: https://api.smax.ai
-        run: npm run etl:tag:sync
+        run: npm run etl:lead:firstchat

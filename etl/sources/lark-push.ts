@@ -175,11 +175,21 @@ async function createTable(token: string, name: string, fields: { field_name: st
 }
 
 async function listFields(token: string, tableId: string) {
-  const res = await fetch(`${BASE_URL}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/fields`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const data = await res.json();
-  return data.data?.items || [];
+  // PHÂN TRANG bắt buộc: Lark mặc định chỉ trả ~20 field/lần. Nếu không lặp hết,
+  // ensureFieldsExist tưởng field chưa có → tạo lại → cột trùng "(1)". Lỗi đọc
+  // thì THROW (thà fail còn hơn sinh cột trùng).
+  const items: { field_id: string; field_name: string; type: number }[] = [];
+  let pageToken: string | undefined;
+  do {
+    const url = new URL(`${BASE_URL}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/fields`);
+    url.searchParams.set("page_size", "100"); if (pageToken) url.searchParams.set("page_token", pageToken);
+    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (data.code !== 0) throw new Error(`listFields failed: ${data.code} ${data.msg}`);
+    items.push(...(data.data?.items || []));
+    pageToken = data.data?.has_more ? data.data.page_token : undefined;
+  } while (pageToken);
+  return items;
 }
 
 async function createField(token: string, tableId: string, field: { field_name: string; type: number; property?: object }) {
