@@ -53,11 +53,12 @@ export async function runLeadFirstChat() {
 
   // 1) lead lookup (giống tag-sync)
   const byCust = new Map<string, string>(), byPid = new Map<string, string>(), byPhone = new Map<string, string>(), byEmail = new Map<string, string>();
+  const tagsByLead = new Map<string, string[]>(); // lead → smax_tags (mirror lên "Tag SMAX")
   let from = 0;
   while (from < 60000) {
-    const { data } = await admin.from("dim_lead").select("lead_id, phone, email, external_profile_id, smax_customer_id, full_name").range(from, from + 999);
+    const { data } = await admin.from("dim_lead").select("lead_id, phone, email, external_profile_id, smax_customer_id, full_name, smax_tags").range(from, from + 999);
     if (!data?.length) break;
-    for (const l of data) { if (l.smax_customer_id) byCust.set(l.smax_customer_id, l.lead_id); if (l.external_profile_id) byPid.set(l.external_profile_id, l.lead_id); if (l.phone) byPhone.set(normPh(l.phone), l.lead_id); const np2 = phoneFromName(l.full_name); if (np2 && !byPhone.has(np2)) byPhone.set(np2, l.lead_id); if (l.email) byEmail.set(String(l.email).toLowerCase().trim(), l.lead_id); }
+    for (const l of data) { if (l.smax_customer_id) byCust.set(l.smax_customer_id, l.lead_id); if (l.external_profile_id) byPid.set(l.external_profile_id, l.lead_id); if (l.phone) byPhone.set(normPh(l.phone), l.lead_id); const np2 = phoneFromName(l.full_name); if (np2 && !byPhone.has(np2)) byPhone.set(np2, l.lead_id); if (l.email) byEmail.set(String(l.email).toLowerCase().trim(), l.lead_id); if (Array.isArray(l.smax_tags)) tagsByLead.set(l.lead_id, l.smax_tags); }
     if (data.length < 1000) break; from += 1000;
   }
 
@@ -148,7 +149,7 @@ export async function runLeadFirstChat() {
   const upd: any[] = []; let pt: string | undefined;
   while (true) {
     const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/records`); url.searchParams.set("page_size", "500");
-    url.searchParams.set("field_names", JSON.stringify(["Lead ID", COL, "Hot Score", CHAN, ...lucCols]));
+    url.searchParams.set("field_names", JSON.stringify(["Lead ID", COL, "Hot Score", CHAN, "Tag SMAX", ...lucCols]));
     if (pt) url.searchParams.set("page_token", pt);
     const d = await fetch(url.toString(), { headers: { Authorization: `Bearer ${tk}` } }).then(r => r.json());
     for (const r of d.data?.items || []) {
@@ -167,6 +168,9 @@ export async function runLeadFirstChat() {
       for (const col of lucCols) { const w = tt[col]; if (w == null) continue; const curL = typeof r.fields?.[col] === "number" ? r.fields[col] : null; if (w !== curL) patch[col] = w; }
       // communication channels (multi-select) — chỉ update khi tập kênh thay đổi
       const cs2 = chans.get(lid); if (cs2 && cs2.size) { const want2 = [...cs2].sort(); const rawc = r.fields?.[CHAN]; const cur2 = (Array.isArray(rawc) ? rawc.map((x: any) => typeof x === "object" ? (x.text ?? x.name ?? "") : x) : []).sort(); if (want2.join("|") !== cur2.join("|")) patch[CHAN] = want2; }
+      // Tag SMAX (multi-select) — mirror từ dim_lead.smax_tags (đảm bảo tag không kẹt
+      // rỗng khi lark-push snapshot bỏ sót lead chat cũ). Chỉ đổi khi tập tag khác.
+      const tg = tagsByLead.get(lid); if (tg) { const wantT = [...new Set(tg)].sort(); const rawt = r.fields?.["Tag SMAX"]; const curT = (Array.isArray(rawt) ? rawt.map((x: any) => typeof x === "object" ? (x.text ?? x.name ?? "") : x) : (rawt ? [rawt] : [])).sort(); if (wantT.join("|") !== curT.join("|")) patch["Tag SMAX"] = wantT; }
       patch[CHK] = runMs; // dấu thời gian quét — luôn ghi để thấy row được refresh lúc nào
       upd.push({ record_id: r.record_id, fields: patch });
     }
