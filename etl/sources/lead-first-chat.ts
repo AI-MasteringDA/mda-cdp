@@ -44,7 +44,10 @@ function trackName(name: string): string | null {
 function channelLabel(platform: string, pageName: string): string {
   const brand = /phuong thao|pta/i.test(pageName || "") ? "PTA" : "MDA";
   const p = (platform || "").toLowerCase();
-  const plat = p === "facebook" ? "Facebook" : /insta/.test(p) ? "Instagram" : /zalo/.test(p) ? "Zalo" : p === "custom" ? "Website" : (platform || "Khác");
+  const plat = p === "facebook" ? "Facebook" : /insta/.test(p) ? "Instagram"
+    : p === "zalo" ? "Zalo OA"        // Official Account (pid "zl…")
+    : /zalo/.test(p) ? "Zalo Web"     // zaloweb — Zalo cá nhân/Salework (pid "zlw…")
+    : p === "custom" ? "Website" : (platform || "Khác");
   return `${plat} ${brand}`;
 }
 
