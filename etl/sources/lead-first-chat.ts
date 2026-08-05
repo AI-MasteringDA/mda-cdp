@@ -36,7 +36,7 @@ const norm2 = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
 function trackName(name: string): string | null {
   const n = norm2(name);
   if (CLASS[n]) return CLASS[n];
-  const m = name.trim().match(/^(k\d{2,3}|f\d(\.\d)?)$/i);
+  const m = name.trim().match(/^(kh?\d{2,3}|f\d(\.\d)?)$/i); // K##, KH##, F#
   if (m) return name.trim().toUpperCase();
   return null;
 }

@@ -456,7 +456,7 @@ export async function pullFromSmaxReal() {
       const n = name.toLowerCase().trim();
       if (/test/.test(n)) return false;
       if (/^(cold|hot|warm)\s*lead$/.test(n) || n === "prospect") return true;
-      if (/^(k\d{2,3}|f\d(\.\d)?)$/.test(n)) return true;
+      if (/^(kh?\d{2,3}|f\d(\.\d)?)$/.test(n)) return true; // K## và KH## (khóa) + F#
       if (/info|infor/.test(n)) return true;
       if (/sf[_\s-]?done|lead sf|opp|unqualified|reactive/.test(n)) return true;
       if (/^(bi|fa)\s*student$/.test(n)) return true;
