@@ -83,10 +83,16 @@ export async function runLeadFirstChat() {
   const tagTimes = new Map<string, Record<string, number>>(); // lead → {"Hot Lead lúc": ms}
   const lucSet = new Set<string>();
   const chans = new Map<string, Set<string>>(); // lead → {"Facebook MDA", "Zalo MDA"...}
+  // Tự backfill pid: lead nhận diện bằng email/SĐT (không kèm pid) → match về SMAX
+  // customer để lấy pid → cột "ID" luôn có. Chạy mỗi giờ nên KHÔNG bị lại thủ công.
+  const ownedPids = new Set<string>(leadToPid.values());
+  const pidBackfill = new Map<string, { pid: string; cid: string }>();
   for (const c of customers) {
     const namePh = phoneFromName(c.name);
     const lead = (c.id && byCust.get(c.id)) || (c.pid && byPid.get(c.pid)) || (c.phone && byPhone.get(normPh(c.phone))) || (namePh && byPhone.get(namePh)) || (c.email && byEmail.get(String(c.email).toLowerCase().trim()));
     if (!lead) continue;
+    // lead chưa có pid + customer có pid chưa ai giữ → gán (fill "ID")
+    if (!leadToPid.has(lead) && c.pid && !ownedPids.has(c.pid)) { pidBackfill.set(lead, { pid: c.pid, cid: c.id }); ownedPids.add(c.pid); leadToPid.set(lead, c.pid); }
     // communication channel của customer này (lead gộp → union nhiều channel)
     const ch = pageLabel.get(c.page_pid) || (c.platform ? channelLabel(c.platform, "") : "");
     if (ch) { const s = chans.get(lead) || new Set<string>(); s.add(ch); chans.set(lead, s); }
@@ -104,7 +110,10 @@ export async function runLeadFirstChat() {
       const m = tagTimes.get(lead) || {}; if (!m[col] || tms > m[col]) m[col] = tms; tagTimes.set(lead, m);
     }
   }
-  console.log(`[first-chat] SMAX customers=${customers.length} | lead có ngày chat đầu=${firstMs.size} | cột tag-time=${lucSet.size}`);
+  // persist pid backfill vào dim_lead (để lark-push + lần sau dùng)
+  let pidFilled = 0;
+  for (const [lead, { pid, cid }] of pidBackfill) { const { error } = await admin.from("dim_lead").update({ external_profile_id: pid, smax_customer_id: cid }).eq("lead_id", lead); if (!error) pidFilled++; }
+  console.log(`[first-chat] SMAX customers=${customers.length} | lead có ngày chat đầu=${firstMs.size} | cột tag-time=${lucSet.size} | pid tự backfill=${pidFilled}`);
 
   // 2b) Hot Score per lead (gộp từ tag-sync cũ) — dùng cho view Hot Leads
   const { data: latest } = await admin.from("fact_lead_score").select("scored_at").order("scored_at", { ascending: false }).limit(1).maybeSingle();
