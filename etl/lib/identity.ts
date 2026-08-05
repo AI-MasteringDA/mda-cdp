@@ -307,13 +307,13 @@ export async function batchResolveOrCreate(
       else if (r.smax_customer_id) lid = smaxLeadMap.get(r.smax_customer_id);
       if (lid) { recToLead.set(r.id, lid); matchedIds.add(lid); }
     }
-    const cur = new Map<string, { email: string | null; phone: string | null }>();
+    const cur = new Map<string, { email: string | null; phone: string | null; external_profile_id: string | null }>();
     const idArr = [...matchedIds];
     for (let i = 0; i < idArr.length; i += 100) {
-      const { data } = await admin.from("dim_lead").select("lead_id, email, phone").in("lead_id", idArr.slice(i, i + 100));
-      for (const l of data ?? []) cur.set(l.lead_id, { email: l.email, phone: l.phone });
+      const { data } = await admin.from("dim_lead").select("lead_id, email, phone, external_profile_id").in("lead_id", idArr.slice(i, i + 100));
+      for (const l of data ?? []) cur.set(l.lead_id, { email: l.email, phone: l.phone, external_profile_id: l.external_profile_id });
     }
-    const patches = new Map<string, { email?: string; phone?: string }>();
+    const patches = new Map<string, { email?: string; phone?: string; external_profile_id?: string }>();
     for (const r of records) {
       const lid = recToLead.get(r.id);
       if (!lid) continue;
@@ -330,7 +330,13 @@ export async function batchResolveOrCreate(
         const owner = emailLeadMap.get(recEmail);
         if (!owner || owner === lid) p.email = recEmail;
       }
-      if (p.phone || p.email) patches.set(lid, p);
+      // Điền pid (external_profile_id = tid SMAX) cho lead khớp email/SĐT còn TRỐNG
+      // pid → cột "ID" trên Lark hiện đủ. Collision guard: pid đã thuộc lead khác thì bỏ.
+      if (!c.external_profile_id && typeof r.external_profile_id === "string" && r.external_profile_id) {
+        const owner = pidLeadMap.get(r.external_profile_id);
+        if (!owner || owner === lid) p.external_profile_id = r.external_profile_id;
+      }
+      if (p.phone || p.email || p.external_profile_id) patches.set(lid, p);
     }
     let filled = 0;
     for (const [lid, patch] of patches) {
