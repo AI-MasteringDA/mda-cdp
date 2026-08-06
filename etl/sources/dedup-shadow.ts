@@ -19,13 +19,30 @@ export async function runDedupShadow() {
   if (!APP) { console.log("[dedup-shadow] thiếu creds, bỏ qua"); return; }
   // pid → owner lead + contact info
   const owner = new Map<string, string>(); const info = new Map<string, { email: string | null; phone: string | null }>();
+  const pidGroups = new Map<string, { lid: string; email: string | null; phone: string | null; tags: string[] }[]>();
   let f = 0;
-  while (f < 90000) { const { data } = await admin.from("dim_lead").select("lead_id, external_profile_id, email, phone").range(f, f + 999); if (!data?.length) break; for (const l of data) { if (l.external_profile_id) owner.set(l.external_profile_id, l.lead_id); info.set(l.lead_id, { email: l.email, phone: l.phone }); } if (data.length < 1000) break; f += 1000; }
+  while (f < 90000) { const { data } = await admin.from("dim_lead").select("lead_id, external_profile_id, email, phone, smax_tags").range(f, f + 999); if (!data?.length) break; for (const l of data) { if (l.external_profile_id) { owner.set(l.external_profile_id, l.lead_id); const a = pidGroups.get(l.external_profile_id) || []; a.push({ lid: l.lead_id, email: l.email, phone: l.phone, tags: Array.isArray(l.smax_tags) ? l.smax_tags : [] }); pidGroups.set(l.external_profile_id, a); } info.set(l.lead_id, { email: l.email, phone: l.phone }); } if (data.length < 1000) break; f += 1000; }
+
+  // 0) PID-DUP: 2+ lead cùng giữ 1 pid (cùng 1 hội thoại → cùng người, gây ĐẾM ĐÔI
+  //    như ca Văn Việt 2026-08-06) → gộp về lead nhiều touchpoint nhất, union tag/contact.
+  const dropIds: string[] = []; let pidMerged = 0;
+  for (const [, leads] of pidGroups) {
+    if (leads.length < 2) continue;
+    let keep = leads[0], bn = -1;
+    for (const l of leads) { const { count } = await admin.from("fact_touchpoint").select("*", { count: "exact", head: true }).eq("lead_id", l.lid); if ((count || 0) > bn) { bn = count || 0; keep = l; } }
+    const others = leads.filter(l => l.lid !== keep.lid);
+    const unionTags = [...new Set([...keep.tags, ...others.flatMap(o => o.tags)])];
+    const email = keep.email || others.map(o => o.email).find(Boolean) || null;
+    const phone = keep.phone || others.map(o => o.phone).find(Boolean) || null;
+    await admin.from("dim_lead").update({ smax_tags: unionTags, ...(email ? { email } : {}), ...(phone ? { phone } : {}) }).eq("lead_id", keep.lid);
+    for (const o of others) { await admin.from("fact_touchpoint").update({ lead_id: keep.lid }).eq("lead_id", o.lid); await admin.from("fact_lead_score").delete().eq("lead_id", o.lid); const { error } = await admin.from("dim_lead").delete().eq("lead_id", o.lid); if (!error) { dropIds.push(o.lid); pidMerged++; } }
+  }
+  if (pidMerged) console.log(`[dedup-shadow] gộp pid-dup (đếm đôi): ${pidMerged}`);
   // leads thiếu pid
   const nullLeads: { lid: string; email: string | null; phone: string | null }[] = []; f = 0;
   while (f < 90000) { const { data } = await admin.from("dim_lead").select("lead_id, email, phone").is("external_profile_id", null).range(f, f + 999); if (!data?.length) break; for (const l of data) nullLeads.push({ lid: l.lead_id, email: l.email, phone: l.phone }); if (data.length < 1000) break; f += 1000; }
 
-  let merged = 0, claimed = 0; const dropIds: string[] = [];
+  let merged = 0, claimed = 0;
   for (let i = 0; i < nullLeads.length; i += 200) {
     const b = nullLeads.slice(i, i + 200);
     const { data } = await admin.from("fact_touchpoint").select("lead_id, payload, dedup_key, occurred_at").in("lead_id", b.map(x => x.lid)).eq("source", "smax").order("occurred_at", { ascending: true });
