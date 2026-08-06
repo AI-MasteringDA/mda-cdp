@@ -646,6 +646,20 @@ async function pushSmaxLeadSnapshot(token: string) {
   console.log(`   ↳ ${rows.length} snapshot rows from view`);
   if (rows.length === 0) { console.log(`   ✓ Nothing new. Skipping.`); return; }
 
+  // FALLBACK "ID" (fix triệt để ID trống): lead mới nhận diện qua email/SĐT chưa có
+  // external_profile_id trong dim_lead → lấy tid THẲNG từ touchpoint SMAX (nguồn tạo
+  // dòng này — luôn mang tid). ID hiện ngay trong chu kỳ push 7', không chờ job giờ.
+  const tidFallback = new Map<string, string>();
+  {
+    const noPid = rows.filter((r) => !r.external_profile_id).map((r) => r.lead_id);
+    for (let i = 0; i < noPid.length; i += 200) {
+      const batch = noPid.slice(i, i + 200);
+      const { data } = await admin.from("fact_touchpoint").select("lead_id, payload, occurred_at").in("lead_id", batch).eq("source", "smax").order("occurred_at", { ascending: false });
+      for (const t of data ?? []) { const p = (t.payload ?? {}) as { tid?: string }; if (p.tid && !tidFallback.has(t.lead_id)) tidFallback.set(t.lead_id, p.tid); }
+    }
+    if (tidFallback.size) console.log(`   ↳ ID fallback từ touchpoint tid: ${tidFallback.size} lead thiếu pid`);
+  }
+
   const records: Array<{ leadId: string; fields: Record<string, unknown> }> = rows.map((r) => {
     const tags: string[] = Array.isArray(r.smax_tags) ? r.smax_tags : [];
     const timeMs = r.occurred_at ? new Date(r.occurred_at).getTime() : null;
@@ -655,7 +669,7 @@ async function pushSmaxLeadSnapshot(token: string) {
         "Time": timeMs || null,
         "Event": r.event_type || "",
         "Lead Name": r.full_name || r.fallback_name || "",
-        "ID": stripSmaxIdPrefix(r.external_profile_id),
+        "ID": stripSmaxIdPrefix(r.external_profile_id || tidFallback.get(r.lead_id) || null),
         "Email": r.email || "",
         "Phone": r.phone || "",
         "Company": r.company || (r.email?.includes("@") ? r.email.split("@")[1] : ""),
