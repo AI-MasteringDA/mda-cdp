@@ -19,6 +19,7 @@
     "etl:smax:messages": "tsx etl/run-all.ts smax:messages",
     "etl:chat:sweep": "tsx etl/sources/chat-sweep.ts",
     "etl:lead:firstchat": "tsx etl/sources/lead-first-chat.ts",
+    "etl:dedup:shadow": "tsx etl/sources/dedup-shadow.ts",
     "etl:instantly:inspect": "tsx etl/debug/instantly-inspect.ts",
     "etl:smax:inspect": "tsx etl/debug/smax-inspect.ts",
     "etl:smax:msg:inspect": "tsx etl/debug/smax-messages-inspect.ts",

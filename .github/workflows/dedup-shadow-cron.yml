@@ -1,0 +1,35 @@
+name: Dedup shadow leads (gộp bản trùng email/kênh → dòng có ID)
+
+on:
+  schedule:
+    # Mỗi giờ (:47) — gộp lead trùng "shadow" (không pid, chat SMAX thuộc lead khác)
+    # vào lead-owner. Dọn các ca bị sót do timing → cột ID không kẹt trống.
+    - cron: '47 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: dedup-shadow
+  cancel-in-progress: false
+
+jobs:
+  dedup-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund --prefer-offline
+      - name: Dedup shadow leads
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+          LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+          LARK_BASE_APP_TOKEN: ${{ secrets.LARK_BASE_APP_TOKEN }}
+        run: npm run etl:dedup:shadow
