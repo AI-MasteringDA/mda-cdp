@@ -87,6 +87,26 @@ export async function runLeadFirstChat() {
   // customer để lấy pid → cột "ID" luôn có. Chạy mỗi giờ nên KHÔNG bị lại thủ công.
   const ownedPids = new Set<string>(leadToPid.values());
   const pidBackfill = new Map<string, { pid: string; cid: string }>();
+  // TAG RECONCILE (fix điểm mù "Lan Anh"): tag gắn SAU khi hết phiên chat (không tin
+  // nhắn mới, interaction không đổi) → smax-real incremental không quét lại → tag kẹt.
+  // Ở đây quét TOÀN BỘ top-10k customer mỗi giờ và reconcile AN TOÀN:
+  //   - class (Hot/Cold/Warm/Prospect): customer là nguồn chuẩn → THAY thế class cũ
+  //     khi customer có class (sửa cả stale cold→hot); customer không có class → giữ.
+  //   - tag khác (khóa, SF_Done, info…): chỉ UNION thêm, KHÔNG BAO GIỜ xóa/reset rỗng
+  //     (tránh regression mất tag như lần mirror-toàn-bộ 2026-08-06 phải revert).
+  const CLASS_KEYS = new Set(["hotlead", "coldlead", "warmlead", "prospect"]);
+  const normTag = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
+  const keepTag = (name: string): boolean => {
+    const n = name.toLowerCase().trim();
+    if (/test/.test(n)) return false;
+    if (/^(cold|hot|warm)\s*lead$/.test(n) || n === "prospect") return true;
+    if (/^(kh?\d{2,3}|f\d(\.\d)?)$/.test(n)) return true;
+    if (/info|infor/.test(n)) return true;
+    if (/sf[_\s-]?done|lead sf|opp|unqualified|reactive/.test(n)) return true;
+    if (/^(bi|fa)\s*student$/.test(n)) return true;
+    return false;
+  };
+  const custKeepByLead = new Map<string, Set<string>>();
   for (const c of customers) {
     const namePh = phoneFromName(c.name);
     const lead = (c.id && byCust.get(c.id)) || (c.pid && byPid.get(c.pid)) || (c.phone && byPhone.get(normPh(c.phone))) || (namePh && byPhone.get(namePh)) || (c.email && byEmail.get(String(c.email).toLowerCase().trim()));
@@ -104,12 +124,30 @@ export async function runLeadFirstChat() {
     if (first) { const ms = vnMidnightMs(first); const prev = firstMs.get(lead); if (prev == null || ms < prev) firstMs.set(lead, ms); }
     // tag-time ("…lúc") — giữ mốc MỚI nhất nếu 1 tag gắn nhiều lần
     for (const tg of (c.tags || [])) {
-      const nm = trackName(String(tg.name || tg.alias || "")); if (!nm) continue;
+      const nmRaw = String(tg.name || tg.alias || "").trim();
+      if (nmRaw && keepTag(nmRaw)) { const s = custKeepByLead.get(lead) || new Set<string>(); s.add(nmRaw); custKeepByLead.set(lead, s); }
+      const nm = trackName(nmRaw); if (!nm) continue;
       const tms = tg.time ? new Date(tg.time).getTime() : 0; if (!tms) continue;
       const col = `${nm} lúc`; lucSet.add(col);
       const m = tagTimes.get(lead) || {}; if (!m[col] || tms > m[col]) m[col] = tms; tagTimes.set(lead, m);
     }
   }
+  // reconcile tag vào dim_lead (class thay thế theo customer, còn lại union-only)
+  let tagFixed = 0;
+  for (const [lead, ks] of custKeepByLead) {
+    const cur = tagsByLead.get(lead) ?? [];
+    const custArr = [...ks];
+    const custClass = custArr.filter(t => CLASS_KEYS.has(normTag(t)));
+    const curClass = cur.filter(t => CLASS_KEYS.has(normTag(t)));
+    const newClass = custClass.length ? custClass : curClass;
+    const nonClass = new Set<string>([...cur.filter(t => !CLASS_KEYS.has(normTag(t))), ...custArr.filter(t => !CLASS_KEYS.has(normTag(t)))]);
+    const merged = [...new Set<string>([...newClass, ...nonClass])];
+    if (merged.slice().sort().join("|") !== cur.slice().sort().join("|")) {
+      const { error } = await admin.from("dim_lead").update({ smax_tags: merged }).eq("lead_id", lead);
+      if (!error) { tagsByLead.set(lead, merged); tagFixed++; }
+    }
+  }
+  if (tagFixed) console.log(`[first-chat] tag reconcile từ customers: ${tagFixed} lead cập nhật`);
   // persist pid backfill vào dim_lead (để lark-push + lần sau dùng)
   let pidFilled = 0;
   for (const [lead, { pid, cid }] of pidBackfill) { const { error } = await admin.from("dim_lead").update({ external_profile_id: pid, smax_customer_id: cid }).eq("lead_id", lead); if (!error) pidFilled++; }
