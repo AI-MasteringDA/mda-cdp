@@ -58,6 +58,7 @@ export async function runLeadFirstChat() {
 
   // 1) lead lookup (giống tag-sync)
   const byCust = new Map<string, string>(), byPid = new Map<string, string>(), byPhone = new Map<string, string>(), byEmail = new Map<string, string>();
+  const curPhone = new Map<string, string | null>(), curEmail = new Map<string, string | null>(); // contact hiện có của lead
   const tagsByLead = new Map<string, string[]>(); // lead → smax_tags (mirror lên "Tag SMAX")
   const leadToPid = new Map<string, string>();    // lead → external_profile_id (mirror lên "ID")
   const leadToCid = new Map<string, string>();    // lead → smax_customer_id (fallback "ID" khi không có pid)
@@ -65,7 +66,7 @@ export async function runLeadFirstChat() {
   while (from < 60000) {
     const { data } = await admin.from("dim_lead").select("lead_id, phone, email, external_profile_id, smax_customer_id, full_name, smax_tags").range(from, from + 999);
     if (!data?.length) break;
-    for (const l of data) { if (l.smax_customer_id) byCust.set(l.smax_customer_id, l.lead_id); if (l.external_profile_id) byPid.set(l.external_profile_id, l.lead_id); if (l.phone) byPhone.set(normPh(l.phone), l.lead_id); const np2 = phoneFromName(l.full_name); if (np2 && !byPhone.has(np2)) byPhone.set(np2, l.lead_id); if (l.email) byEmail.set(String(l.email).toLowerCase().trim(), l.lead_id); if (Array.isArray(l.smax_tags)) tagsByLead.set(l.lead_id, l.smax_tags); if (l.external_profile_id) leadToPid.set(l.lead_id, l.external_profile_id); if (l.smax_customer_id) leadToCid.set(l.lead_id, l.smax_customer_id); }
+    for (const l of data) { if (l.smax_customer_id) byCust.set(l.smax_customer_id, l.lead_id); if (l.external_profile_id) byPid.set(l.external_profile_id, l.lead_id); if (l.phone) byPhone.set(normPh(l.phone), l.lead_id); const np2 = phoneFromName(l.full_name); if (np2 && !byPhone.has(np2)) byPhone.set(np2, l.lead_id); if (l.email) byEmail.set(String(l.email).toLowerCase().trim(), l.lead_id); if (Array.isArray(l.smax_tags)) tagsByLead.set(l.lead_id, l.smax_tags); if (l.external_profile_id) leadToPid.set(l.lead_id, l.external_profile_id); if (l.smax_customer_id) leadToCid.set(l.lead_id, l.smax_customer_id); curPhone.set(l.lead_id, l.phone); curEmail.set(l.lead_id, l.email); }
     if (data.length < 1000) break; from += 1000;
   }
 
@@ -108,12 +109,19 @@ export async function runLeadFirstChat() {
     return false;
   };
   const custKeepByLead = new Map<string, Set<string>>();
+  const contactFill = new Map<string, { phone?: string; email?: string }>(); // lead → contact cần điền
   for (const c of customers) {
     const namePh = phoneFromName(c.name);
     const lead = (c.id && byCust.get(c.id)) || (c.pid && byPid.get(c.pid)) || (c.phone && byPhone.get(normPh(c.phone))) || (namePh && byPhone.get(namePh)) || (c.email && byEmail.get(String(c.email).toLowerCase().trim()));
     if (!lead) continue;
     // lead chưa có pid + customer có pid chưa ai giữ → gán (fill "ID")
     if (!leadToPid.has(lead) && c.pid && !ownedPids.has(c.pid)) { pidBackfill.set(lead, { pid: c.pid, cid: c.id }); ownedPids.add(c.pid); leadToPid.set(lead, c.pid); }
+    // CONTACT FILL (ca Lê Ngọc Giàu 2026-08-06): SMAX customer có phone/email mà lead
+    // đang TRỐNG → tự điền mỗi giờ. Guard: giá trị đã thuộc lead KHÁC thì bỏ (không gộp nhầm).
+    const cph = c.phone ? String(c.phone).trim() : "";
+    if (cph && !curPhone.get(lead)) { const o = byPhone.get(normPh(cph)); if (!o || o === lead) { curPhone.set(lead, cph.startsWith("0") ? cph : "0" + normPh(cph)); byPhone.set(normPh(cph), lead); contactFill.set(lead, { ...(contactFill.get(lead) || {}), phone: curPhone.get(lead)! }); } }
+    const cem = c.email ? String(c.email).toLowerCase().trim() : "";
+    if (cem && !curEmail.get(lead)) { const o = byEmail.get(cem); if (!o || o === lead) { curEmail.set(lead, cem); byEmail.set(cem, lead); contactFill.set(lead, { ...(contactFill.get(lead) || {}), email: cem }); } }
     // communication channel của customer này (lead gộp → union nhiều channel)
     const ch = pageLabel.get(c.page_pid) || (c.platform ? channelLabel(c.platform, "") : "");
     if (ch) { const s = chans.get(lead) || new Set<string>(); s.add(ch); chans.set(lead, s); }
@@ -152,6 +160,10 @@ export async function runLeadFirstChat() {
   // persist pid backfill vào dim_lead (để lark-push + lần sau dùng)
   let pidFilled = 0;
   for (const [lead, { pid, cid }] of pidBackfill) { const { error } = await admin.from("dim_lead").update({ external_profile_id: pid, smax_customer_id: cid }).eq("lead_id", lead); if (!error) pidFilled++; }
+  // persist contact fill
+  let contactFilled = 0;
+  for (const [lead, cf] of contactFill) { const upd: Record<string, string> = {}; if (cf.phone) upd.phone = cf.phone; if (cf.email) upd.email = cf.email; const { error } = await admin.from("dim_lead").update(upd).eq("lead_id", lead); if (!error) contactFilled++; }
+  if (contactFilled) console.log(`[first-chat] contact fill (phone/email từ SMAX): ${contactFilled} lead`);
   console.log(`[first-chat] SMAX customers=${customers.length} | lead có ngày chat đầu=${firstMs.size} | cột tag-time=${lucSet.size} | pid tự backfill=${pidFilled}`);
 
   // 2b) Hot Score per lead (gộp từ tag-sync cũ) — dùng cho view Hot Leads
@@ -203,7 +215,7 @@ export async function runLeadFirstChat() {
   const upd: any[] = []; let pt: string | undefined;
   while (true) {
     const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/records`); url.searchParams.set("page_size", "500");
-    url.searchParams.set("field_names", JSON.stringify(["Lead ID", COL, "Hot Score", CHAN, "Tag SMAX", "ID", ...lucCols]));
+    url.searchParams.set("field_names", JSON.stringify(["Lead ID", COL, "Hot Score", CHAN, "Tag SMAX", "ID", "Phone", "Email", ...lucCols]));
     if (pt) url.searchParams.set("page_token", pt);
     const d = await fetch(url.toString(), { headers: { Authorization: `Bearer ${tk}` } }).then(r => r.json());
     for (const r of d.data?.items || []) {
@@ -225,6 +237,9 @@ export async function runLeadFirstChat() {
       // Tag SMAX (multi-select) — mirror từ dim_lead.smax_tags (đảm bảo tag không kẹt
       // rỗng khi lark-push snapshot bỏ sót lead chat cũ). Chỉ đổi khi tập tag khác.
       const tg = tagsByLead.get(lid); if (tg) { const wantT = [...new Set(tg)].sort(); const rawt = r.fields?.["Tag SMAX"]; const curT = (Array.isArray(rawt) ? rawt.map((x: any) => typeof x === "object" ? (x.text ?? x.name ?? "") : x) : (rawt ? [rawt] : [])).sort(); if (wantT.join("|") !== curT.join("|")) patch["Tag SMAX"] = wantT; }
+      // Phone/Email — điền khi ô Lark TRỐNG mà dim_lead có (không đè giá trị sẵn có)
+      const ph2 = curPhone.get(lid); if (ph2 && !txt(r.fields?.["Phone"]).trim()) patch["Phone"] = ph2;
+      const em2 = curEmail.get(lid); if (em2 && !txt(r.fields?.["Email"]).trim()) patch["Email"] = em2;
       // "ID" (SMAX id) — mirror từ external_profile_id (fallback smax_customer_id) để MỌI lead có ID
       const pid = leadToPid.get(lid); const cid2 = leadToCid.get(lid);
       const wantId = pid ? stripSmaxId(pid) : (cid2 || "");
