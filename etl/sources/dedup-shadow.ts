@@ -25,15 +25,33 @@ export async function runDedupShadow() {
   const nullLeads: { lid: string; email: string | null; phone: string | null }[] = []; f = 0;
   while (f < 90000) { const { data } = await admin.from("dim_lead").select("lead_id, email, phone").is("external_profile_id", null).range(f, f + 999); if (!data?.length) break; for (const l of data) nullLeads.push({ lid: l.lead_id, email: l.email, phone: l.phone }); if (data.length < 1000) break; f += 1000; }
 
-  let merged = 0; const dropIds: string[] = [];
+  let merged = 0, claimed = 0; const dropIds: string[] = [];
   for (let i = 0; i < nullLeads.length; i += 200) {
     const b = nullLeads.slice(i, i + 200);
-    const { data } = await admin.from("fact_touchpoint").select("lead_id, payload, occurred_at").in("lead_id", b.map(x => x.lid)).eq("source", "smax").order("occurred_at", { ascending: true });
-    const tidByLead = new Map<string, string>();
-    for (const r of (data ?? [])) { const p = (r.payload ?? {}) as { tid?: string }; if (p.tid && !tidByLead.has(r.lead_id)) tidByLead.set(r.lead_id, p.tid); }
+    const { data } = await admin.from("fact_touchpoint").select("lead_id, payload, dedup_key, occurred_at").in("lead_id", b.map(x => x.lid)).eq("source", "smax").order("occurred_at", { ascending: true });
+    const tidByLead = new Map<string, string>(); const cidByLead = new Map<string, string>();
+    for (const r of (data ?? [])) {
+      const p = (r.payload ?? {}) as { tid?: string; thread_id?: string; smax_customer_id?: string };
+      if (p.tid && !tidByLead.has(r.lead_id)) tidByLead.set(r.lead_id, p.tid);
+      // cid (mongo id SMAX) từ payload — dùng khi lead không có tid riêng
+      const cid = p.smax_customer_id || (String(r.dedup_key || "").startsWith("cust-") ? String(r.dedup_key).slice(5) : (p.thread_id && /^[0-9a-f]{24}$/.test(String(p.thread_id)) ? String(p.thread_id) : null));
+      if (cid && !cidByLead.has(r.lead_id)) cidByLead.set(r.lead_id, cid);
+    }
     for (const { lid, email, phone } of b) {
-      const tid = tidByLead.get(lid); if (!tid) continue;
-      const keep = owner.get(tid); if (!keep || keep === lid) continue; // tid thuộc lead khác = shadow
+      const tid = tidByLead.get(lid);
+      if (!tid) {
+        // không có tid nhưng có cid → điền cid để cột "ID" không trống
+        const cid = cidByLead.get(lid);
+        if (cid) { const { error } = await admin.from("dim_lead").update({ smax_customer_id: cid }).eq("lead_id", lid); if (!error) claimed++; }
+        continue;
+      }
+      const keep = owner.get(tid);
+      if (!keep || keep === lid) {
+        // tid CHƯA ai giữ → lead này nhận luôn (self-claim) → cột "ID" tự đầy
+        if (!keep) { const cid = cidByLead.get(lid); const { error } = await admin.from("dim_lead").update({ external_profile_id: tid, ...(cid ? { smax_customer_id: cid } : {}) }).eq("lead_id", lid); if (!error) { owner.set(tid, lid); claimed++; } }
+        continue;
+      }
+      // tid thuộc lead khác = shadow
       await admin.from("fact_touchpoint").update({ lead_id: keep }).eq("lead_id", lid); // dời chat sang owner
       const k = info.get(keep) || { email: null, phone: null }; const upd: Record<string, string> = {};
       if (!k.email && email) upd.email = email; if (!k.phone && phone) upd.phone = phone;
@@ -42,7 +60,7 @@ export async function runDedupShadow() {
       const { error } = await admin.from("dim_lead").delete().eq("lead_id", lid); if (!error) { dropIds.push(lid); merged++; }
     }
   }
-  console.log(`[dedup-shadow] gộp shadow-dup: ${merged}`);
+  console.log(`[dedup-shadow] gộp shadow-dup: ${merged} | self-claim pid/cid: ${claimed}`);
   if (!dropIds.length || !ID) return;
   // xóa dòng trùng trên Lark
   const tk = await fetch(`${U}/auth/v3/tenant_access_token/internal`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ app_id: ID, app_secret: SEC }) }).then(r => r.json()).then(j => j.tenant_access_token);
