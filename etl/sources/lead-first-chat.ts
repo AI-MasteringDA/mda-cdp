@@ -46,9 +46,9 @@ function trackName(name: string): string | null {
 function channelLabel(platform: string, pageName: string): string {
   const brand = /phuong thao|pta/i.test(pageName || "") ? "PTA" : "MDA";
   const p = (platform || "").toLowerCase();
+  if (/zalo/.test(p) && p !== "zalo") return "Zalo 48"; // zaloweb — Zalo cá nhân/Salework 48 (pid "zlw…"), tên theo team sales
   const plat = p === "facebook" ? "Facebook" : /insta/.test(p) ? "Instagram"
     : p === "zalo" ? "Zalo OA"        // Official Account (pid "zl…")
-    : /zalo/.test(p) ? "Zalo Web"     // zaloweb — Zalo cá nhân/Salework (pid "zlw…")
     : p === "custom" ? "Website" : (platform || "Khác");
   return `${plat} ${brand}`;
 }
