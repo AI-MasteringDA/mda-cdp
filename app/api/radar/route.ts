@@ -12,6 +12,9 @@ export const dynamic = "force-dynamic";
 
 const U = "https://open.larksuite.com/open-apis";
 const FIELDS = ["Lead Name", "Báo cáo ngày", "Hot Lead lúc", "Tag SMAX", "Communication Channels", "Phone", "Chưa phản hồi"];
+// Lead chỉ-comment (chưa inbox) được đánh dấu bằng option riêng trong
+// "Communication Channels" — vì app Lark hiện KHÔNG tạo được cột mới (lỗi 9499).
+const COMMENT_ONLY = "Comment (chưa inbox)";
 
 type Cell = unknown;
 type LarkRecord = { fields?: Record<string, Cell> };
@@ -21,6 +24,8 @@ const vnDate = (ms: Cell): string | null => typeof ms === "number" ? new Date(ms
 const norm = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
 
 function toLead(f: Record<string, Cell>, cutoff: string) {
+  // RULE SALES: chỉ tính lead INBOX — người mới chỉ comment dưới bài thì bỏ
+  if (g(f["Communication Channels"]).includes(COMMENT_ONLY)) return null;
   const bc = vnDate(f["Báo cáo ngày"]), ha = vnDate(f["Hot Lead lúc"]);
   if ((!bc || bc < cutoff) && (!ha || ha < cutoff)) return null;
   const tags = g(f["Tag SMAX"]);
