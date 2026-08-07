@@ -1,18 +1,18 @@
 <title>MDA · Sales Lead Radar</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --page1:#CDCFD2; --page2:#E2E3E5;
-  --shell:#F3F4F6; --side:#131417; --side-ink:#E9EAEC; --side-mut:#8B8F96;
-  --card:#FFFFFF; --ink:#17181A; --ink2:#6A6F76; --ink3:#9AA0A8; --line:#E8E9EB;
-  --pill:#131417; --pill-ink:#FFFFFF;
-  --good:#1F9D55; --bad:#E23B2E;
-  --sP:#0E8A6D; --sC:#2563EB; --sW:#E8A013; --sH:#B3261E; --sU:#C3C7CD;
+  --page1:#D3D5D8; --page2:#E7E8EA;
+  --shell:#F4F5F7; --side:#16181D; --side-ink:#EDEEF0; --side-mut:#878C95;
+  --card:#FFFFFF; --ink:#1A1C20; --ink2:#71767F; --ink3:#A2A7B0; --line:#ECEDEF;
+  --pill:#16181D; --pill-ink:#FFFFFF;
+  --good:#1B8F4D; --bad:#D23B2E;
+  --sP:#0E8A6D; --sC:#2563EB; --sW:#E8A013; --sH:#B3261E; --sU:#CDD1D6;
   --r:14px;
-  --shadow:0 24px 60px rgba(20,22,26,.18),0 4px 14px rgba(20,22,26,.08);
-  --cshadow:0 1px 2px rgba(20,22,26,.04),0 5px 16px rgba(20,22,26,.06);
+  --shadow:0 20px 52px rgba(20,22,26,.14),0 3px 10px rgba(20,22,26,.06);
+  --cshadow:0 1px 2px rgba(20,22,26,.03),0 3px 10px rgba(20,22,26,.04);
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;height:100%}
@@ -22,11 +22,11 @@ body{background:linear-gradient(160deg,var(--page2),var(--page1));color:var(--in
   display:grid;grid-template-columns:196px 1fr;overflow:hidden}
 /* sidebar */
 .side{background:var(--side);color:var(--side-ink);padding:22px 16px;display:flex;flex-direction:column;min-height:0}
-.logo{font-size:19px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
-.logo small{display:block;font-size:9.5px;font-weight:600;letter-spacing:.3em;color:var(--side-mut);margin-top:3px}
+.logo{font-size:18px;text-transform:uppercase}
+.logo small{display:block;font-size:9px;color:var(--side-mut);margin-top:4px}
 .side nav{margin-top:26px;display:flex;flex-direction:column;gap:5px}
 .side nav button{display:flex;align-items:center;gap:10px;border:0;background:transparent;color:var(--side-mut);
-  font:600 13px/1 inherit;padding:10px 13px;border-radius:999px;cursor:pointer;text-align:left}
+  font-size:13px;line-height:1;padding:10px 13px;border-radius:999px;cursor:pointer;text-align:left}
 .side nav button .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
 .side nav button.on{background:#FFF;color:#131417}
 .side nav button:not(.on):hover{color:var(--side-ink)}
@@ -34,13 +34,13 @@ body{background:linear-gradient(160deg,var(--page2),var(--page1));color:var(--in
 .side .foot b{color:var(--side-ink);font-weight:600}
 /* main */
 .main{padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;overflow:hidden}
-.lbl{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3)}
+.lbl{font-size:10px;text-transform:uppercase;color:var(--ink3)}
 .bar{background:var(--card);border-radius:999px;box-shadow:var(--cshadow);padding:6px 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:none}
 .tabs{display:flex;gap:2px;background:#EDEEF0;border-radius:999px;padding:3px}
-.tabs button{border:0;background:transparent;color:var(--ink2);font:700 10.5px/1 inherit;letter-spacing:.05em;text-transform:uppercase;
+.tabs button{border:0;background:transparent;color:var(--ink2);font-size:10.5px;line-height:1;text-transform:uppercase;
   padding:8px 13px;border-radius:999px;cursor:pointer;white-space:nowrap}
 .tabs button.on{background:var(--pill);color:var(--pill-ink)}
-.chip{border:1.5px solid var(--line);background:var(--card);color:var(--ink2);font:600 11px/1 inherit;
+.chip{border:1px solid var(--line);background:var(--card);color:var(--ink2);font-size:11px;line-height:1;
   padding:7px 12px;border-radius:999px;cursor:pointer}
 .chip.on{border-color:var(--pill);background:var(--pill);color:var(--pill-ink)}
 .range{color:var(--ink2);font-size:11.5px;margin-left:auto;padding-right:8px}
@@ -48,9 +48,9 @@ body{background:linear-gradient(160deg,var(--page2),var(--page1));color:var(--in
 button:focus-visible,.chip:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 /* KPI */
 .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;flex:none}
-.kpi{background:var(--card);border-radius:var(--r);padding:10px 14px 9px;box-shadow:var(--cshadow)}
-.kpi .v{font-size:26px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1.05;margin-top:4px}
-.kpi .delta{font-size:10.5px;font-variant-numeric:tabular-nums;margin-top:3px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi{background:var(--card);border-radius:var(--r);padding:12px 15px 11px;box-shadow:var(--cshadow)}
+.kpi .v{font-size:29px;font-variant-numeric:tabular-nums;line-height:1.05;margin-top:6px}
+.kpi .delta{font-size:10.5px;font-variant-numeric:tabular-nums;margin-top:4px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .delta .up{color:var(--good);font-weight:700}
 .delta .down{color:var(--bad);font-weight:700}
 .kpi .tag{display:inline-block;width:22px;height:3px;border-radius:2px;margin-top:1px}
@@ -58,41 +58,57 @@ button:focus-visible,.chip:focus-visible{outline:2px solid var(--ink);outline-of
 .charts{flex:1;min-height:0;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:1.15fr 1fr;gap:10px}
 .card{background:var(--card);border-radius:var(--r);padding:11px 14px 8px;box-shadow:var(--cshadow);display:flex;flex-direction:column;min-height:0;min-width:0}
 .card .hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;flex:none}
-.card h3{margin:0;font-size:12.5px;font-weight:800;letter-spacing:-.01em}
+.card h3{margin:0;font-size:13px}
 .card .sub{color:var(--ink3);font-size:10.5px}
 .legend{display:flex;gap:10px;flex-wrap:wrap;margin-left:auto}
-.legend span{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:600;color:var(--ink2)}
+.legend span{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:var(--ink2)}
 .legend i{width:9px;height:9px;border-radius:3px;display:inline-block}
 .plot{flex:1;min-height:0}
 svg{display:block;width:100%;height:100%}
 svg text{font-family:inherit}
-.axis{font-size:9.5px;fill:var(--ink3);font-weight:600}
+.axis{font-size:9.5px;fill:var(--ink3)}
 .gridline{stroke:var(--line);stroke-width:1}
-.dlab{font-size:9.5px;font-weight:700;fill:var(--ink2)}
+.dlab{font-size:9.5px;fill:var(--ink2)}
 #cardStack{grid-column:1/3}
 #cardTbl{grid-column:3/5}
 /* tooltip */
 #tip{position:fixed;z-index:99;pointer-events:none;background:var(--pill);color:#fff;border-radius:10px;
   box-shadow:0 10px 30px rgba(0,0,0,.25);padding:8px 11px;font-size:11.5px;display:none;max-width:240px}
-#tip .t{font-weight:800;margin-bottom:4px}
+#tip .t{margin-bottom:4px}
 #tip .row{display:flex;justify-content:space-between;gap:14px;font-variant-numeric:tabular-nums;opacity:.95}
 #tip .row i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:5px}
 /* table card */
 .mini{display:flex;gap:2px;background:#EDEEF0;border-radius:999px;padding:2px;margin-left:auto}
-.mini button{border:0;background:transparent;color:var(--ink2);font:700 10px/1 inherit;padding:6px 11px;border-radius:999px;cursor:pointer}
+.mini button{border:0;background:transparent;color:var(--ink2);font-size:10px;line-height:1;padding:6px 11px;border-radius:999px;cursor:pointer}
 .mini button.on{background:var(--pill);color:var(--pill-ink)}
 .tblwrap{flex:1;min-height:0;overflow:auto;margin-top:4px}
 table{width:100%;border-collapse:collapse;font-size:11.5px}
-th{text-align:left;font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);font-weight:700;padding:5px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
+th{text-align:left;font-size:9.5px;text-transform:uppercase;color:var(--ink3);padding:6px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
 td{padding:5.5px 8px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
 tbody tr:hover td{background:#FAFAFB}
-.cls{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.03em;padding:2px 8px;border-radius:999px;color:#fff}
-.badge{display:inline-block;font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:#F0F1F3;color:var(--ink2)}
+.cls{display:inline-block;font-size:9.5px;padding:2.5px 9px;border-radius:999px;color:#fff}
+.badge{display:inline-block;font-size:9.5px;padding:2.5px 9px;border-radius:999px;background:#F2F3F5;color:var(--ink2)}
 .badge.alert{background:#FBEAE7;color:var(--sH)}
-/* typography: Inter cho nội dung, Montserrat cho display/số/label */
-body,#tip,table{font-family:"Inter","Segoe UI",system-ui,sans-serif}
-.logo,h3,.kpi .v,.tabs button,.mini button,.lbl,.chip{font-family:"Montserrat","Inter","Segoe UI",sans-serif}
-svg text{font-family:"Inter","Segoe UI",sans-serif}
+/* typography: một họ Inter duy nhất, cân nặng nhẹ — tối giản, không "đậm đậm" */
+body,#tip,table,svg text,.logo,h3,.kpi .v,.tabs button,.mini button,.lbl,.chip{
+  font-family:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;font-feature-settings:"cv05","ss01","tnum"}
+.logo{font-weight:600;letter-spacing:.18em}
+.logo small{font-weight:500;letter-spacing:.24em}
+.card h3{font-weight:600;letter-spacing:-.006em}
+.kpi .v{font-weight:600;letter-spacing:-.028em}
+.lbl{font-weight:500;letter-spacing:.075em}
+.tabs button,.mini button{font-weight:500;letter-spacing:.035em}
+.chip{font-weight:500}
+.side nav button{font-weight:500}
+th{font-weight:500;letter-spacing:.05em}
+td{font-weight:400}
+td b{font-weight:550}
+.cls,.badge{font-weight:500;letter-spacing:.01em}
+.delta .up,.delta .down{font-weight:550}
+.legend span{font-weight:450}
+.dlab{font-weight:550}
+.axis{font-weight:450}
+#tip .t{font-weight:550}
 @media(max-width:1100px){body{overflow:auto}.app{height:auto;grid-template-columns:1fr}.side{flex-direction:row;align-items:center;gap:12px;padding:12px 16px}.side nav{margin:0;flex-direction:row}.side .foot{display:none}.charts{grid-template-columns:1fr;grid-template-rows:none}.charts .card{min-height:240px}#cardStack,#cardTbl{grid-column:auto}.kpis{grid-template-columns:repeat(3,1fr)}}
 </style>
 
