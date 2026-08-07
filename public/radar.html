@@ -202,6 +202,16 @@ try{
   document.body.innerHTML = '<div style="font:14px Inter,Segoe UI,sans-serif;padding:48px;color:#B3261E;background:#fff;min-height:100vh"><b>Không tải được dữ liệu:</b> '+e.message+'<br><br>Bấm F5 thử lại. Nếu vẫn lỗi, chụp màn hình gửi admin.</div>';
   throw e;
 }
+// Báo lỗi HIỆN RÕ thay vì im lặng để trống (sự cố 2026-08-07: JS dừng giữa chừng,
+// khung vẫn hiện nhưng biểu đồ rỗng, không biết vì sao).
+function showFatal(msg){
+  const b=document.createElement("div");
+  b.style.cssText="position:fixed;left:16px;right:16px;top:16px;z-index:999;background:#fff;border:1px solid #C4553F;border-left:5px solid #C4553F;border-radius:12px;padding:14px 18px;font:13px/1.5 Inter,system-ui,sans-serif;color:#7A2E22;box-shadow:0 10px 30px rgba(0,0,0,.18)";
+  b.innerHTML="<b>Dashboard lỗi hiển thị:</b> "+msg+"<br><span style='color:#8A6A64'>Thử tải lại bằng Ctrl+F5. Nếu còn lỗi, gửi ảnh này cho admin.</span>";
+  document.body.appendChild(b);
+}
+addEventListener("error",e=>showFatal(String(e.message||e.error||"lỗi không rõ")));
+addEventListener("unhandledrejection",e=>showFatal(String(e.reason&&e.reason.message||e.reason||"lỗi tải dữ liệu")));
 const CHDEFS=[["Facebook MDA","FB MDA"],["Facebook PTA","FB PTA"],["Zalo 48","Zalo 48"],["Zalo OA MDA","Zalo OA"],["Website MDA","Website"],["Instagram MDA","IG MDA"],["Instagram PTA","IG PTA"]];
 const S={days:14,grp:"all",ch:new Set(),tbl:"all"};
 const $=id=>document.getElementById(id);
@@ -416,7 +426,11 @@ function tableCard(a){
 }
 /* ---- wiring ---- */
 let A=null;
-function renderAll(){$("rangeLbl").textContent=rangeLbl();A=agg();kpis(A);chartStack(A);chartHot(A);chartLine(A);chartGrp(A);chartChan(A);tableCard(A)}
+function renderAll(){
+  try{
+    $("rangeLbl").textContent=rangeLbl();A=agg();kpis(A);chartStack(A);chartHot(A);chartLine(A);chartGrp(A);chartChan(A);tableCard(A);
+  }catch(e){showFatal("khi vẽ biểu đồ — "+e.message);throw e}
+}
 $("segDays").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
   [...$("segDays").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.days=+b.dataset.v;renderAll()});
 $("segGrp").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
