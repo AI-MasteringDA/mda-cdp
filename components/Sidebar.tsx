@@ -23,6 +23,7 @@ import {
   PieChart,
   Lightbulb,
   BarChart3,
+  Radar,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
@@ -34,6 +35,7 @@ type NavItem = { href: string; label: string; icon: React.ComponentType<{ classN
 
 const COCKPIT: NavItem[] = [
   { href: "/dashboard",     label: "Tổng quan",      icon: LayoutDashboard },
+  { href: "/radar",         label: "Sales Radar 📡", icon: Radar },
   { href: "/hot-leads",     label: "Lead NÓNG",      icon: Flame },
   { href: "/warm-leads",    label: "Lead ẤM",        icon: Thermometer },
   { href: "/cool-leads",    label: "Lead MÁT",       icon: Snowflake },
