@@ -110,6 +110,13 @@ export async function runLeadFirstChat() {
   };
   const custKeepByLead = new Map<string, Set<string>>();
   const contactFill = new Map<string, { phone?: string; email?: string }>(); // lead → contact cần điền
+  // RULE SALES (2026-08-07): người mới chỉ COMMENT dưới bài/ads mà CHƯA gắn tag thì
+  // KHÔNG tính là lead (đa số comment không liên quan khoá học). Nhưng comment ĐÃ
+  // GẮN TAG thì VẪN TÍNH (sales đã xác nhận là quan tâm). Dấu hiệu comment-only:
+  // FB customer không có facebook.conversation_id (chưa từng có hội thoại Messenger).
+  // Đã kiểm định: 979/4896 FB customer không có conversation_id, tất cả đều chưa tag.
+  // Non-FB (Zalo/Web/IG) luôn là inbox. Việc LỌC nằm ở nơi đếm (daily-report, /api/radar).
+  const hasInbox = new Map<string, boolean>(); // lead → có ít nhất 1 kênh inbox thật
   for (const c of customers) {
     const namePh = phoneFromName(c.name);
     const lead = (c.id && byCust.get(c.id)) || (c.pid && byPid.get(c.pid)) || (c.phone && byPhone.get(normPh(c.phone))) || (namePh && byPhone.get(namePh)) || (c.email && byEmail.get(String(c.email).toLowerCase().trim()));
@@ -122,6 +129,10 @@ export async function runLeadFirstChat() {
     if (cph && !curPhone.get(lead)) { const o = byPhone.get(normPh(cph)); if (!o || o === lead) { curPhone.set(lead, cph.startsWith("0") ? cph : "0" + normPh(cph)); byPhone.set(normPh(cph), lead); contactFill.set(lead, { ...(contactFill.get(lead) || {}), phone: curPhone.get(lead)! }); } }
     const cem = c.email ? String(c.email).toLowerCase().trim() : "";
     if (cem && !curEmail.get(lead)) { const o = byEmail.get(cem); if (!o || o === lead) { curEmail.set(lead, cem); byEmail.set(cem, lead); contactFill.set(lead, { ...(contactFill.get(lead) || {}), email: cem }); } }
+    // inbox hay chỉ-comment (xem RULE ở trên)
+    const isFb = String(c.platform || "") === "facebook";
+    if (!isFb || c.facebook?.conversation_id) hasInbox.set(lead, true);
+    else if (!hasInbox.has(lead)) hasInbox.set(lead, false);
     // communication channel của customer này (lead gộp → union nhiều channel)
     const ch = pageLabel.get(c.page_pid) || (c.platform ? channelLabel(c.platform, "") : "");
     if (ch) { const s = chans.get(lead) || new Set<string>(); s.add(ch); chans.set(lead, s); }
@@ -157,6 +168,11 @@ export async function runLeadFirstChat() {
     }
   }
   if (tagFixed) console.log(`[first-chat] tag reconcile từ customers: ${tagFixed} lead cập nhật`);
+  // Lead chưa từng inbox → gắn nhãn kênh riêng để nơi đếm nhận diện (không tạo được
+  // cột mới trên Lark nên đánh dấu ngay trong Communication Channels).
+  const COMMENT_ONLY = "Comment (chưa inbox)";
+  for (const [lead, ok] of hasInbox) if (!ok) chans.set(lead, new Set([COMMENT_ONLY]));
+
   // persist pid backfill vào dim_lead (để lark-push + lần sau dùng)
   let pidFilled = 0;
   for (const [lead, { pid, cid }] of pidBackfill) { const { error } = await admin.from("dim_lead").update({ external_profile_id: pid, smax_customer_id: cid }).eq("lead_id", lead); if (!error) pidFilled++; }

@@ -61,6 +61,8 @@ export async function runDailyReport() {
     if (d.code !== 0) { console.log(`[daily-report] đọc lỗi ${d.code}`); return; }
     for (const r of (d.data?.items ?? [])) {
       const tags = arr(r.fields?.["Tag SMAX"]);
+      // RULE SALES: comment CHƯA gắn tag → không đếm. Comment ĐÃ gắn tag → vẫn đếm.
+      if (!tags.length && arr(r.fields?.["Communication Channels"]).includes("Comment (chưa inbox)")) continue;
       const bi = tags.some(isBI), fa = tags.some(isFA);
       const getRow = (day: string) => { const row = byDay.get(day) ?? Object.fromEntries(NUM_COLS.map(c => [c, 0])); byDay.set(day, row); return row; };
       // Lead mới + Prospect/Cold/Warm + channel: theo NGÀY CHAT ĐẦU

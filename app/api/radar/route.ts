@@ -24,11 +24,11 @@ const vnDate = (ms: Cell): string | null => typeof ms === "number" ? new Date(ms
 const norm = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
 
 function toLead(f: Record<string, Cell>, cutoff: string) {
-  // RULE SALES: chỉ tính lead INBOX — người mới chỉ comment dưới bài thì bỏ
-  if (g(f["Communication Channels"]).includes(COMMENT_ONLY)) return null;
+  const tags = g(f["Tag SMAX"]);
+  // RULE SALES: comment CHƯA gắn tag → không tính là lead. Comment ĐÃ gắn tag → vẫn tính.
+  if (!tags.length && g(f["Communication Channels"]).includes(COMMENT_ONLY)) return null;
   const bc = vnDate(f["Báo cáo ngày"]), ha = vnDate(f["Hot Lead lúc"]);
   if ((!bc || bc < cutoff) && (!ha || ha < cutoff)) return null;
-  const tags = g(f["Tag SMAX"]);
   return {
     n: gs(f["Lead Name"]) || "(?)", d: bc, ha,
     cls: tags.map(t => ({ hotlead: "H", coldlead: "C", warmlead: "W", prospect: "P" } as Record<string, string>)[norm(t)]).filter(Boolean),
