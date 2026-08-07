@@ -1,0 +1,377 @@
+<title>MDA · Sales Lead Radar</title>
+<style>
+:root{
+  --page1:#CDCFD2; --page2:#E2E3E5;
+  --shell:#F3F4F6; --side:#131417; --side-ink:#E9EAEC; --side-mut:#8B8F96;
+  --card:#FFFFFF; --ink:#17181A; --ink2:#6A6F76; --ink3:#9AA0A8; --line:#E8E9EB;
+  --pill:#131417; --pill-ink:#FFFFFF;
+  --good:#1F9D55; --bad:#E23B2E;
+  --sP:#0E8A6D; --sC:#2563EB; --sW:#E8A013; --sH:#B3261E; --sU:#C3C7CD;
+  --r:14px;
+  --shadow:0 24px 60px rgba(20,22,26,.18),0 4px 14px rgba(20,22,26,.08);
+  --cshadow:0 1px 2px rgba(20,22,26,.04),0 5px 16px rgba(20,22,26,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%}
+body{background:linear-gradient(160deg,var(--page2),var(--page1));color:var(--ink);
+  font:13px/1.45 "Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;padding:14px 16px;overflow:hidden}
+.app{height:calc(100vh - 28px);max-width:1720px;margin:0 auto;background:var(--shell);border-radius:22px;box-shadow:var(--shadow);
+  display:grid;grid-template-columns:196px 1fr;overflow:hidden}
+/* sidebar */
+.side{background:var(--side);color:var(--side-ink);padding:22px 16px;display:flex;flex-direction:column;min-height:0}
+.logo{font-size:19px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+.logo small{display:block;font-size:9.5px;font-weight:600;letter-spacing:.3em;color:var(--side-mut);margin-top:3px}
+.side nav{margin-top:26px;display:flex;flex-direction:column;gap:5px}
+.side nav button{display:flex;align-items:center;gap:10px;border:0;background:transparent;color:var(--side-mut);
+  font:600 13px/1 inherit;padding:10px 13px;border-radius:999px;cursor:pointer;text-align:left}
+.side nav button .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.side nav button.on{background:#FFF;color:#131417}
+.side nav button:not(.on):hover{color:var(--side-ink)}
+.side .foot{margin-top:auto;font-size:10.5px;color:var(--side-mut);line-height:1.55}
+.side .foot b{color:var(--side-ink);font-weight:600}
+/* main */
+.main{padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;overflow:hidden}
+.lbl{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3)}
+.bar{background:var(--card);border-radius:999px;box-shadow:var(--cshadow);padding:6px 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:none}
+.tabs{display:flex;gap:2px;background:#EDEEF0;border-radius:999px;padding:3px}
+.tabs button{border:0;background:transparent;color:var(--ink2);font:700 10.5px/1 inherit;letter-spacing:.05em;text-transform:uppercase;
+  padding:8px 13px;border-radius:999px;cursor:pointer;white-space:nowrap}
+.tabs button.on{background:var(--pill);color:var(--pill-ink)}
+.chip{border:1.5px solid var(--line);background:var(--card);color:var(--ink2);font:600 11px/1 inherit;
+  padding:7px 12px;border-radius:999px;cursor:pointer}
+.chip.on{border-color:var(--pill);background:var(--pill);color:var(--pill-ink)}
+.range{color:var(--ink2);font-size:11.5px;margin-left:auto;padding-right:8px}
+.range b{color:var(--ink)}
+button:focus-visible,.chip:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;flex:none}
+.kpi{background:var(--card);border-radius:var(--r);padding:10px 14px 9px;box-shadow:var(--cshadow)}
+.kpi .v{font-size:26px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1.05;margin-top:4px}
+.kpi .delta{font-size:10.5px;font-variant-numeric:tabular-nums;margin-top:3px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.delta .up{color:var(--good);font-weight:700}
+.delta .down{color:var(--bad);font-weight:700}
+.kpi .tag{display:inline-block;width:22px;height:3px;border-radius:2px;margin-top:1px}
+/* charts zone: fit remaining height */
+.charts{flex:1;min-height:0;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:1.15fr 1fr;gap:10px}
+.card{background:var(--card);border-radius:var(--r);padding:11px 14px 8px;box-shadow:var(--cshadow);display:flex;flex-direction:column;min-height:0;min-width:0}
+.card .hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;flex:none}
+.card h3{margin:0;font-size:12.5px;font-weight:800;letter-spacing:-.01em}
+.card .sub{color:var(--ink3);font-size:10.5px}
+.legend{display:flex;gap:10px;flex-wrap:wrap;margin-left:auto}
+.legend span{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:600;color:var(--ink2)}
+.legend i{width:9px;height:9px;border-radius:3px;display:inline-block}
+.plot{flex:1;min-height:0}
+svg{display:block;width:100%;height:100%}
+svg text{font-family:inherit}
+.axis{font-size:9.5px;fill:var(--ink3);font-weight:600}
+.gridline{stroke:var(--line);stroke-width:1}
+.dlab{font-size:9.5px;font-weight:700;fill:var(--ink2)}
+#cardStack{grid-column:1/3}
+#cardTbl{grid-column:3/5}
+/* tooltip */
+#tip{position:fixed;z-index:99;pointer-events:none;background:var(--pill);color:#fff;border-radius:10px;
+  box-shadow:0 10px 30px rgba(0,0,0,.25);padding:8px 11px;font-size:11.5px;display:none;max-width:240px}
+#tip .t{font-weight:800;margin-bottom:4px}
+#tip .row{display:flex;justify-content:space-between;gap:14px;font-variant-numeric:tabular-nums;opacity:.95}
+#tip .row i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:5px}
+/* table card */
+.mini{display:flex;gap:2px;background:#EDEEF0;border-radius:999px;padding:2px;margin-left:auto}
+.mini button{border:0;background:transparent;color:var(--ink2);font:700 10px/1 inherit;padding:6px 11px;border-radius:999px;cursor:pointer}
+.mini button.on{background:var(--pill);color:var(--pill-ink)}
+.tblwrap{flex:1;min-height:0;overflow:auto;margin-top:4px}
+table{width:100%;border-collapse:collapse;font-size:11.5px}
+th{text-align:left;font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);font-weight:700;padding:5px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
+td{padding:5.5px 8px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
+tbody tr:hover td{background:#FAFAFB}
+.cls{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.03em;padding:2px 8px;border-radius:999px;color:#fff}
+.badge{display:inline-block;font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:#F0F1F3;color:var(--ink2)}
+.badge.alert{background:#FBEAE7;color:var(--sH)}
+@media(max-width:1100px){body{overflow:auto}.app{height:auto;grid-template-columns:1fr}.side{flex-direction:row;align-items:center;gap:12px;padding:12px 16px}.side nav{margin:0;flex-direction:row}.side .foot{display:none}.charts{grid-template-columns:1fr;grid-template-rows:none}.charts .card{min-height:240px}#cardStack,#cardTbl{grid-column:auto}.kpis{grid-template-columns:repeat(3,1fr)}}
+</style>
+
+<div class="app">
+  <aside class="side">
+    <div class="logo">MDA<small>Lead Radar</small></div>
+    <nav id="navPg" aria-label="Trang">
+      <button data-p="ov" class="on"><span class="dot"></span>Tổng quan</button>
+      <button data-p="ls"><span class="dot"></span>Danh sách lead</button>
+    </nav>
+    <div class="foot">Dữ liệu SMAX đến<br><b id="asof"></b><br><br>Nguồn: SMAX_Database<br>1 người = 1 dòng · Hot theo giờ gắn tag, còn lại theo ngày chat đầu</div>
+  </aside>
+
+  <main class="main">
+    <div class="bar" role="toolbar">
+      <div class="tabs" id="segDays">
+        <button data-v="1">Hôm qua</button><button data-v="7">7 ngày</button><button data-v="14" class="on">14 ngày</button><button data-v="30">30 ngày</button><button data-v="40">40 ngày</button>
+      </div>
+      <div class="tabs" id="segGrp">
+        <button data-v="all" class="on">Tất cả</button><button data-v="bi">BI</button><button data-v="fa">FA</button>
+      </div>
+      <span class="lbl" style="padding-left:8px">Kênh</span>
+      <span id="chipCh" style="display:flex;gap:5px;flex-wrap:wrap"></span>
+      <button class="chip" id="chipClear">✕</button>
+      <div class="range">🗓 <b id="rangeLbl"></b></div>
+    </div>
+
+    <div id="pgOv" style="display:flex;flex-direction:column;gap:10px;flex:1;min-height:0">
+    <div class="kpis" id="kpis"></div>
+
+    <div class="charts">
+      <div class="card" id="cardStack">
+        <div class="hd"><h3>Lead mới theo ngày</h3><span class="sub">theo ngày chat đầu</span>
+          <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sU)"></i>Chưa tag</span></div></div>
+        <div class="plot"><svg id="cStack"></svg></div>
+      </div>
+      <div class="card">
+        <div class="hd"><h3>Hot mới</h3><span class="sub">theo giờ gắn tag</span></div>
+        <div class="plot"><svg id="cHot"></svg></div>
+      </div>
+      <div class="card">
+        <div class="hd"><h3>Nhịp lead vào</h3><span class="sub">đậm = TB trượt 7 ngày</span></div>
+        <div class="plot"><svg id="cLine"></svg></div>
+      </div>
+      <div class="card">
+        <div class="hd"><h3>Kênh</h3><span class="sub">lead mới trong kỳ</span></div>
+        <div class="plot"><svg id="cChan"></svg></div>
+      </div>
+      <div class="card">
+        <div class="hd"><h3>BI vs FA</h3>
+          <div class="legend"><span><i style="background:var(--pill)"></i>BI</span><span><i style="background:var(--sU)"></i>FA</span></div></div>
+        <div class="plot"><svg id="cGrp"></svg></div>
+      </div>
+    </div>
+    </div><!-- /pgOv -->
+
+    <div id="pgLs" style="display:none;flex:1;min-height:0">
+      <div class="card" id="cardTbl" style="height:100%">
+        <div class="hd"><h3 id="tblTitle">🔥 Hot mới trong kỳ</h3><span class="sub" id="tblSub"></span>
+          <div class="mini" id="tblTabs"><button data-v="hot" class="on">Hot mới</button><button data-v="new">Lead mới</button></div></div>
+        <div class="tblwrap"><table id="tbl"></table></div>
+      </div>
+    </div><!-- /pgLs -->
+  </main>
+</div>
+<div id="tip"></div>
+
+<script type="module">
+const DATA = await (await fetch("/api/radar",{cache:"no-store"})).json();
+const CHDEFS=[["Facebook MDA","FB MDA"],["Facebook PTA","FB PTA"],["Zalo 48","Zalo 48"],["Zalo OA MDA","Zalo OA"],["Website MDA","Website"],["Instagram MDA","IG MDA"],["Instagram PTA","IG PTA"]];
+const S={days:14,grp:"all",ch:new Set(),tbl:"hot"};
+const $=id=>document.getElementById(id);
+const fmtD=d=>d.slice(8,10)+"/"+d.slice(5,7);
+const asofDate=DATA.asOf.slice(0,10);
+$("asof").textContent=DATA.asOf;
+const addDays=(d,n)=>{const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10)};
+const YDAY=addDays(asofDate,-1);
+function rangeLbl(){
+  if(S.days===1)return "Hôm qua · "+fmtD(YDAY);
+  return fmtD(addDays(asofDate,-(S.days-1)))+" – "+fmtD(asofDate);
+}
+function leadPass(l){
+  if(S.grp==="bi"&&!l.bi)return false;
+  if(S.grp==="fa"&&!l.fa)return false;
+  if(S.ch.size&&!l.ch.some(c=>S.ch.has(c)))return false;
+  return true;
+}
+function daysList(n){const a=[];for(let i=n-1;i>=0;i--)a.push(addDays(asofDate,-i));return a}
+function agg(){
+  const days=S.days===1?[YDAY]:daysList(S.days);
+  const idx=Object.fromEntries(days.map((d,i)=>[d,i]));
+  const prevSet=new Set(days.map(d=>addDays(d,-days.length)));
+  const z=()=>days.map(()=>0);
+  const r={days,moi:z(),P:z(),C:z(),W:z(),U:z(),H:z(),chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],newWin:[],cphWin:0,prev:{moi:0,P:0,C:0,W:0,H:0}};
+  CHDEFS.forEach(([k])=>r.chCount[k]=0);
+  for(const l of DATA.leads){
+    if(!leadPass(l))continue;
+    const has=c=>l.cls.includes(c);
+    if(l.d&&idx[l.d]!=null){
+      const i=idx[l.d];r.moi[i]++;
+      if(has("P"))r.P[i]++;else if(has("W"))r.W[i]++;else if(has("C"))r.C[i]++;else if(!has("H"))r.U[i]++;
+      for(const c of l.ch)if(c in r.chCount)r.chCount[c]++;
+      r.newWin.push(l);if(l.cph)r.cphWin++;
+      for(const c of l.cls){const k={P:"P",C:"C",W:"W",H:"H"}[c];if(l.bi)r.biCls[k]++;if(l.fa)r.faCls[k]++}
+    }else if(l.d&&prevSet.has(l.d)){
+      r.prev.moi++;
+      if(has("P"))r.prev.P++;else if(has("W"))r.prev.W++;else if(has("C"))r.prev.C++;
+    }
+    if(l.ha&&idx[l.ha]!=null){r.H[idx[l.ha]]++;r.hotLeads.push(l)}
+    else if(l.ha&&prevSet.has(l.ha))r.prev.H++;
+  }
+  r.hotLeads.sort((a,b)=>(b.ha||"").localeCompare(a.ha||""));
+  r.newWin.sort((a,b)=>(b.d||"").localeCompare(a.d||""));
+  return r;
+}
+/* ---- svg helpers ---- */
+function svgEl(n,attrs){const e=document.createElementNS("http://www.w3.org/2000/svg",n);for(const k in attrs)e.setAttribute(k,attrs[k]);return e}
+const tip=$("tip");
+function showTip(html,x,y){tip.innerHTML=html;tip.style.display="block";const w=tip.offsetWidth,h=tip.offsetHeight;let L=x+14,T=y-h-8;if(L+w>innerWidth-8)L=x-w-14;if(T<8)T=y+14;tip.style.left=L+"px";tip.style.top=T+"px"}
+function hideTip(){tip.style.display="none"}
+function dims(svg,defW,defH){const r=svg.parentElement.getBoundingClientRect();return {W:Math.max(r.width,defW),H:Math.max(r.height,defH)}}
+function frame(svg,W,H,pad,maxV,nY){
+  svg.setAttribute("viewBox","0 0 "+W+" "+H);
+  while(svg.firstChild)svg.removeChild(svg.firstChild);
+  const g=svgEl("g",{});svg.appendChild(g);
+  const plotH=H-pad.t-pad.b,plotW=W-pad.l-pad.r;
+  for(let i=0;i<=nY;i++){
+    const v=maxV*i/nY,y=pad.t+plotH-plotH*i/nY;
+    g.appendChild(svgEl("line",{x1:pad.l,x2:pad.l+plotW,y1:y,y2:y,class:"gridline","stroke-opacity":i===0?1:.5}));
+    const t=svgEl("text",{x:pad.l-6,y:y+3.5,class:"axis","text-anchor":"end"});t.textContent=Math.round(v);g.appendChild(t);
+  }
+  return {g,plotH,plotW};
+}
+function xLabels(g,days,pad,plotH,band,step){
+  days.forEach((d,i)=>{if(i%step!==0&&i!==days.length-1)return;
+    const t=svgEl("text",{x:pad.l+band*i+band/2,y:pad.t+plotH+14,class:"axis","text-anchor":"middle"});
+    t.textContent=fmtD(d);g.appendChild(t)});
+}
+function topRoundRect(x,y,w,h,r){if(h<=0)return null;r=Math.min(r,w/2,h);
+  return "M"+x+" "+(y+h)+"V"+(y+r)+"Q"+x+" "+y+" "+(x+r)+" "+y+"H"+(x+w-r)+"Q"+(x+w)+" "+y+" "+(x+w)+" "+(y+r)+"V"+(y+h)+"Z"}
+/* ---- charts ---- */
+function chartStack(a){
+  const svg=$("cStack"),{W,H}=dims(svg,600,200),pad={t:14,b:22,l:30,r:8};
+  const tot=a.days.map((_,i)=>a.P[i]+a.C[i]+a.W[i]+a.U[i]);
+  const maxV=Math.max(4,...tot)*1.12;
+  const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,4);
+  const band=plotW/a.days.length,bw=Math.min(band*.6,42);
+  const series=[["P","--sP"],["C","--sC"],["W","--sW"],["U","--sU"]];
+  a.days.forEach((d,i)=>{
+    let y=pad.t+plotH;const x=pad.l+band*i+(band-bw)/2;
+    const segs=series.map(([k])=>a[k][i]);
+    const topIdx=(()=>{for(let s=segs.length-1;s>=0;s--)if(segs[s]>0)return s;return -1})();
+    series.forEach(([k,cvar],s)=>{const v=a[k][i];if(!v)return;
+      const hpx=v/maxV*plotH;y-=hpx;
+      if(s===topIdx)g.appendChild(svgEl("path",{d:topRoundRect(x,y,bw,Math.max(hpx-1,1),4),style:"fill:var("+cvar+")"}));
+      else g.appendChild(svgEl("rect",{x,y,width:bw,height:Math.max(hpx-2,1),style:"fill:var("+cvar+")"}));
+    });
+    if(tot[i]>0){const t=svgEl("text",{x:x+bw/2,y:y-4,class:"dlab","text-anchor":"middle"});t.textContent=tot[i];g.appendChild(t)}
+    const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
+    hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+fmtD(d)+"</div>"
+      +"<div class='row'><span><i style='background:var(--sP)'></i>Prospect</span><b>"+a.P[i]+"</b></div>"
+      +"<div class='row'><span><i style='background:var(--sC)'></i>Cold</span><b>"+a.C[i]+"</b></div>"
+      +"<div class='row'><span><i style='background:var(--sW)'></i>Warm</span><b>"+a.W[i]+"</b></div>"
+      +"<div class='row'><span><i style='background:var(--sU)'></i>Chưa tag</span><b>"+a.U[i]+"</b></div>"
+      +"<div class='row'><span>Tổng lead mới</span><b>"+a.moi[i]+"</b></div>",e.clientX,e.clientY));
+    hit.addEventListener("mouseleave",hideTip);
+    g.appendChild(hit);
+  });
+  xLabels(g,a.days,pad,plotH,band,Math.ceil(a.days.length/12));
+}
+function chartHot(a){
+  const svg=$("cHot"),{W,H}=dims(svg,300,160),pad={t:12,b:22,l:26,r:6};
+  const maxV=Math.max(3,...a.H)*1.15;
+  const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
+  const band=plotW/a.days.length,bw=Math.min(band*.6,28);
+  a.days.forEach((d,i)=>{
+    const v=a.H[i],x=pad.l+band*i+(band-bw)/2,hpx=v/maxV*plotH,y=pad.t+plotH-hpx;
+    if(v>0){g.appendChild(svgEl("path",{d:topRoundRect(x,y,bw,hpx,4),style:"fill:var(--sH)",opacity:d===YDAY?"1":".8"}));
+      const t=svgEl("text",{x:x+bw/2,y:y-3,class:"dlab","text-anchor":"middle"});t.textContent=v;g.appendChild(t)}
+    const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
+    hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+fmtD(d)+"</div><div class='row'><span><i style='background:var(--sH)'></i>Lên Hot</span><b>"+v+"</b></div>",e.clientX,e.clientY));
+    hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
+  });
+  xLabels(g,a.days,pad,plotH,band,Math.ceil(a.days.length/6));
+}
+function chartLine(a){
+  const svg=$("cLine"),{W,H}=dims(svg,300,160),pad={t:12,b:22,l:26,r:8};
+  const maxV=Math.max(4,...a.moi)*1.15;
+  const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
+  const band=plotW/a.days.length;
+  const X=i=>pad.l+band*i+band/2,Y=v=>pad.t+plotH-v/maxV*plotH;
+  const ma=a.moi.map((_,i)=>{const s=a.moi.slice(Math.max(0,i-6),i+1);return s.reduce((p,c)=>p+c,0)/s.length});
+  g.appendChild(svgEl("path",{d:a.moi.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" "),fill:"none",style:"stroke:var(--sC)","stroke-width":"1.4",opacity:".4"}));
+  g.appendChild(svgEl("path",{d:ma.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" "),fill:"none",style:"stroke:var(--sC)","stroke-width":"2.4","stroke-linecap":"round"}));
+  const li=a.days.length-1;
+  g.appendChild(svgEl("circle",{cx:X(li),cy:Y(a.moi[li]),r:4,style:"fill:var(--sC);stroke:#fff","stroke-width":"2"}));
+  a.days.forEach((d,i)=>{const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
+    hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+fmtD(d)+"</div><div class='row'><span>Lead mới</span><b>"+a.moi[i]+"</b></div><div class='row'><span>TB 7 ngày</span><b>"+ma[i].toFixed(1)+"</b></div>",e.clientX,e.clientY));
+    hit.addEventListener("mouseleave",hideTip);g.appendChild(hit)});
+  xLabels(g,a.days,pad,plotH,band,Math.ceil(a.days.length/6));
+}
+function chartGrp(a){
+  const svg=$("cGrp"),{W,H}=dims(svg,300,160),pad={t:12,b:22,l:26,r:6};
+  const cats=[["Prospect","P"],["Cold","C"],["Warm","W"],["Hot","H"]];
+  const maxV=Math.max(3,...cats.map(([,k])=>Math.max(a.biCls[k],a.faCls[k])))*1.2;
+  const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
+  const band=plotW/cats.length,bw=Math.min(band*.24,30),gap=4;
+  cats.forEach(([nm,k],i)=>{
+    const cx=pad.l+band*i+band/2;
+    [[a.biCls[k],"var(--pill)",-bw-gap/2],[a.faCls[k],"var(--sU)",gap/2]].forEach(([v,fill,off])=>{
+      const hpx=v/maxV*plotH,y=pad.t+plotH-hpx,x=cx+off;
+      if(v>0)g.appendChild(svgEl("path",{d:topRoundRect(x,y,bw,hpx,4),style:"fill:"+fill}));
+      const t=svgEl("text",{x:x+bw/2,y:y-3,class:"dlab","text-anchor":"middle"});t.textContent=v;g.appendChild(t);
+    });
+    const t=svgEl("text",{x:cx,y:pad.t+plotH+14,class:"axis","text-anchor":"middle"});t.textContent=nm;g.appendChild(t);
+  });
+}
+function chartChan(a){
+  const svg=$("cChan"),{W,H}=dims(svg,300,160);
+  const items=CHDEFS.map(([k,s])=>[s,a.chCount[k]]).filter(x=>x[1]>0).sort((x,y)=>y[1]-x[1]).slice(0,6);
+  svg.setAttribute("viewBox","0 0 "+W+" "+H);
+  while(svg.firstChild)svg.removeChild(svg.firstChild);
+  const maxV=Math.max(1,...items.map(x=>x[1]));
+  const total=items.reduce((p,c)=>p+c[1],0)||1;
+  const rowH=Math.min(30,(H-16)/Math.max(items.length,1)),padL=64,plotW=W-padL-62,bh=Math.min(rowH*.62,18);
+  items.forEach(([nm,v],i)=>{
+    const y=8+i*rowH+(rowH-bh)/2;
+    const t=svgEl("text",{x:padL-7,y:y+bh/2+3.5,class:"axis","text-anchor":"end"});t.textContent=nm;svg.appendChild(t);
+    const w=Math.max(v/maxV*plotW,3);
+    const r=svgEl("rect",{x:padL,y:y,width:w,height:bh,rx:5,style:"fill:var(--pill)",opacity:i===0?"1":String(.8-i*.08)});
+    r.addEventListener("mousemove",e=>showTip("<div class='t'>"+nm+"</div><div class='row'><span>Lead</span><b>"+v+"</b></div><div class='row'><span>Tỷ trọng</span><b>"+Math.round(v/total*100)+"%</b></div>",e.clientX,e.clientY));
+    r.addEventListener("mouseleave",hideTip);
+    svg.appendChild(r);
+    const lv=svgEl("text",{x:padL+w+6,y:y+bh/2+3.5,class:"dlab"});lv.textContent=v+" · "+Math.round(v/total*100)+"%";svg.appendChild(lv);
+  });
+  if(!items.length){const t=svgEl("text",{x:16,y:26,class:"axis"});t.textContent="Không có dữ liệu";svg.appendChild(t)}
+}
+/* ---- kpi & table ---- */
+const CLSN={P:["Prospect","--sP"],C:["Cold","--sC"],W:["Warm","--sW"],H:["Hot","--sH"]};
+function kpis(a){
+  const sum=k=>a[k].reduce((p,c)=>p+c,0);
+  const items=[["Lead mới","moi","--pill"],["Hot mới","H","--sH"],["Cold","C","--sC"],["Prospect","P","--sP"],["Warm","W","--sW"]];
+  let h="";
+  for(const [nm,k,cvar] of items){
+    const v=sum(k),base=a.prev[k],diff=v-base;
+    const cls=diff>0?"up":(diff<0?"down":"");
+    const arrow=diff>0?"▲":(diff<0?"▼":"–");
+    h+="<div class='kpi'><span class='lbl'>"+nm+"</span><div class='v'>"+v+"</div><span class='tag' style='background:var("+cvar+")'></span><div class='delta'><span class='"+cls+"'>"+arrow+" "+Math.abs(diff)+"</span> so kỳ trước ("+base+")</div></div>";
+  }
+  h+="<div class='kpi'><span class='lbl'>Chưa phản hồi</span><div class='v'>"+a.cphWin+"</div><span class='tag' style='background:var(--sW)'></span><div class='delta'>trong "+sum("moi")+" lead mới</div></div>";
+  $("kpis").innerHTML=h;
+}
+function clsChip(c){const [nm,v]=CLSN[c];return "<span class='cls' style='background:var("+v+")'>"+nm+"</span>"}
+function tableCard(a){
+  if(S.tbl==="hot"){
+    $("tblTitle").textContent="🔥 Hot mới trong kỳ";
+    const hot=a.hotLeads;$("tblSub").textContent=hot.length+" người";
+    $("tbl").innerHTML="<tr><th>Tên</th><th>Lên Hot</th><th>Kênh</th><th>SĐT</th></tr>"+
+      (hot.length?hot.map(l=>"<tr><td><b>"+l.n+"</b></td><td>"+(l.ha?fmtD(l.ha):"-")+"</td><td>"+(l.ch.join(", ")||"-")+"</td><td>"+(l.ph||"—")+"</td></tr>").join(""):"<tr><td colspan='4' style='color:var(--ink3)'>Không có</td></tr>");
+  }else{
+    $("tblTitle").textContent="Lead mới trong kỳ";
+    const nw=a.newWin;$("tblSub").textContent=nw.length+" người";
+    $("tbl").innerHTML="<tr><th>Tên</th><th>Ngày</th><th>Phân loại</th><th>Kênh</th><th>SĐT</th><th></th></tr>"+
+      (nw.length?nw.map(l=>{const c=l.cls.filter(x=>x!=="H")[0]||(l.cls.includes("H")?"H":null);
+        return "<tr><td><b>"+l.n+"</b></td><td>"+(l.d?fmtD(l.d):"-")+"</td><td>"+(c?clsChip(c):"<span class='badge'>chưa tag</span>")+"</td><td>"+(l.ch.join(", ")||"-")+"</td><td>"+(l.ph||"—")+"</td><td>"+(l.cph?"<span class='badge alert'>chưa phản hồi</span>":"")+"</td></tr>"}).join(""):"<tr><td colspan='6' style='color:var(--ink3)'>Không có</td></tr>");
+  }
+}
+/* ---- wiring ---- */
+let A=null;
+function renderAll(){$("rangeLbl").textContent=rangeLbl();A=agg();kpis(A);chartStack(A);chartHot(A);chartLine(A);chartGrp(A);chartChan(A);tableCard(A)}
+$("segDays").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
+  [...$("segDays").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.days=+b.dataset.v;renderAll()});
+$("segGrp").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
+  [...$("segGrp").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.grp=b.dataset.v;renderAll()});
+$("navPg").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
+  [...$("navPg").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");
+  const ov=b.dataset.p==="ov";
+  $("pgOv").style.display=ov?"flex":"none";$("pgLs").style.display=ov?"none":"block";
+  renderAll()});
+$("tblTabs").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
+  [...$("tblTabs").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.tbl=b.dataset.v;if(A)tableCard(A)});
+CHDEFS.forEach(([k,s])=>{const b=document.createElement("button");b.className="chip";b.textContent=s;
+  b.addEventListener("click",()=>{if(S.ch.has(k)){S.ch.delete(k);b.classList.remove("on")}else{S.ch.add(k);b.classList.add("on")}renderAll()});
+  $("chipCh").appendChild(b)});
+$("chipClear").addEventListener("click",()=>{S.ch.clear();[...$("chipCh").children].forEach(x=>x.classList.remove("on"));renderAll()});
+renderAll();
+requestAnimationFrame(()=>renderAll()); /* render lần 2 sau khi layout ổn định để chart đo đúng kích thước */
+addEventListener("resize",()=>{clearTimeout(window.__rz);window.__rz=setTimeout(renderAll,120)});
+</script>
