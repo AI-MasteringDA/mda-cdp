@@ -4,12 +4,13 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --page1:#D3D5D8; --page2:#E7E8EA;
-  --shell:#F4F5F7; --side:#16181D; --side-ink:#EDEEF0; --side-mut:#878C95;
-  --card:#FFFFFF; --ink:#1A1C20; --ink2:#71767F; --ink3:#A2A7B0; --line:#ECEDEF;
-  --pill:#16181D; --pill-ink:#FFFFFF;
-  --good:#1B8F4D; --bad:#D23B2E;
-  --sP:#0E8A6D; --sC:#2563EB; --sW:#E8A013; --sH:#B3261E; --sU:#CDD1D6;
+  /* MDA brand — xanh dương chủ đạo, vàng #fec636 nhấn, hot = xanh lá */
+  --page1:#CFDDEE; --page2:#E8EFF7;
+  --shell:#F4F8FC; --side:#0d47a1; --side-ink:#e3f2fd; --side-mut:#90caf9;
+  --card:#FFFFFF; --ink:#10243B; --ink2:#5B6F86; --ink3:#93A5B8; --line:#E4EDF6;
+  --pill:#1565c0; --pill-ink:#FFFFFF; --brandY:#fec636;
+  --good:#2E9E5B; --bad:#C4553F;
+  --sP:#64b5f6; --sC:#1565c0; --sW:#D69A0A; --sH:#2E9E5B; --sU:#C7D4E0;
   --r:14px;
   --shadow:0 20px 52px rgba(20,22,26,.14),0 3px 10px rgba(20,22,26,.06);
   --cshadow:0 1px 2px rgba(20,22,26,.03),0 3px 10px rgba(20,22,26,.04);
@@ -28,7 +29,8 @@ body{background:linear-gradient(160deg,var(--page2),var(--page1));color:var(--in
 .side nav button{display:flex;align-items:center;gap:10px;border:0;background:transparent;color:var(--side-mut);
   font-size:13px;line-height:1;padding:10px 13px;border-radius:999px;cursor:pointer;text-align:left}
 .side nav button .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
-.side nav button.on{background:#FFF;color:#131417}
+.side nav button.on{background:#FFF;color:#0d47a1}
+.side nav button.on .dot{background:var(--brandY)}
 .side nav button:not(.on):hover{color:var(--side-ink)}
 .side .foot{margin-top:auto;font-size:10.5px;color:var(--side-mut);line-height:1.55}
 .side .foot b{color:var(--side-ink);font-weight:600}
@@ -36,7 +38,7 @@ body{background:linear-gradient(160deg,var(--page2),var(--page1));color:var(--in
 .main{padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;overflow:hidden}
 .lbl{font-size:10px;text-transform:uppercase;color:var(--ink3)}
 .bar{background:var(--card);border-radius:999px;box-shadow:var(--cshadow);padding:6px 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:none}
-.tabs{display:flex;gap:2px;background:#EDEEF0;border-radius:999px;padding:3px}
+.tabs{display:flex;gap:2px;background:#EAF2FA;border-radius:999px;padding:3px}
 .tabs button{border:0;background:transparent;color:var(--ink2);font-size:10.5px;line-height:1;text-transform:uppercase;
   padding:8px 13px;border-radius:999px;cursor:pointer;white-space:nowrap}
 .tabs button.on{background:var(--pill);color:var(--pill-ink)}
@@ -78,14 +80,14 @@ svg text{font-family:inherit}
 #tip .row{display:flex;justify-content:space-between;gap:14px;font-variant-numeric:tabular-nums;opacity:.95}
 #tip .row i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:5px}
 /* table card */
-.mini{display:flex;gap:2px;background:#EDEEF0;border-radius:999px;padding:2px;margin-left:auto}
+.mini{display:flex;gap:2px;background:#EAF2FA;border-radius:999px;padding:2px;margin-left:auto}
 .mini button{border:0;background:transparent;color:var(--ink2);font-size:10px;line-height:1;padding:6px 11px;border-radius:999px;cursor:pointer}
 .mini button.on{background:var(--pill);color:var(--pill-ink)}
 .tblwrap{flex:1;min-height:0;overflow:auto;margin-top:4px}
 table{width:100%;border-collapse:collapse;font-size:11.5px}
 th{text-align:left;font-size:9.5px;text-transform:uppercase;color:var(--ink3);padding:6px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
 td{padding:5.5px 8px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
-tbody tr:hover td{background:#FAFAFB}
+tbody tr:hover td{background:#F5F9FD}
 .cls{display:inline-block;font-size:9.5px;padding:2.5px 9px;border-radius:999px;color:#fff}
 .badge{display:inline-block;font-size:9.5px;padding:2.5px 9px;border-radius:999px;background:#F2F3F5;color:var(--ink2)}
 .badge.alert{background:#FBEAE7;color:var(--sH)}
@@ -141,12 +143,12 @@ td b{font-weight:550}
 
     <div class="charts">
       <div class="card" id="cardStack">
-        <div class="hd"><h3>Lead mới theo ngày</h3><span class="sub">theo ngày chat đầu</span>
-          <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sU)"></i>Chưa tag</span></div></div>
+        <div class="hd"><h3>Lead mới theo ngày</h3><span class="sub">theo ngày chat đầu · số trên cột = tổng lead mới</span>
+          <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sU)"></i>Chưa gắn tag</span></div></div>
         <div class="plot"><svg id="cStack"></svg></div>
       </div>
       <div class="card">
-        <div class="hd"><h3>Hot mới</h3><span class="sub">theo giờ gắn tag</span></div>
+        <div class="hd"><h3>Lên Hot theo ngày</h3><span class="sub">ngày GẮN tag Hot — có thể là lead cũ</span></div>
         <div class="plot"><svg id="cHot"></svg></div>
       </div>
       <div class="card">
@@ -213,14 +215,15 @@ function agg(){
   const idx=Object.fromEntries(days.map((d,i)=>[d,i]));
   const prevSet=new Set(days.map(d=>addDays(d,-days.length)));
   const z=()=>days.map(()=>0);
-  const r={days,moi:z(),P:z(),C:z(),W:z(),U:z(),H:z(),chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],newWin:[],cphWin:0,prev:{moi:0,P:0,C:0,W:0,H:0}};
+  const r={days,moi:z(),P:z(),C:z(),W:z(),Hc:z(),U:z(),H:z(),chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],newWin:[],cphWin:0,prev:{moi:0,P:0,C:0,W:0,H:0}};
   CHDEFS.forEach(([k])=>r.chCount[k]=0);
   for(const l of DATA.leads){
     if(!leadPass(l))continue;
     const has=c=>l.cls.includes(c);
     if(l.d&&idx[l.d]!=null){
       const i=idx[l.d];r.moi[i]++;
-      if(has("P"))r.P[i]++;else if(has("W"))r.W[i]++;else if(has("C"))r.C[i]++;else if(!has("H"))r.U[i]++;
+      // mỗi lead rơi vào ĐÚNG 1 nhóm → tổng các nhóm = "Lead mới" (không lệch như bug 9 vs 10)
+      if(has("P"))r.P[i]++;else if(has("W"))r.W[i]++;else if(has("C"))r.C[i]++;else if(has("H"))r.Hc[i]++;else r.U[i]++;
       for(const c of l.ch)if(c in r.chCount)r.chCount[c]++;
       r.newWin.push(l);if(l.cph)r.cphWin++;
       for(const c of l.cls){const k={P:"P",C:"C",W:"W",H:"H"}[c];if(l.bi)r.biCls[k]++;if(l.fa)r.faCls[k]++}
@@ -263,11 +266,11 @@ function topRoundRect(x,y,w,h,r){if(h<=0)return null;r=Math.min(r,w/2,h);
 /* ---- charts ---- */
 function chartStack(a){
   const svg=$("cStack"),{W,H}=dims(svg,600,200),pad={t:14,b:22,l:30,r:8};
-  const tot=a.days.map((_,i)=>a.P[i]+a.C[i]+a.W[i]+a.U[i]);
+  const tot=a.moi; // = P+C+W+Hc+U (mỗi lead đúng 1 nhóm)
   const maxV=Math.max(4,...tot)*1.12;
   const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,4);
   const band=plotW/a.days.length,bw=Math.min(band*.6,42);
-  const series=[["P","--sP"],["C","--sC"],["W","--sW"],["U","--sU"]];
+  const series=[["P","--sP"],["C","--sC"],["W","--sW"],["Hc","--sH"],["U","--sU"]];
   a.days.forEach((d,i)=>{
     let y=pad.t+plotH;const x=pad.l+band*i+(band-bw)/2;
     const segs=series.map(([k])=>a[k][i]);
@@ -283,8 +286,9 @@ function chartStack(a){
       +"<div class='row'><span><i style='background:var(--sP)'></i>Prospect</span><b>"+a.P[i]+"</b></div>"
       +"<div class='row'><span><i style='background:var(--sC)'></i>Cold</span><b>"+a.C[i]+"</b></div>"
       +"<div class='row'><span><i style='background:var(--sW)'></i>Warm</span><b>"+a.W[i]+"</b></div>"
-      +"<div class='row'><span><i style='background:var(--sU)'></i>Chưa tag</span><b>"+a.U[i]+"</b></div>"
-      +"<div class='row'><span>Tổng lead mới</span><b>"+a.moi[i]+"</b></div>",e.clientX,e.clientY));
+      +"<div class='row'><span><i style='background:var(--sH)'></i>Hot</span><b>"+a.Hc[i]+"</b></div>"
+      +"<div class='row'><span><i style='background:var(--sU)'></i>Chưa gắn tag</span><b>"+a.U[i]+"</b></div>"
+      +"<div class='row' style='border-top:1px solid rgba(255,255,255,.25);margin-top:5px;padding-top:5px'><span>Tổng lead mới</span><b>"+a.moi[i]+"</b></div>",e.clientX,e.clientY));
     hit.addEventListener("mouseleave",hideTip);
     g.appendChild(hit);
   });
