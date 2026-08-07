@@ -1,4 +1,7 @@
 <title>MDA · Sales Lead Radar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@600;700;800&display=swap" rel="stylesheet">
 <style>
 :root{
   --page1:#CDCFD2; --page2:#E2E3E5;
@@ -86,6 +89,10 @@ tbody tr:hover td{background:#FAFAFB}
 .cls{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.03em;padding:2px 8px;border-radius:999px;color:#fff}
 .badge{display:inline-block;font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:#F0F1F3;color:var(--ink2)}
 .badge.alert{background:#FBEAE7;color:var(--sH)}
+/* typography: Inter cho nội dung, Montserrat cho display/số/label */
+body,#tip,table{font-family:"Inter","Segoe UI",system-ui,sans-serif}
+.logo,h3,.kpi .v,.tabs button,.mini button,.lbl,.chip{font-family:"Montserrat","Inter","Segoe UI",sans-serif}
+svg text{font-family:"Inter","Segoe UI",sans-serif}
 @media(max-width:1100px){body{overflow:auto}.app{height:auto;grid-template-columns:1fr}.side{flex-direction:row;align-items:center;gap:12px;padding:12px 16px}.side nav{margin:0;flex-direction:row}.side .foot{display:none}.charts{grid-template-columns:1fr;grid-template-rows:none}.charts .card{min-height:240px}#cardStack,#cardTbl{grid-column:auto}.kpis{grid-template-columns:repeat(3,1fr)}}
 </style>
 
@@ -144,8 +151,10 @@ tbody tr:hover td{background:#FAFAFB}
 
     <div id="pgLs" style="display:none;flex:1;min-height:0">
       <div class="card" id="cardTbl" style="height:100%">
-        <div class="hd"><h3 id="tblTitle">🔥 Hot mới trong kỳ</h3><span class="sub" id="tblSub"></span>
-          <div class="mini" id="tblTabs"><button data-v="hot" class="on">Hot mới</button><button data-v="new">Lead mới</button></div></div>
+        <div class="hd"><h3 id="tblTitle">Chi tiết lead trong kỳ</h3><span class="sub" id="tblSub"></span>
+          <div class="mini" id="tblTabs" style="flex-wrap:wrap">
+            <button data-v="all" class="on">Tất cả</button><button data-v="hot">🔥 Hot mới</button><button data-v="P">Prospect</button><button data-v="C">Cold</button><button data-v="W">Warm</button><button data-v="U">Chưa tag</button><button data-v="cph">Chưa phản hồi</button>
+          </div></div>
         <div class="tblwrap"><table id="tbl"></table></div>
       </div>
     </div><!-- /pgLs -->
@@ -154,9 +163,18 @@ tbody tr:hover td{background:#FAFAFB}
 <div id="tip"></div>
 
 <script type="module">
-const DATA = await (await fetch("/api/radar",{cache:"no-store"})).json();
+let DATA;
+try{
+  const __r = await fetch("/api/radar",{cache:"no-store"});
+  if(!__r.ok) throw new Error("API "+__r.status);
+  DATA = await __r.json();
+  if(DATA.error) throw new Error(DATA.error);
+}catch(e){
+  document.body.innerHTML = '<div style="font:14px Inter,Segoe UI,sans-serif;padding:48px;color:#B3261E;background:#fff;min-height:100vh"><b>Không tải được dữ liệu:</b> '+e.message+'<br><br>Bấm F5 thử lại. Nếu vẫn lỗi, chụp màn hình gửi admin.</div>';
+  throw e;
+}
 const CHDEFS=[["Facebook MDA","FB MDA"],["Facebook PTA","FB PTA"],["Zalo 48","Zalo 48"],["Zalo OA MDA","Zalo OA"],["Website MDA","Website"],["Instagram MDA","IG MDA"],["Instagram PTA","IG PTA"]];
-const S={days:14,grp:"all",ch:new Set(),tbl:"hot"};
+const S={days:14,grp:"all",ch:new Set(),tbl:"all"};
 const $=id=>document.getElementById(id);
 const fmtD=d=>d.slice(8,10)+"/"+d.slice(5,7);
 const asofDate=DATA.asOf.slice(0,10);
@@ -340,18 +358,29 @@ function kpis(a){
 }
 function clsChip(c){const [nm,v]=CLSN[c];return "<span class='cls' style='background:var("+v+")'>"+nm+"</span>"}
 function tableCard(a){
-  if(S.tbl==="hot"){
-    $("tblTitle").textContent="🔥 Hot mới trong kỳ";
-    const hot=a.hotLeads;$("tblSub").textContent=hot.length+" người";
-    $("tbl").innerHTML="<tr><th>Tên</th><th>Lên Hot</th><th>Kênh</th><th>SĐT</th></tr>"+
-      (hot.length?hot.map(l=>"<tr><td><b>"+l.n+"</b></td><td>"+(l.ha?fmtD(l.ha):"-")+"</td><td>"+(l.ch.join(", ")||"-")+"</td><td>"+(l.ph||"—")+"</td></tr>").join(""):"<tr><td colspan='4' style='color:var(--ink3)'>Không có</td></tr>");
-  }else{
-    $("tblTitle").textContent="Lead mới trong kỳ";
-    const nw=a.newWin;$("tblSub").textContent=nw.length+" người";
-    $("tbl").innerHTML="<tr><th>Tên</th><th>Ngày</th><th>Phân loại</th><th>Kênh</th><th>SĐT</th><th></th></tr>"+
-      (nw.length?nw.map(l=>{const c=l.cls.filter(x=>x!=="H")[0]||(l.cls.includes("H")?"H":null);
-        return "<tr><td><b>"+l.n+"</b></td><td>"+(l.d?fmtD(l.d):"-")+"</td><td>"+(c?clsChip(c):"<span class='badge'>chưa tag</span>")+"</td><td>"+(l.ch.join(", ")||"-")+"</td><td>"+(l.ph||"—")+"</td><td>"+(l.cph?"<span class='badge alert'>chưa phản hồi</span>":"")+"</td></tr>"}).join(""):"<tr><td colspan='6' style='color:var(--ink3)'>Không có</td></tr>");
+  const T={all:"Tất cả lead mới",hot:"🔥 Hot mới (theo giờ gắn tag)",P:"Prospect",C:"Cold",W:"Warm",U:"Chưa gắn tag",cph:"Chưa phản hồi"};
+  $("tblTitle").textContent=T[S.tbl]+" trong kỳ";
+  const exCls=l=>l.cls.includes("P")?"P":(l.cls.includes("W")?"W":(l.cls.includes("C")?"C":null));
+  let rows;
+  if(S.tbl==="hot")rows=a.hotLeads;
+  else{
+    rows=a.newWin.filter(l=>{
+      if(S.tbl==="all")return true;
+      if(S.tbl==="cph")return l.cph;
+      if(S.tbl==="U")return !l.cls.length;
+      return exCls(l)===S.tbl;
+    });
   }
+  $("tblSub").textContent=rows.length+" người";
+  $("tbl").innerHTML="<tr><th>Tên</th><th>Chat đầu</th><th>Lên Hot</th><th>Phân loại</th><th>Mảng</th><th>Kênh</th><th>SĐT</th><th></th></tr>"+
+    (rows.length?rows.map(l=>{
+      const c=exCls(l)||(l.cls.includes("H")?"H":null);
+      const mang=(l.bi?"BI":"")+(l.bi&&l.fa?" + ":"")+(l.fa?"FA":"")||"—";
+      return "<tr><td><b>"+l.n+"</b></td><td>"+(l.d?fmtD(l.d):"—")+"</td><td>"+(l.ha?fmtD(l.ha):"—")+"</td><td>"
+        +(l.cls.includes("H")?clsChip("H")+" ":"")+(c&&c!=="H"?clsChip(c):(!l.cls.length?"<span class='badge'>chưa tag</span>":""))
+        +"</td><td>"+mang+"</td><td>"+(l.ch.join(", ")||"—")+"</td><td>"+(l.ph||"—")+"</td><td>"
+        +(l.cph?"<span class='badge alert'>chưa phản hồi</span>":"")+"</td></tr>"}).join("")
+    :"<tr><td colspan='8' style='color:var(--ink3)'>Không có lead nào với bộ lọc hiện tại</td></tr>");
 }
 /* ---- wiring ---- */
 let A=null;
