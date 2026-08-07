@@ -8,7 +8,7 @@
  * `?v=` là số phiên bản chống cache — TĂNG mỗi lần sửa public/radar.html,
  * nếu không trình duyệt vẫn giữ bản cũ và tưởng là dashboard hỏng.
  */
-const RADAR_VERSION = 9;
+const RADAR_VERSION = 10;
 
 export const metadata = { title: "Sales Radar · MDA Platform" };
 

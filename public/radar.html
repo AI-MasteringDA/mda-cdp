@@ -44,7 +44,9 @@ body{background:linear-gradient(160deg,var(--page2),var(--page1));color:var(--in
 .side .foot{margin-top:auto;font-size:10.5px;color:var(--side-mut);line-height:1.55}
 .side .foot b{color:var(--side-ink);font-weight:600}
 /* main */
-.main{padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;overflow:hidden}
+/* .side là position:absolute (rời khỏi lưới) nên PHẢI chỉ định .main ở cột 2,
+   không thì grid xếp .main vào cột 1 rộng 58px và cắt sạch nội dung. */
+.main{grid-column:2;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;overflow:hidden}
 .lbl{font-size:10px;text-transform:uppercase;color:var(--ink3)}
 .bar{background:var(--card);border-radius:999px;box-shadow:var(--cshadow);padding:6px 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:none}
 .tabs{display:flex;gap:2px;background:#EAF2FA;border-radius:999px;padding:3px}
@@ -120,7 +122,7 @@ td b{font-weight:550}
 .dlab{font-weight:550}
 .axis{font-weight:450}
 #tip .t{font-weight:550}
-@media(max-width:1100px){body{overflow:auto}.app{height:auto;grid-template-columns:1fr}.side{position:static;width:auto;flex-direction:row;align-items:center;gap:12px;padding:12px 16px}.side:hover{width:auto;box-shadow:none}.side .txt{opacity:1}.side nav{margin:0;flex-direction:row}.side .foot{display:none}.charts{grid-template-columns:1fr;grid-template-rows:none}.charts .card{min-height:240px}#cardStack,#cardTbl{grid-column:auto}.kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:1100px){body{overflow:auto}.app{height:auto;grid-template-columns:1fr}.main{grid-column:auto}.side{position:static;width:auto;flex-direction:row;align-items:center;gap:12px;padding:12px 16px}.side:hover{width:auto;box-shadow:none}.side .txt{opacity:1}.side nav{margin:0;flex-direction:row}.side .foot{display:none}.charts{grid-template-columns:1fr;grid-template-rows:none}.charts .card{min-height:240px}#cardStack,#cardTbl{grid-column:auto}.kpis{grid-template-columns:repeat(3,1fr)}}
 </style>
 
 <div class="app">
