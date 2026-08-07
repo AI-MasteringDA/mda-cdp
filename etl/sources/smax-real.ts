@@ -460,6 +460,9 @@ export async function pullFromSmaxReal() {
       if (/info|infor/.test(n)) return true;
       if (/sf[_\s-]?done|lead sf|opp|unqualified|reactive/.test(n)) return true;
       if (/^(bi|fa)\s*student$/.test(n)) return true;
+      // Spam / Đã Block: KHÔNG phải lead nhưng vẫn hiện để biết vì sao không được
+      // đếm (trước đây bị ẩn → Lark thấy trống → tính nhầm là "chưa gắn tag").
+      if (n === "spam" || /block/.test(n)) return true;
       return false;
     };
     for (const c of allCustomers) {

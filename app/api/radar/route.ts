@@ -25,6 +25,8 @@ const norm = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
 
 function toLead(f: Record<string, Cell>, cutoff: string) {
   const tags = g(f["Tag SMAX"]);
+  // RULE SALES: Spam / Đã Block là rác — KHÔNG phải lead.
+  if (tags.some(t => norm(t) === "spam" || norm(t).includes("block"))) return null;
   // RULE SALES: comment CHƯA gắn tag → không tính là lead. Comment ĐÃ gắn tag → vẫn tính.
   if (!tags.length && g(f["Communication Channels"]).includes(COMMENT_ONLY)) return null;
   const bc = vnDate(f["Báo cáo ngày"]), ha = vnDate(f["Hot Lead lúc"]);

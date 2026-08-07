@@ -61,6 +61,8 @@ export async function runDailyReport() {
     if (d.code !== 0) { console.log(`[daily-report] đọc lỗi ${d.code}`); return; }
     for (const r of (d.data?.items ?? [])) {
       const tags = arr(r.fields?.["Tag SMAX"]);
+      // RULE SALES: Spam / Đã Block là rác — không phải lead.
+      if (tags.some(t => norm(t) === "spam" || norm(t).includes("block"))) continue;
       // RULE SALES: comment CHƯA gắn tag → không đếm. Comment ĐÃ gắn tag → vẫn đếm.
       if (!tags.length && arr(r.fields?.["Communication Channels"]).includes("Comment (chưa inbox)")) continue;
       const bi = tags.some(isBI), fa = tags.some(isFA);

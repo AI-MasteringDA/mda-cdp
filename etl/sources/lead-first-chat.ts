@@ -106,6 +106,7 @@ export async function runLeadFirstChat() {
     if (/info|infor/.test(n)) return true;
     if (/sf[_\s-]?done|lead sf|opp|unqualified|reactive/.test(n)) return true;
     if (/^(bi|fa)\s*student$/.test(n)) return true;
+    if (n === "spam" || /block/.test(n)) return true; // rác — hiện để biết vì sao không đếm
     return false;
   };
   const custKeepByLead = new Map<string, Set<string>>();
