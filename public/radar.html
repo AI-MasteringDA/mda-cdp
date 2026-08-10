@@ -57,6 +57,31 @@ body{background:linear-gradient(160deg,var(--page2),var(--page1));color:var(--in
   padding:7px 12px;border-radius:999px;cursor:pointer}
 .chip.on{border-color:var(--pill);background:var(--pill);color:var(--pill-ink)}
 .range{color:var(--ink2);font-size:11.5px;margin-left:auto;padding-right:8px}
+/* calendar picker */
+.calwrap{position:relative}
+.calbtn{border:1px solid var(--line);background:var(--card);color:var(--ink2);font-size:11px;line-height:1;padding:8px 13px;border-radius:999px;cursor:pointer;display:flex;align-items:center;gap:6px}
+.calbtn.on{border-color:var(--pill);background:var(--pill);color:#fff}
+.cal{position:absolute;top:calc(100% + 8px);left:0;z-index:200;background:var(--card);border-radius:16px;
+  box-shadow:0 18px 50px rgba(20,22,26,.22);padding:16px 18px;display:none}
+.cal.open{display:block}
+.calhd{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.calhd button{border:0;background:transparent;color:var(--ink2);font-size:16px;cursor:pointer;padding:4px 10px;border-radius:8px}
+.calhd button:hover{background:#EAF2FA}
+.calms{display:flex;gap:26px}
+@media(max-width:760px){.calms{flex-direction:column;gap:14px}}
+.calm{width:224px}
+.calm h4{margin:0 0 8px;text-align:center;font-size:12.5px;font-weight:600}
+.calg{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.calg span{text-align:center;font-size:9.5px;color:var(--ink3);padding:3px 0}
+.calg button{border:0;background:transparent;color:var(--ink);font-size:11.5px;height:29px;border-radius:8px;cursor:pointer}
+.calg button:hover:not(:disabled){background:#EAF2FA}
+.calg button:disabled{color:#D3D9E0;cursor:default}
+.calg button.in{background:#E3F2FD;border-radius:0}
+.calg button.sel{background:var(--pill);color:#fff;border-radius:8px}
+.calft{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.calft span{font-size:11.5px;color:var(--ink2)}
+.calft button{border:0;background:var(--pill);color:#fff;font-size:11.5px;padding:8px 16px;border-radius:999px;cursor:pointer}
+.calft button.ghost{background:#EAF2FA;color:var(--ink2)}
 .range b{color:var(--ink)}
 button:focus-visible,.chip:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 /* KPI */
@@ -145,6 +170,15 @@ td b{font-weight:550}
       <div class="tabs" id="segGrp">
         <button data-v="all" class="on">Tất cả</button><button data-v="bi">BI</button><button data-v="fa">FA</button>
       </div>
+      <div class="calwrap">
+        <button class="calbtn" id="calBtn" title="Chọn ngày hoặc khoảng ngày">🗓 Chọn ngày</button>
+        <div class="cal" id="cal">
+          <div class="calhd"><button id="calPrev" aria-label="Tháng trước">‹</button><span class="lbl">Chọn 1 ngày hoặc khoảng ngày</span><button id="calNext" aria-label="Tháng sau">›</button></div>
+          <div class="calms" id="calMs"></div>
+          <div class="calft"><span id="calInfo">Bấm 1 ngày để xem ngày đó · bấm ngày thứ 2 để chọn khoảng</span>
+            <span style="display:flex;gap:8px"><button class="ghost" id="calClear">Bỏ chọn</button><button id="calClose">Xong</button></span></div>
+        </div>
+      </div>
       <span class="lbl" style="padding-left:8px">Kênh</span>
       <span id="chipCh" style="display:flex;gap:5px;flex-wrap:wrap"></span>
       <button class="chip" id="chipClear">✕</button>
@@ -215,14 +249,16 @@ function showFatal(msg){
 addEventListener("error",e=>showFatal(String(e.message||e.error||"lỗi không rõ")));
 addEventListener("unhandledrejection",e=>showFatal(String(e.reason&&e.reason.message||e.reason||"lỗi tải dữ liệu")));
 const CHDEFS=[["Facebook MDA","FB MDA"],["Facebook PTA","FB PTA"],["Zalo 48","Zalo 48"],["Zalo OA MDA","Zalo OA"],["Website MDA","Website"],["Instagram MDA","IG MDA"],["Instagram PTA","IG PTA"]];
-const S={days:14,grp:"all",ch:new Set(),tbl:"all"};
+const S={days:14,grp:"all",ch:new Set(),tbl:"all",from:null,to:null};
 const $=id=>document.getElementById(id);
 const fmtD=d=>d.slice(8,10)+"/"+d.slice(5,7);
 const asofDate=DATA.asOf.slice(0,10);
 $("asof").textContent=DATA.asOf;
 const addDays=(d,n)=>{const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10)};
 const YDAY=addDays(asofDate,-1);
+function rangeDays(a,b){const out=[];let d=a;while(d<=b){out.push(d);d=addDays(d,1)}return out}
 function rangeLbl(){
+  if(S.from&&S.to)return S.from===S.to?("Ngày "+fmtD(S.from)):(fmtD(S.from)+" – "+fmtD(S.to)+" ("+rangeDays(S.from,S.to).length+" ngày)");
   if(S.days===0)return "Hôm nay · "+fmtD(asofDate)+" (chưa trọn ngày)";
   if(S.days===1)return "Hôm qua · "+fmtD(YDAY);
   return fmtD(addDays(asofDate,-(S.days-1)))+" – "+fmtD(asofDate);
@@ -235,7 +271,7 @@ function leadPass(l){
 }
 function daysList(n){const a=[];for(let i=n-1;i>=0;i--)a.push(addDays(asofDate,-i));return a}
 function agg(){
-  const days=S.days===0?[asofDate]:(S.days===1?[YDAY]:daysList(S.days));
+  const days=(S.from&&S.to)?rangeDays(S.from,S.to):(S.days===0?[asofDate]:(S.days===1?[YDAY]:daysList(S.days)));
   const idx=Object.fromEntries(days.map((d,i)=>[d,i]));
   const prevSet=new Set(days.map(d=>addDays(d,-days.length)));
   const z=()=>days.map(()=>0);
@@ -434,7 +470,48 @@ function renderAll(){
   }catch(e){showFatal("khi vẽ biểu đồ — "+e.message);throw e}
 }
 $("segDays").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
-  [...$("segDays").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.days=+b.dataset.v;renderAll()});
+  [...$("segDays").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");
+  S.days=+b.dataset.v;S.from=S.to=null;syncCalBtn();renderAll()});
+/* ---- calendar picker (chọn 1 ngày hoặc khoảng) ---- */
+const MIN_D=addDays(asofDate,-39),MAX_D=asofDate;
+let calM=asofDate.slice(0,7)+"-01", picking=false;
+const monthAdd=(ym,n)=>{const [y,m]=ym.split("-").map(Number);const d=new Date(Date.UTC(y,m-1+n,1));return d.toISOString().slice(0,10)};
+function syncCalBtn(){const on=!!(S.from&&S.to);const b=$("calBtn");b.classList.toggle("on",on);
+  b.textContent=on?("🗓 "+(S.from===S.to?fmtD(S.from):fmtD(S.from)+" – "+fmtD(S.to))):"🗓 Chọn ngày"}
+function drawCal(){
+  const ms=[calM,monthAdd(calM,1)].map(first=>{
+    const [y,m]=first.split("-").map(Number);
+    const firstDow=(new Date(Date.UTC(y,m-1,1)).getUTCDay()+6)%7; // T2 = 0
+    const nDays=new Date(Date.UTC(y,m,0)).getUTCDate();
+    let cells="";
+    for(let i=0;i<firstDow;i++)cells+="<button disabled></button>";
+    for(let d=1;d<=nDays;d++){
+      const ds=`${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      const dis=ds<MIN_D||ds>MAX_D;
+      const sel=ds===S.from||ds===S.to;
+      const inR=S.from&&S.to&&ds>S.from&&ds<S.to;
+      cells+=`<button data-d="${ds}" ${dis?"disabled":""} class="${sel?"sel":(inR?"in":"")}">${d}</button>`;
+    }
+    return `<div class="calm"><h4>Tháng ${m}/${y}</h4><div class="calg">`
+      +["T2","T3","T4","T5","T6","T7","CN"].map(x=>`<span>${x}</span>`).join("")+cells+"</div></div>";
+  }).join("");
+  $("calMs").innerHTML=ms;
+}
+$("calMs").addEventListener("click",e=>{const b=e.target.closest("button[data-d]");if(!b||b.disabled)return;
+  const d=b.dataset.d;
+  if(!picking||!S.from){S.from=S.to=d;picking=true;$("calInfo").textContent="Đã chọn 1 ngày — bấm ngày thứ 2 để chọn khoảng";}
+  else{if(d<S.from){S.to=S.from;S.from=d}else S.to=d;picking=false;$("calInfo").textContent="Đã chọn khoảng ngày";}
+  [...$("segDays").children].forEach(x=>x.classList.remove("on"));
+  drawCal();syncCalBtn();renderAll();});
+$("calBtn").addEventListener("click",e=>{e.stopPropagation();const c=$("cal");const open=c.classList.toggle("open");
+  if(open){calM=monthAdd(asofDate.slice(0,7)+"-01",-1);picking=false;drawCal()}});
+$("calPrev").addEventListener("click",()=>{calM=monthAdd(calM,-1);drawCal()});
+$("calNext").addEventListener("click",()=>{calM=monthAdd(calM,1);drawCal()});
+$("calClose").addEventListener("click",()=>$("cal").classList.remove("open"));
+$("calClear").addEventListener("click",()=>{S.from=S.to=null;picking=false;
+  [...$("segDays").children].forEach((x,i)=>x.classList.toggle("on",x.dataset.v==="14"));S.days=14;
+  drawCal();syncCalBtn();renderAll();});
+document.addEventListener("click",e=>{if(!e.target.closest(".calwrap"))$("cal").classList.remove("open")});
 $("segGrp").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
   [...$("segGrp").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.grp=b.dataset.v;renderAll()});
 $("navPg").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
