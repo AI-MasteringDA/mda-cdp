@@ -471,10 +471,11 @@ function renderAll(){
 }
 $("segDays").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
   [...$("segDays").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");
-  S.days=+b.dataset.v;S.from=S.to=null;syncCalBtn();renderAll()});
+  S.days=+b.dataset.v;S.from=S.to=null;S.pick=[];syncCalBtn();renderAll()});
 /* ---- calendar picker (chọn 1 ngày hoặc khoảng) ---- */
 const MIN_D=addDays(asofDate,-39),MAX_D=asofDate;
-let calM=asofDate.slice(0,7)+"-01", picking=false;
+let calM=asofDate.slice(0,7)+"-01";
+S.pick=[]; // [] chưa chọn · [d] đã chọn ngày đầu, chờ ngày thứ 2 · [a,b] khoảng hoàn chỉnh
 const monthAdd=(ym,n)=>{const [y,m]=ym.split("-").map(Number);const d=new Date(Date.UTC(y,m-1+n,1));return d.toISOString().slice(0,10)};
 function syncCalBtn(){const on=!!(S.from&&S.to);const b=$("calBtn");b.classList.toggle("on",on);
   b.textContent=on?("🗓 "+(S.from===S.to?fmtD(S.from):fmtD(S.from)+" – "+fmtD(S.to))):"🗓 Chọn ngày"}
@@ -499,16 +500,22 @@ function drawCal(){
 }
 $("calMs").addEventListener("click",e=>{const b=e.target.closest("button[data-d]");if(!b||b.disabled)return;
   const d=b.dataset.d;
-  if(!picking||!S.from){S.from=S.to=d;picking=true;$("calInfo").textContent="Đã chọn 1 ngày — bấm ngày thứ 2 để chọn khoảng";}
-  else{if(d<S.from){S.to=S.from;S.from=d}else S.to=d;picking=false;$("calInfo").textContent="Đã chọn khoảng ngày";}
+  if(S.pick.length===1){                       // đã có ngày đầu → ngày này là ngày cuối
+    S.pick=[S.pick[0],d].sort();
+    $("calInfo").textContent="Đã chọn khoảng — bấm 1 ngày bất kỳ để bắt đầu chọn lại";
+  }else{                                        // chưa chọn, hoặc đang có khoảng → bắt đầu lại
+    S.pick=[d];
+    $("calInfo").textContent="Đã chọn ngày đầu — BẤM TIẾP 1 NGÀY để tạo khoảng";
+  }
+  S.from=S.pick[0];S.to=S.pick[S.pick.length-1];
   [...$("segDays").children].forEach(x=>x.classList.remove("on"));
   drawCal();syncCalBtn();renderAll();});
 $("calBtn").addEventListener("click",e=>{e.stopPropagation();const c=$("cal");const open=c.classList.toggle("open");
-  if(open){calM=monthAdd(asofDate.slice(0,7)+"-01",-1);picking=false;drawCal()}});
+  if(open){calM=monthAdd(asofDate.slice(0,7)+"-01",-1);drawCal()}});
 $("calPrev").addEventListener("click",()=>{calM=monthAdd(calM,-1);drawCal()});
 $("calNext").addEventListener("click",()=>{calM=monthAdd(calM,1);drawCal()});
 $("calClose").addEventListener("click",()=>$("cal").classList.remove("open"));
-$("calClear").addEventListener("click",()=>{S.from=S.to=null;picking=false;
+$("calClear").addEventListener("click",()=>{S.from=S.to=null;S.pick=[];$("calInfo").textContent="Bấm 1 ngày để xem ngày đó · bấm ngày thứ 2 để chọn khoảng";
   [...$("segDays").children].forEach((x,i)=>x.classList.toggle("on",x.dataset.v==="14"));S.days=14;
   drawCal();syncCalBtn();renderAll();});
 document.addEventListener("click",e=>{if(!e.target.closest(".calwrap"))$("cal").classList.remove("open")});
