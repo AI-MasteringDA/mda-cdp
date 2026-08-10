@@ -1,16 +1,16 @@
-﻿/**
- * /radar â€” Sales Lead Radar: dashboard lead SMAX (KPI theo ká»³, trend, kÃªnh,
- * BI/FA, danh sÃ¡ch chi tiáº¿t). Dashboard lÃ  1 trang self-contained trong
- * public/radar.html (SVG thuáº§n, khÃ´ng thÆ° viá»‡n) â€” nhÃºng iframe Ä‘á»ƒ giá»¯ nguyÃªn
- * layout fit-mÃ n-hÃ¬nh mÃ  váº«n náº±m trong app (sidebar + auth cá»§a CDP).
- * Data: /api/radar (Ä‘á»c Lark SMAX_Database, filter 40 ngÃ y).
+/**
+ * /radar — Sales Lead Radar: dashboard lead SMAX (KPI theo kỳ, trend, kênh,
+ * BI/FA, danh sách chi tiết). Dashboard là 1 trang self-contained trong
+ * public/radar.html (SVG thuần, không thư viện) — nhúng iframe để giữ nguyên
+ * layout fit-màn-hình mà vẫn nằm trong app (sidebar + auth của CDP).
+ * Data: /api/radar (đọc Lark SMAX_Database, filter 40 ngày).
  *
- * `?v=` lÃ  sá»‘ phiÃªn báº£n chá»‘ng cache â€” TÄ‚NG má»—i láº§n sá»­a public/radar.html,
- * náº¿u khÃ´ng trÃ¬nh duyá»‡t váº«n giá»¯ báº£n cÅ© vÃ  tÆ°á»Ÿng lÃ  dashboard há»ng.
+ * `?v=` là số phiên bản chống cache — TĂNG mỗi lần sửa public/radar.html,
+ * nếu không trình duyệt vẫn giữ bản cũ và tưởng là dashboard hỏng.
  */
 const RADAR_VERSION = 11;
 
-export const metadata = { title: "Sales Radar Â· MDA Platform" };
+export const metadata = { title: "Sales Radar · MDA Platform" };
 
 export default function RadarPage() {
   return (
