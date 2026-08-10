@@ -112,7 +112,7 @@ export async function GET() {
       const d = await fetch(url.toString(), {
         method: "POST", headers: H, cache: "no-store",
         body: JSON.stringify({
-          field_names: ["Time", "Event", "Lead Name", "Tag SMAX", "Phone", "Email"],
+          field_names: ["Time", "Event", "Lead Name", "Tên SF", "Tag SMAX", "Phone", "Email"],
           filter: { conjunction: "and", conditions: [
             { field_name: "Event", operator: "is", value: ["lead_created"] },
             { field_name: "Time", operator: "isGreater", value: ["ExactDate", String(cutoffMs)] },
@@ -124,8 +124,12 @@ export async function GET() {
         const f = r.fields ?? {};
         if (g(f["Tag SMAX"]).length) continue;           // đã có trên SMAX → SMAX đếm rồi
         const ha = vnDate(f["Time"]); if (!ha || ha < cutoff) continue;
+        // Tên SF thường khác tên SMAX (SMAX "K40-Bảo Lee" ↔ SF "Lý Hồng Bảo") →
+        // hiện tên SF làm chính để tra trên Salesforce được ngay, kèm tên SMAX.
+        const sfName = gs(f["Tên SF"]).trim(), smaxName = gs(f["Lead Name"]).trim();
         leads.push({
-          n: gs(f["Lead Name"]) || "(?)", d: null, ha, cls: ["H"],
+          n: sfName || smaxName || "(?)", n2: sfName && smaxName && sfName !== smaxName ? smaxName : "",
+          d: null, ha, cls: ["H"],
           bi: false, fa: false, ch: ["Salesforce"], ph: gs(f["Phone"]), cph: false, sf: true,
         });
       }

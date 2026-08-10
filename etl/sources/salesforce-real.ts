@@ -344,6 +344,7 @@ export async function pullFromSalesforceReal() {
         occurred_at: origCreated || c.CreatedDate,
         payload: {
           sf_contact_id: c.Id,
+          sf_name: sanitize(c.Name || ""),   // tên BÊN SF (khác tên SMAX) → tra cứu nhanh
           lead_source: sanitize(lsource),
           owner: sanitize(owner),
           real: true,
@@ -365,6 +366,7 @@ export async function pullFromSalesforceReal() {
         occurred_at: l.CreatedDate,
         payload: {
           sf_lead_id: l.Id,
+          sf_name: sanitize(l.Name || ""),   // tên BÊN SF (khác tên SMAX) → tra cứu nhanh
           lead_source: sanitize(lsource),
           owner: sanitize(owner),
           status: sanitize(l.Status),

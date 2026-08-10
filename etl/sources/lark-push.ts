@@ -490,6 +490,12 @@ async function pushChannel(token: string, source: string, tableName: string) {
     tableId = table.table_id;
   }
 
+  // Cột "Tên SF" phải đảm bảo TRƯỚC các nhánh thoát sớm bên dưới, không thì
+  // lần chạy nào không có dòng mới sẽ bỏ qua luôn việc tạo cột.
+  if (source === "salesforce") {
+    await ensureFieldsExist(token, tableId, [{ field_name: "Tên SF", type: 1 }]);
+  }
+
   // Determine cutoff for pulling records
   const daysForThis = daysForSource(source);
   const daysCutoffMs = Date.now() - daysForThis * 86400_000;
@@ -553,6 +559,9 @@ async function pushChannel(token: string, source: string, tableName: string) {
       "Tag SMAX": tags.length > 0 ? tags : null,  // MultiSelect: array or null
       "Title": (r.title || "").slice(0, 500),
       "Detail": (r.detail || "").slice(0, 500),
+      // Tên bên SF thường KHÁC tên SMAX (VD SMAX "K40-Bảo Lee" ↔ SF "Lý Hồng Bảo")
+      // → có cột riêng để tra cứu chéo giữa 2 hệ thống.
+      ...(source === "salesforce" ? { "Tên SF": String((r.payload as { sf_name?: string } | null)?.sf_name || "") } : {}),
     };
   });
 
