@@ -33,7 +33,7 @@ const CHANNELS = ["Facebook MDA", "Facebook PTA", "Zalo 48", "Zalo OA MDA", "Web
 const NUM_COLS = [
   "Lead mới", "Prospect", "Cold", "Warm", "Hot",
   "Prospect (BI)", "Cold (BI)", "Warm (BI)", "Hot (BI)",
-  "Prospect (FA)", "Cold (FA)", "Warm (FA)", "Hot (FA)",
+  "Prospect (FA)", "Cold (FA)", "Warm (FA)", "Hot (FA)", "Hot (SF)",
   ...CHANNELS,
 ];
 
@@ -86,7 +86,32 @@ export async function runDailyReport() {
     }
     if (!d.data?.has_more) break; pt = d.data.page_token;
   }
-  console.log(`[daily-report] đếm ${byDay.size} ngày (cửa sổ ${DAYS} ngày)`);
+  // HOT từ SALESFORCE (quy tắc Sales 2026-08-10): cộng thêm lead SF chỉ-có-trên-SF
+  // (cột "Tag SMAX" TRỐNG ⇒ SMAX chưa đếm). Quy ngày theo Time của lead_created
+  // = CreatedDate của Lead gốc.
+  const sfTid = tR.data?.items?.find((t: { name: string; table_id: string }) => t.name === "Salesforce_Database")?.table_id;
+  let sfHot = 0;
+  if (sfTid) {
+    let spt: string | undefined;
+    while (true) {
+      const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${sfTid}/records`); url.searchParams.set("page_size", "500");
+      url.searchParams.set("field_names", JSON.stringify(["Time", "Event", "Tag SMAX"]));
+      if (spt) url.searchParams.set("page_token", spt);
+      const d = await fetch(url.toString(), { headers: H }).then(r => r.json());
+      if (d.code !== 0) { console.log(`[daily-report] đọc SF lỗi ${d.code} — bỏ qua phần Hot SF`); break; }
+      for (const r of (d.data?.items ?? [])) {
+        const f = r.fields ?? {};
+        if (String(f["Event"] ?? "") !== "lead_created") continue;
+        if (arr(f["Tag SMAX"]).length) continue;          // SMAX đã đếm rồi
+        const t = f["Time"]; if (typeof t !== "number" || t < cutoffMs) continue;
+        const row = byDay.get(vnDate(t)) ?? Object.fromEntries(NUM_COLS.map(c => [c, 0]));
+        row["Hot"]++; row["Hot (SF)"]++; sfHot++;
+        byDay.set(vnDate(t), row);
+      }
+      if (!d.data?.has_more) break; spt = d.data.page_token;
+    }
+  }
+  console.log(`[daily-report] đếm ${byDay.size} ngày (cửa sổ ${DAYS} ngày) · Hot cộng thêm từ SF: ${sfHot}`);
 
   // 2) bảng Daily_Report — tạo nếu chưa có
   let dst = tR.data.items.find((t: { name: string; table_id: string }) => t.name === TABLE)?.table_id;
@@ -95,6 +120,24 @@ export async function runDailyReport() {
     if (cr.code !== 0) { console.log(`[daily-report] tạo bảng lỗi: ${cr.code} ${cr.msg}`); return; }
     dst = cr.data.table_id;
     console.log(`[daily-report] đã tạo bảng "${TABLE}"`);
+  }
+
+  // 2b) đảm bảo đủ cột (bảng đã tạo từ trước có thể thiếu cột mới thêm)
+  {
+    const have = new Set<string>(); let fpt: string | undefined;
+    while (true) {
+      const fu = new URL(`${U}/bitable/v1/apps/${APP}/tables/${dst}/fields`); fu.searchParams.set("page_size", "100");
+      if (fpt) fu.searchParams.set("page_token", fpt);
+      const fr = await fetch(fu.toString(), { headers: H }).then(r => r.json());
+      if (fr.code !== 0) break;
+      for (const f of (fr.data?.items ?? [])) have.add(f.field_name);
+      if (!fr.data?.has_more) break; fpt = fr.data.page_token;
+    }
+    for (const c of NUM_COLS) {
+      if (have.has(c)) continue;
+      const cr = await fetch(`${U}/bitable/v1/apps/${APP}/tables/${dst}/fields`, { method: "POST", headers: H, body: JSON.stringify({ field_name: c, type: 2, property: { formatter: "0" } }) }).then(r => r.json());
+      console.log(`[daily-report] tạo cột "${c}": ${cr.code === 0 ? "OK" : cr.code + " " + cr.msg}`);
+    }
   }
 
   // 3) upsert theo Báo cáo ngày

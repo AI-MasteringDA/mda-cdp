@@ -196,7 +196,7 @@ td b{font-weight:550}
         <div class="plot"><svg id="cStack"></svg></div>
       </div>
       <div class="card">
-        <div class="hd"><h3>Lên Hot theo ngày</h3><span class="sub">ngày GẮN tag Hot — có thể là lead cũ</span></div>
+        <div class="hd"><h3>Lên Hot theo ngày</h3><span class="sub">SMAX (giờ gắn tag) + Salesforce (lead chưa có trên SMAX)</span></div>
         <div class="plot"><svg id="cHot"></svg></div>
       </div>
       <div class="card">
@@ -453,11 +453,11 @@ function tableCard(a){
     });
   }
   $("tblSub").textContent=rows.length+" người";
-  $("tbl").innerHTML="<tr><th>Tên</th><th>Chat đầu</th><th>Lên Hot</th><th>Phân loại</th><th>Mảng</th><th>Kênh</th><th>SĐT</th><th></th></tr>"+
+  $("tbl").innerHTML="<tr><th>Tên</th><th>Nguồn</th><th>Chat đầu</th><th>Lên Hot</th><th>Phân loại</th><th>Mảng</th><th>Kênh</th><th>SĐT</th><th></th></tr>"+
     (rows.length?rows.map(l=>{
       const c=exCls(l)||(l.cls.includes("H")?"H":null);
       const mang=(l.bi?"BI":"")+(l.bi&&l.fa?" + ":"")+(l.fa?"FA":"")||"—";
-      return "<tr><td><b>"+l.n+"</b></td><td>"+(l.d?fmtD(l.d):"—")+"</td><td>"+(l.ha?fmtD(l.ha):"—")+"</td><td>"
+      return "<tr><td><b>"+l.n+"</b></td><td>"+(l.sf?"<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>":"<span class='badge'>SMAX</span>")+"</td><td>"+(l.d?fmtD(l.d):"—")+"</td><td>"+(l.ha?fmtD(l.ha):"—")+"</td><td>"
         +(l.cls.includes("H")?clsChip("H")+" ":"")+(c&&c!=="H"?clsChip(c):(!l.cls.length?"<span class='badge'>chưa tag</span>":""))
         +"</td><td>"+mang+"</td><td>"+(l.ch.join(", ")||"—")+"</td><td>"+(l.ph||"—")+"</td><td>"
         +(l.cph?"<span class='badge alert'>chưa phản hồi</span>":"")+"</td></tr>"}).join("")

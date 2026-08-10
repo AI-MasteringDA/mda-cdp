@@ -9,7 +9,7 @@
  * nếu không trình duyệt vẫn giữ bản cũ và tưởng là dashboard hỏng.
  * LƯU Ý: đừng sửa file này bằng PowerShell Set-Content (làm hỏng font tiếng Việt).
  */
-const RADAR_VERSION = 13;
+const RADAR_VERSION = 14;
 
 export const metadata = { title: "Sales Radar · MDA Platform" };
 

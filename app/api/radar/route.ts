@@ -99,6 +99,41 @@ export async function GET() {
     }
   }
 
+  // ── HOT từ SALESFORCE (quy tắc Sales 2026-08-10) ────────────────────────────
+  // Hot ngày X = Hot của SMAX + lead SF chỉ-có-trên-SF. Dòng SF có "Tag SMAX"
+  // CÓ dữ liệu ⇒ SMAX đã đếm rồi ⇒ bỏ qua (chống đếm đôi). Quy ngày theo Time
+  // của lead_created = CreatedDate của Lead gốc (đã sửa 2026-08-10).
+  const sfTable = tR.data?.items?.find((t: { name: string; table_id: string }) => t.name === "Salesforce_Database")?.table_id;
+  if (sfTable) {
+    let spt: string | undefined; let pages = 0;
+    while (pages < 30) {
+      const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${sfTable}/records/search`);
+      url.searchParams.set("page_size", "500"); if (spt) url.searchParams.set("page_token", spt);
+      const d = await fetch(url.toString(), {
+        method: "POST", headers: H, cache: "no-store",
+        body: JSON.stringify({
+          field_names: ["Time", "Event", "Lead Name", "Tag SMAX", "Phone", "Email"],
+          filter: { conjunction: "and", conditions: [
+            { field_name: "Event", operator: "is", value: ["lead_created"] },
+            { field_name: "Time", operator: "isGreater", value: ["ExactDate", String(cutoffMs)] },
+          ] },
+        }),
+      }).then(r => r.json()).catch(() => ({ code: -1 }));
+      if (d.code !== 0) break;
+      for (const r of (d.data?.items ?? []) as LarkRecord[]) {
+        const f = r.fields ?? {};
+        if (g(f["Tag SMAX"]).length) continue;           // đã có trên SMAX → SMAX đếm rồi
+        const ha = vnDate(f["Time"]); if (!ha || ha < cutoff) continue;
+        leads.push({
+          n: gs(f["Lead Name"]) || "(?)", d: null, ha, cls: ["H"],
+          bi: false, fa: false, ch: ["Salesforce"], ph: gs(f["Phone"]), cph: false, sf: true,
+        });
+      }
+      pages++;
+      if (!d.data?.has_more) break; spt = d.data.page_token;
+    }
+  }
+
   const asOf = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 16).replace("T", " ");
   return NextResponse.json({ asOf, leads }, { headers: { "Cache-Control": "private, max-age=120" } });
 }
