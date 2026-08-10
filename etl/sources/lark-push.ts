@@ -174,6 +174,12 @@ async function createTable(token: string, name: string, fields: { field_name: st
   return data.data.table_id;
 }
 
+/** Ô text của Lark có thể trả về mảng rich-text [{text}] — gộp lại thành chuỗi. */
+function txtOf(v: unknown): string {
+  if (Array.isArray(v)) return (v as { text?: string }[]).map(x => x?.text ?? "").join("");
+  return v == null ? "" : String(v);
+}
+
 async function listFields(token: string, tableId: string) {
   // PHÂN TRANG bắt buộc: Lark mặc định chỉ trả ~20 field/lần. Nếu không lặp hết,
   // ensureFieldsExist tưởng field chưa có → tạo lại → cột trùng "(1)". Lỗi đọc
@@ -490,13 +496,12 @@ async function pushChannel(token: string, source: string, tableName: string) {
   let cutoffMs = daysCutoffMs;
   let mode: "full" | "incremental" = "full";
 
-  if (!isNewTable && !fullRefresh) {
-    const maxTimeInLark = await getMaxDateTimeField(token, tableId, "Time");
-    if (maxTimeInLark && maxTimeInLark > daysCutoffMs) {
-      cutoffMs = maxTimeInLark;  // only newer than Lark's most recent
-      mode = "incremental";
-    }
-  }
+  // KHÔNG dùng "mốc nước cao" (max Time trên Lark) làm cutoff nữa: nguồn trả sự
+  // kiện KHÔNG theo thứ tự thời gian (SF gửi email lúc 07:00 nhưng sync về lúc
+  // 9h; conversion dùng CloseDate lùi ngày) → mọi dòng cũ hơn mốc bị bỏ VĨNH VIỄN.
+  // Đo 2026-08-10 ngày 06/08: email_sent 4/36, conversion 0/2 (mất sạch deal thắng).
+  // Thay bằng: luôn kéo cửa sổ N ngày rồi KHỬ TRÙNG LẶP với dòng đã có trên Lark.
+  void getMaxDateTimeField;
 
   const cutoff = new Date(cutoffMs).toISOString();
   console.log(`   ↳ Mode: ${mode} · cutoff: ${cutoff}`);
@@ -531,12 +536,8 @@ async function pushChannel(token: string, source: string, tableName: string) {
     return;
   }
 
-  if (maxRecords) {
-    await pruneTableToFit(token, tableId, rows.length, maxRecords);
-  }
-
   // Transform to Lark records — DateTime fields as Unix milliseconds
-  const records = rows.map((r) => {
+  const allRecords = rows.map((r) => {
     const l = r.dim_lead || {};
     const tags: string[] = Array.isArray(l.smax_tags) ? l.smax_tags : [];
     const timeMs = r.occurred_at ? new Date(r.occurred_at).getTime() : null;
@@ -555,13 +556,48 @@ async function pushChannel(token: string, source: string, tableName: string) {
     };
   });
 
-  if (mode === "full") {
-    // Full refresh: delete all → update field types (only works when empty) → insert
-    await deleteAllRecords(token, tableId);
+  // KHỬ TRÙNG LẶP với dòng đã có trên Lark (khóa = Time|Event|Lead Name|Title).
+  // Nhờ vậy có thể kéo cả cửa sổ N ngày mà không tạo bản sao, và sự kiện đến
+  // MUỘN nhưng có giờ CŨ vẫn được chèn (thứ mà "mốc nước cao" bỏ sót).
+  const keyOf = (t: unknown, ev: unknown, nm: unknown, ti: unknown) =>
+    `${typeof t === "number" ? t : 0}|${String(ev ?? "")}|${String(nm ?? "")}|${String(ti ?? "").slice(0, 60)}`;
+  const existingKeys = new Set<string>();
+  if (!isNewTable && !fullRefresh) {
+    let pageToken: string | undefined;
+    while (true) {
+      const url = new URL(`${BASE_URL}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/records`);
+      url.searchParams.set("page_size", "500");
+      url.searchParams.set("field_names", JSON.stringify(["Time", "Event", "Lead Name", "Title"]));
+      if (pageToken) url.searchParams.set("page_token", pageToken);
+      const data = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
+      if (data.code !== 0) { console.warn(`   ⚠️ đọc Lark để khử trùng lỗi ${data.code} — bỏ qua bước này`); existingKeys.clear(); break; }
+      for (const r of (data.data?.items || [])) {
+        const f = r.fields || {};
+        existingKeys.add(keyOf(f["Time"], txtOf(f["Event"]), txtOf(f["Lead Name"]), txtOf(f["Title"])));
+      }
+      if (!data.data?.has_more) break;
+      pageToken = data.data.page_token;
+    }
+  }
+  const records = existingKeys.size
+    ? allRecords.filter(rec => !existingKeys.has(keyOf(rec["Time"], rec["Event"], rec["Lead Name"], rec["Title"])))
+    : allRecords;
+  console.log(`   ↳ Đã có trên Lark: ${existingKeys.size} · cần chèn mới: ${records.length}/${allRecords.length}`);
+  if (records.length === 0) { console.log(`   ✓ Không có dòng mới. Bỏ qua.`); return; }
+
+  if (maxRecords) {
+    await pruneTableToFit(token, tableId, records.length, maxRecords);
+  }
+
+  // CHỈ xoá-sạch-rồi-chèn khi ÉP full refresh hoặc bảng mới. Trước đây `mode`
+  // rơi về "full" mặc định → mỗi lần chạy XOÁ TOÀN BỘ lịch sử rồi chỉ chèn lại
+  // cửa sổ N ngày (mất data cũ). Giờ đã khử trùng lặp nên luôn chèn-thêm.
+  if (fullRefresh || isNewTable) {
+    if (fullRefresh) await deleteAllRecords(token, tableId);
     await ensureFieldsExist(token, tableId, STANDARD_FIELDS);
   }
   const inserted = await insertRecords(token, tableId, records);
-  console.log(`   ✅ Inserted ${inserted} records to Lark (${mode})`);
+  console.log(`   ✅ Inserted ${inserted} records to Lark (${fullRefresh ? "full refresh" : "append + dedup"})`);
 }
 
 /**

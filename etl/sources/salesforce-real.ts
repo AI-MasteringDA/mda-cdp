@@ -300,19 +300,48 @@ export async function pullFromSalesforceReal() {
       payload: Record<string, unknown>;
     }> = [];
 
+    // NGÀY TẠO ĐÚNG cho Contact đã convert từ Lead: query Lead gốc (bị loại khỏi
+    // vòng pull vì IsConverted=false) để lấy CreatedDate THẬT. Không có bước này
+    // thì lead convert bị quy về NGÀY CONVERT — sai ngày báo cáo (ca Ngô Hải Nam
+    // 2026-08-10: Lead tạo 05/08 11:09 nhưng Contact tạo 06/08 12:18 → đếm nhầm
+    // sang 06/08). Xem [[project_sf_fix_todo]].
+    const convertedLeadCreated = new Map<string, string>(); // contactId → Lead.CreatedDate
+    {
+      const cids = contacts.map((c) => c.Id).filter(Boolean);
+      for (let i = 0; i < cids.length; i += 200) {
+        const inList = cids.slice(i, i + 200).map((x) => `'${x}'`).join(",");
+        if (!inList) continue;
+        try {
+          const rows = await sfQuery<{ ConvertedContactId: string; CreatedDate: string }>(
+            `SELECT Id, ConvertedContactId, CreatedDate FROM Lead WHERE IsConverted = true AND ConvertedContactId IN (${inList})`
+          );
+          for (const r of rows) {
+            if (!r.ConvertedContactId) continue;
+            const prev = convertedLeadCreated.get(r.ConvertedContactId);
+            // giữ mốc SỚM nhất nếu 1 contact đến từ nhiều lead
+            if (!prev || r.CreatedDate < prev) convertedLeadCreated.set(r.ConvertedContactId, r.CreatedDate);
+          }
+        } catch (e) {
+          console.warn(`   ⚠️ query converted leads lỗi: ${(e as Error).message.slice(0, 100)}`);
+        }
+      }
+      console.log(`   ↳ ${convertedLeadCreated.size}/${contacts.length} contact có Lead gốc → dùng ngày tạo của Lead`);
+    }
+
     for (const c of contacts) {
       const leadId = whoIdToLeadId.get(c.Id);
       if (!leadId || hasCreated.has(leadId)) continue;
       hasCreated.add(leadId);
       const owner = c.Owner?.Name || "Unassigned";
       const lsource = c.LeadSource || "Salesforce Contact";
+      const origCreated = convertedLeadCreated.get(c.Id);
       leadCreatedTouchpoints.push({
         lead_id: leadId,
         source: "salesforce",
         event_type: "lead_created",
-        title: `🚪 Tạo Contact trong Salesforce`,
-        detail: `Source: ${sanitize(lsource)} · Owner: ${sanitize(owner)}`,
-        occurred_at: c.CreatedDate,
+        title: `🚪 Tạo ${origCreated ? "Lead" : "Contact"} trong Salesforce`,
+        detail: `Source: ${sanitize(lsource)} · Owner: ${sanitize(owner)}${origCreated ? " · (lead đã convert)" : ""}`,
+        occurred_at: origCreated || c.CreatedDate,
         payload: {
           sf_contact_id: c.Id,
           lead_source: sanitize(lsource),
