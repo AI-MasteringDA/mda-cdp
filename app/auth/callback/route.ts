@@ -31,10 +31,24 @@ export async function GET(request: NextRequest) {
     }
   );
 
-  const { error } = await supabase.auth.exchangeCodeForSession(code);
+  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
   if (error) {
     return NextResponse.redirect(
       `${origin}/login?error=${encodeURIComponent(error.message)}`
+    );
+  }
+
+  // CHẶN TÊN MIỀN LẠ: với Google OAuth, bất kỳ ai có tài khoản Google đều bấm
+  // đăng nhập được — chỉ cho phép email công ty (thêm miền khác qua
+  // ALLOWED_EMAIL_DOMAINS, ngăn cách bằng dấu phẩy).
+  const allowed = (process.env.ALLOWED_EMAIL_DOMAINS || "mastering-da.com")
+    .split(",").map((d) => d.trim().toLowerCase()).filter(Boolean);
+  const email = (data?.user?.email || "").toLowerCase();
+  const domain = email.split("@")[1] || "";
+  if (allowed.length && !allowed.includes(domain)) {
+    await supabase.auth.signOut();
+    return NextResponse.redirect(
+      `${origin}/login?error=${encodeURIComponent(`Email ${email} không thuộc công ty — vui lòng dùng email @${allowed[0]}`)}`
     );
   }
 
