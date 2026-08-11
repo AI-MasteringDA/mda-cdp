@@ -179,15 +179,18 @@ export async function runLeadFirstChat() {
     // communication channel của customer này (lead gộp → union nhiều channel)
     const ch = pageLabel.get(c.page_pid) || (c.platform ? channelLabel(c.platform, "") : "");
     if (ch) { const s = chans.get(lead) || new Set<string>(); s.add(ch); chans.set(lead, s); }
-    // NGÀY TIẾP XÚC ĐẦU = mốc SỚM NHẤT giữa interaction.first và created_at.
-    // interaction.first là tin đầu CỦA KHÁCH, còn created_at là lúc SMAX lập hồ
-    // sơ — thường là lúc MÌNH nhắn trước. Trước đây viết `first ?? created_at`,
-    // tức chỉ dùng created_at khi interaction.first TRỐNG, nên ca "mình nhắn
-    // trước, khách trả lời hôm sau" bị quy sang ngày hôm sau (Tạ Khánh Chi: hồ
-    // sơ lập 10/08 21:16, khách trả lời 11/08 10:02 → phải là 10/08).
-    // Đúng nguyên tắc đã chốt: "mình chat trước hay khách chat trước đều tính".
-    // Ảnh hưởng 3.576/22.278 khách có created_at sớm hơn interaction.first.
-    const first = [c.interaction?.first, c.created_at].filter(Boolean).sort()[0];
+    // NGÀY TIẾP XÚC ĐẦU = interaction.first (tin INBOX đầu của khách), chỉ rơi
+    // về created_at khi KHÔNG có tương tác nào (mình nhắn trước / khách mới chỉ
+    // comment).
+    //
+    // ĐỪNG đổi thành "lấy mốc sớm nhất giữa hai giá trị" — đã thử 2026-08-11 và
+    // SAI: với khách đến từ comment quảng cáo, created_at là lúc COMMENT chứ
+    // không phải lúc inbox. Ca Tạ Khánh Chi: SMAX ghi source="comment",
+    // created_at 10/08 21:16 (comment dưới bài) nhưng interaction.first
+    // 11/08 10:02 (tin Messenger đầu). Quy tắc Sales: COMMENT KHÔNG TÍNH LÀ
+    // LEAD → chị phải thuộc ngày 11/08. Lấy mốc sớm nhất sẽ quy nhầm về ngày
+    // comment. Có 3.576/22.278 khách rơi vào tình huống created_at sớm hơn.
+    const first = c.interaction?.first ?? c.created_at;
     if (first) { const ms = vnMidnightMs(first); const prev = firstMs.get(lead); if (prev == null || ms < prev) firstMs.set(lead, ms); }
     // tag-time ("…lúc") — giữ mốc MỚI nhất nếu 1 tag gắn nhiều lần
     for (const tg of (c.tags || [])) {
