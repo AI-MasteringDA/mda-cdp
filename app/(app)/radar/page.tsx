@@ -1,4 +1,4 @@
-/**
+﻿/**
  * /radar — Sales Lead Radar: dashboard lead SMAX (KPI theo kỳ, trend, kênh,
  * BI/FA, danh sách chi tiết). Dashboard là 1 trang self-contained trong
  * public/radar.html (SVG thuần, không thư viện) — nhúng iframe để giữ nguyên
@@ -9,7 +9,7 @@
  * nếu không trình duyệt vẫn giữ bản cũ và tưởng là dashboard hỏng.
  * LƯU Ý: đừng sửa file này bằng PowerShell Set-Content (làm hỏng font tiếng Việt).
  */
-const RADAR_VERSION = 15;
+const RADAR_VERSION = 23;
 
 export const metadata = { title: "Sales Radar · MDA Platform" };
 

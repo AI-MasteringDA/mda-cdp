@@ -10,6 +10,7 @@
  */
 import { admin } from "../lib/supabase-admin";
 
+import { isCompanyPhone, isCompanyEmail } from "../lib/company-contacts";
 const T = process.env.SMAX_USER_TOKEN || process.env.SMAX_API_KEY;
 const BASE = process.env.SMAX_BASE_URL || "https://api.smax.ai";
 const BIZ = "mastering-data-analytics";
@@ -70,18 +71,38 @@ export async function runLeadFirstChat() {
     if (data.length < 1000) break; from += 1000;
   }
 
-  // 2) SMAX customers → interaction.first per lead (giữ mốc SỚM nhất nếu trùng lead)
-  const cRes = await fetch(`${BASE}/bizs/${BIZ}/customers`, { method: "POST", headers: { Authorization: `Bearer ${T}`, "Content-Type": "application/json" }, body: JSON.stringify({ size: 10000 }) }).then(r => r.json());
-  const customers = cRes.data || [];
-
-  // page_pid → nhãn channel (từ /pages của SMAX)
+  // page_pid → nhãn channel (từ /pages của SMAX). Lấy TRƯỚC vì danh sách page
+  // còn dùng để kéo customer theo từng page (xem dưới).
   const pageLabel = new Map<string, string>();
+  const pageIds: string[] = [];
   try {
     const pg = await fetch(`${BASE}/bizs/${BIZ}/pages`, { headers: { Authorization: `Bearer ${T}` } }).then(r => r.json());
-    for (const p of (pg.data ?? pg.pages ?? [])) { const pid = p.pid || p.page_pid || p.id; if (pid) pageLabel.set(pid, channelLabel(p.platform, p.name || p.page_name || "")); }
+    for (const p of (pg.data ?? pg.pages ?? [])) { const pid = p.pid || p.page_pid || p.id; if (pid) { pageLabel.set(pid, channelLabel(p.platform, p.name || p.page_name || "")); pageIds.push(pid); } }
   } catch { /* fallback: suy từ platform của customer */ }
 
+  // 2) SMAX customers → interaction.first per lead (giữ mốc SỚM nhất nếu trùng lead)
+  // /customers chặn cứng 10.000/lần trong khi biz có 22.283 khách → kéo 1 phát
+  // là mất lịch sử tag của khách cũ (audit 2026-08-10: hụt 852 Hot Lead).
+  // `page_pids` lọc được và tổng theo page = đúng tổng biz ⇒ kéo theo từng page.
+  const custPost = (body: unknown) => fetch(`${BASE}/bizs/${BIZ}/customers`, { method: "POST", headers: { Authorization: `Bearer ${T}`, "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+  const custById = new Map<string, Record<string, unknown>>();
+  if (pageIds.length) {
+    for (const pid of pageIds) {
+      const r = await custPost({ size: 10000, page_pids: [pid] });
+      for (const c of (r.data || [])) if (c.id) custById.set(c.id, c);
+    }
+  } else {
+    const r = await custPost({ size: 10000 });
+    for (const c of (r.data || [])) if (c.id) custById.set(c.id, c);
+  }
+  const customers = Array.from(custById.values());
+  console.log(`   ↳ SMAX customers: ${customers.length} (kéo theo ${pageIds.length} page)`);
+
   const firstMs = new Map<string, number>();
+  // Lead có ÍT NHẤT 1 customer SMAX trong lần quét này ⇒ ta biết chắc tập tag
+  // hiện tại của họ ⇒ được phép XOÁ các mốc "…lúc" không còn tương ứng.
+  // Lead không nằm trong tập này thì tuyệt đối không đụng, tránh xoá oan.
+  const seenLeads = new Set<string>();
   const tagTimes = new Map<string, Record<string, number>>(); // lead → {"Hot Lead lúc": ms}
   const lucSet = new Set<string>();
   const chans = new Map<string, Set<string>>(); // lead → {"Facebook MDA", "Zalo MDA"...}
@@ -122,14 +143,35 @@ export async function runLeadFirstChat() {
     const namePh = phoneFromName(c.name);
     const lead = (c.id && byCust.get(c.id)) || (c.pid && byPid.get(c.pid)) || (c.phone && byPhone.get(normPh(c.phone))) || (namePh && byPhone.get(namePh)) || (c.email && byEmail.get(String(c.email).toLowerCase().trim()));
     if (!lead) continue;
+    seenLeads.add(lead);
     // lead chưa có pid + customer có pid chưa ai giữ → gán (fill "ID")
     if (!leadToPid.has(lead) && c.pid && !ownedPids.has(c.pid)) { pidBackfill.set(lead, { pid: c.pid, cid: c.id }); ownedPids.add(c.pid); leadToPid.set(lead, c.pid); }
     // CONTACT FILL (ca Lê Ngọc Giàu 2026-08-06): SMAX customer có phone/email mà lead
-    // đang TRỐNG → tự điền mỗi giờ. Guard: giá trị đã thuộc lead KHÁC thì bỏ (không gộp nhầm).
-    const cph = c.phone ? String(c.phone).trim() : "";
-    if (cph && !curPhone.get(lead)) { const o = byPhone.get(normPh(cph)); if (!o || o === lead) { curPhone.set(lead, cph.startsWith("0") ? cph : "0" + normPh(cph)); byPhone.set(normPh(cph), lead); contactFill.set(lead, { ...(contactFill.get(lead) || {}), phone: curPhone.get(lead)! }); } }
-    const cem = c.email ? String(c.email).toLowerCase().trim() : "";
-    if (cem && !curEmail.get(lead)) { const o = byEmail.get(cem); if (!o || o === lead) { curEmail.set(lead, cem); byEmail.set(cem, lead); contactFill.set(lead, { ...(contactFill.get(lead) || {}), email: cem }); } }
+    // đang TRỐNG → tự điền mỗi giờ.
+    // BỎ GUARD "đã thuộc lead khác" (2026-08-11, ca Quang Thảo): SMAX tách bản
+    // ghi theo NỀN TẢNG nên một người có thể có 2-3 customer, và SMAX gắn CÙNG
+    // một SĐT lên tất cả (fb28534093956176196 + zlw6526706079441289530 đều
+    // 0962995104). Guard cũ chỉ cho lead ĐẦU TIÊN giữ số, các bản ghi còn lại
+    // trống vĩnh viễn — sai với nguyên tắc mirror SMAX 1:1. Vẫn KHÔNG gộp lead,
+    // chỉ điền thông tin; bản đồ tra cứu giữ nguyên chủ sở hữu đầu tiên để việc
+    // nhận diện lead không bị đổi đích.
+    // BỎ QUA SĐT/EMAIL CỦA CÔNG TY (user chốt 2026-08-11): nhân viên gõ hotline
+    // hay mail sales trong đoạn chat → AI của SMAX tưởng là thông tin khách rồi
+    // gán vào hồ sơ. 22 khách đã dính số 0961486648, 9 khách dính mail sales.
+    // Với những ca này chỉ giữ TÊN, không lấy thông tin liên hệ.
+    const cph = isCompanyPhone(c.phone) ? "" : (c.phone ? String(c.phone).trim() : "");
+    if (cph && !curPhone.get(lead)) {
+      const v = cph.startsWith("0") ? cph : "0" + normPh(cph);
+      curPhone.set(lead, v);
+      if (!byPhone.has(normPh(cph))) byPhone.set(normPh(cph), lead);
+      contactFill.set(lead, { ...(contactFill.get(lead) || {}), phone: v });
+    }
+    const cem = isCompanyEmail(c.email) ? "" : (c.email ? String(c.email).toLowerCase().trim() : "");
+    if (cem && !curEmail.get(lead)) {
+      curEmail.set(lead, cem);
+      if (!byEmail.has(cem)) byEmail.set(cem, lead);
+      contactFill.set(lead, { ...(contactFill.get(lead) || {}), email: cem });
+    }
     // inbox hay chỉ-comment (xem RULE ở trên)
     const isFb = String(c.platform || "") === "facebook";
     if (!isFb || c.facebook?.conversation_id) hasInbox.set(lead, true);
@@ -137,11 +179,15 @@ export async function runLeadFirstChat() {
     // communication channel của customer này (lead gộp → union nhiều channel)
     const ch = pageLabel.get(c.page_pid) || (c.platform ? channelLabel(c.platform, "") : "");
     if (ch) { const s = chans.get(lead) || new Set<string>(); s.add(ch); chans.set(lead, s); }
-    // interaction.first = tin ĐẦU của khách. Khi mình nhắn trước / khách chỉ
-    // comment (interaction undefined) → fallback created_at (mốc tạo record ≈
-    // lần liên hệ đầu). Đảm bảo lead kiểu Bùi Huế (staff nhắn trước) vẫn được
-    // quy về đúng ngày — "mình chat trước hay khách chat trước đều tính".
-    const first = c.interaction?.first ?? c.created_at;
+    // NGÀY TIẾP XÚC ĐẦU = mốc SỚM NHẤT giữa interaction.first và created_at.
+    // interaction.first là tin đầu CỦA KHÁCH, còn created_at là lúc SMAX lập hồ
+    // sơ — thường là lúc MÌNH nhắn trước. Trước đây viết `first ?? created_at`,
+    // tức chỉ dùng created_at khi interaction.first TRỐNG, nên ca "mình nhắn
+    // trước, khách trả lời hôm sau" bị quy sang ngày hôm sau (Tạ Khánh Chi: hồ
+    // sơ lập 10/08 21:16, khách trả lời 11/08 10:02 → phải là 10/08).
+    // Đúng nguyên tắc đã chốt: "mình chat trước hay khách chat trước đều tính".
+    // Ảnh hưởng 3.576/22.278 khách có created_at sớm hơn interaction.first.
+    const first = [c.interaction?.first, c.created_at].filter(Boolean).sort()[0];
     if (first) { const ms = vnMidnightMs(first); const prev = firstMs.get(lead); if (prev == null || ms < prev) firstMs.set(lead, ms); }
     // tag-time ("…lúc") — giữ mốc MỚI nhất nếu 1 tag gắn nhiều lần
     for (const tg of (c.tags || [])) {
@@ -247,8 +293,20 @@ export async function runLeadFirstChat() {
       const ws = scoreMap.get(lid); const cs = typeof r.fields?.["Hot Score"] === "number" ? r.fields["Hot Score"] : (r.fields?.["Hot Score"] ? Number(r.fields["Hot Score"]) : null);
       if (ws != null && ws !== cs) patch["Hot Score"] = ws;
       // tag-time ("…lúc")
+      // tag-time ("…lúc") — MIRROR chứ không chỉ điền thêm.
+      // Trước đây gặp tag không còn thì `continue`, nên mốc cũ nằm lại VĨNH VIỄN:
+      // SMAX gỡ tag mà Lark vẫn hiện (ca Minh Thủy, Sơn Huyền, Duyên Phan…), và
+      // sau khi tách nhóm gộp nhầm thì mốc của người khác vẫn dính lại. Giờ nếu
+      // lead CÓ mặt trong lần quét (biết chắc tập tag hiện tại) mà cột không còn
+      // tương ứng thì XOÁ ô đó.
       const tt = tagTimes.get(lid) || {};
-      for (const col of lucCols) { const w = tt[col]; if (w == null) continue; const curL = typeof r.fields?.[col] === "number" ? r.fields[col] : null; if (w !== curL) patch[col] = w; }
+      const known = seenLeads.has(lid);
+      for (const col of lucCols) {
+        const w = tt[col];
+        const curL = typeof r.fields?.[col] === "number" ? r.fields[col] : null;
+        if (w != null) { if (w !== curL) patch[col] = w; }
+        else if (known && curL != null) patch[col] = null;
+      }
       // communication channels (multi-select) — chỉ update khi tập kênh thay đổi
       const cs2 = chans.get(lid); if (cs2 && cs2.size) { const want2 = [...cs2].sort(); const rawc = r.fields?.[CHAN]; const cur2 = (Array.isArray(rawc) ? rawc.map((x: any) => typeof x === "object" ? (x.text ?? x.name ?? "") : x) : []).sort(); if (want2.join("|") !== cur2.join("|")) patch[CHAN] = want2; }
       // Tag SMAX (multi-select) — mirror từ dim_lead.smax_tags (đảm bảo tag không kẹt

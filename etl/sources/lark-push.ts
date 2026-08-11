@@ -493,7 +493,18 @@ async function pushChannel(token: string, source: string, tableName: string) {
   // Cột "Tên SF" phải đảm bảo TRƯỚC các nhánh thoát sớm bên dưới, không thì
   // lần chạy nào không có dòng mới sẽ bỏ qua luôn việc tạo cột.
   if (source === "salesforce") {
-    await ensureFieldsExist(token, tableId, [{ field_name: "Tên SF", type: 1 }]);
+    await ensureFieldsExist(token, tableId, [
+      { field_name: "Tên SF", type: 1 },
+      // "Relevant Leads" bên SF: các khoá CŨ của cùng một người (VD chị Thu Hà
+      // → "K45 - 2024"). Có giá trị ⇒ KHÁCH QUAY LẠI, dashboard gắn nhãn reMKT
+      // và KHÔNG đếm vào lead mới trong ngày. 47/263 lead 40 ngày rơi vào đây.
+      { field_name: "Lead cũ (SF)", type: 1 },
+      // Khoá + Rating BÊN SF. Không có 2 cột này thì lead chỉ-có-trên-SF không
+      // lọc được theo khoá (K61…) và bị mặc định coi là Hot dù SF ghi Cold —
+      // sai lệch khi đối chiếu với báo cáo Salesforce.
+      { field_name: "Khoá (SF)", type: 1 },
+      { field_name: "Rating (SF)", type: 1 },
+    ]);
   }
 
   // Determine cutoff for pulling records
@@ -561,7 +572,12 @@ async function pushChannel(token: string, source: string, tableName: string) {
       "Detail": (r.detail || "").slice(0, 500),
       // Tên bên SF thường KHÁC tên SMAX (VD SMAX "K40-Bảo Lee" ↔ SF "Lý Hồng Bảo")
       // → có cột riêng để tra cứu chéo giữa 2 hệ thống.
-      ...(source === "salesforce" ? { "Tên SF": String((r.payload as { sf_name?: string } | null)?.sf_name || "") } : {}),
+      ...(source === "salesforce" ? {
+        "Tên SF": String((r.payload as { sf_name?: string } | null)?.sf_name || ""),
+        "Lead cũ (SF)": String((r.payload as { prior_leads?: string } | null)?.prior_leads || ""),
+        "Khoá (SF)": String((r.payload as { product?: string } | null)?.product || ""),
+        "Rating (SF)": String((r.payload as { rating?: string } | null)?.rating || ""),
+      } : {}),
     };
   });
 

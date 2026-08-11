@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { admin } from "./supabase-admin";
+import { isCompanyPhone, isCompanyEmail } from "./company-contacts";
 
 // ── Danh tính bền: mã lead theo CÔNG THỨC, không ngẫu nhiên ──────────────────
 // Trước đây lead mới được DB gán gen_random_uuid() → mỗi lần backfill lại sinh
@@ -64,19 +65,20 @@ export async function resolveIdentity(
 ): Promise<IdentityMatch[]> {
   const { data: leads } = await admin.from("dim_lead").select("lead_id, phone, email");
 
+  // Bỏ SĐT/email của công ty khỏi bản đồ nhận diện — xem company-contacts.ts
   const phoneMap = new Map<string, string>();
   const emailMap = new Map<string, string>();
   for (const l of leads ?? []) {
-    if (l.phone) phoneMap.set(normalizePhone(l.phone), l.lead_id);
-    if (l.email) emailMap.set(l.email.toLowerCase().trim(), l.lead_id);
+    if (l.phone && !isCompanyPhone(l.phone)) phoneMap.set(normalizePhone(l.phone), l.lead_id);
+    if (l.email && !isCompanyEmail(l.email)) emailMap.set(l.email.toLowerCase().trim(), l.lead_id);
   }
 
   return records.map((r) => {
-    if (r.email) {
+    if (r.email && !isCompanyEmail(r.email)) {
       const leadId = emailMap.get(r.email.toLowerCase().trim());
       if (leadId) return { rawId: r.id, leadId, matchedBy: "email" };
     }
-    if (r.phone) {
+    if (r.phone && !isCompanyPhone(r.phone)) {
       const leadId = phoneMap.get(normalizePhone(r.phone));
       if (leadId) return { rawId: r.id, leadId, matchedBy: "phone" };
     }
@@ -180,10 +182,16 @@ export async function batchResolveOrCreate(
   // ── Bản đồ SĐT→lead HOÀN CHỈNH (chuẩn hóa): fetch toàn bộ để so khớp đúng dù
   // phone lưu "0965…" hay "965…". Dùng chung cho (a) chặn đẻ anon-lead trùng theo
   // kênh và (b) bước match cuối. Thay query .in() cũ (trượt khi lệch định dạng).
+  // SĐT CỦA CÔNG TY bị loại khỏi bản đồ này: SMAX gán nhầm hotline cho 22 khách
+  // khác nhau, để trong bản đồ thì mọi người mang số đó đều bị nhận diện thành
+  // CÙNG MỘT lead (user chốt 2026-08-11 — chỉ lấy tên, bỏ thông tin liên hệ).
   const phoneLeadMap = new Map<string, string>();
   {
     const { data: allP } = await admin.from("dim_lead").select("lead_id, phone").not("phone", "is", null);
-    for (const l of allP ?? []) { const np = normalizePhone(l.phone); if (np && !phoneLeadMap.has(np)) phoneLeadMap.set(np, l.lead_id); }
+    for (const l of allP ?? []) {
+      if (isCompanyPhone(l.phone)) continue;
+      const np = normalizePhone(l.phone); if (np && !phoneLeadMap.has(np)) phoneLeadMap.set(np, l.lead_id);
+    }
   }
 
   // Bản đồ pid (external_profile_id)→lead. Chống dup khi SMAX trả 1 pid với NHIỀU

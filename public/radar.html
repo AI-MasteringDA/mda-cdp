@@ -64,6 +64,14 @@ body{background:linear-gradient(160deg,var(--page2),var(--page1));color:var(--in
 .cal{position:absolute;top:calc(100% + 8px);left:0;z-index:200;background:var(--card);border-radius:16px;
   box-shadow:0 18px 50px rgba(20,22,26,.22);padding:16px 18px;display:none}
 .cal.open{display:block}
+/* danh sách khoá (K61, F3…) — nhiều khoá nên cho cuộn + chia cột */
+.colist{display:grid;grid-template-columns:repeat(3,minmax(74px,1fr));gap:4px;max-height:236px;overflow-y:auto;padding-right:4px}
+.colist button{border:1px solid var(--line);background:var(--card);color:var(--ink2);font-size:11px;
+  padding:6px 8px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between;gap:6px;white-space:nowrap}
+.colist button:hover{background:#EAF2FA}
+.colist button.on{border-color:var(--pill);background:var(--pill);color:#fff}
+.colist button i{font-style:normal;opacity:.6;font-size:10px}
+.calfoot{display:flex;justify-content:space-between;gap:8px;margin-top:12px}
 .calhd{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .calhd button{border:0;background:transparent;color:var(--ink2);font-size:16px;cursor:pointer;padding:4px 10px;border-radius:8px}
 .calhd button:hover{background:#EAF2FA}
@@ -93,6 +101,18 @@ button:focus-visible,.chip:focus-visible{outline:2px solid var(--ink);outline-of
 .delta .up{color:var(--good);font-weight:700}
 .delta .down{color:var(--bad);font-weight:700}
 .kpi .tag{display:inline-block;width:22px;height:3px;border-radius:2px;margin-top:1px}
+/* "Xem chi tiết" — mờ sẵn, rõ lên khi rê vào thẻ, để không làm rối con số */
+.kpi{position:relative}
+.kpi .vd{margin-top:7px;border:0;background:transparent;color:var(--pill);font-size:10.5px;font-weight:600;
+  padding:0;cursor:pointer;opacity:.55;transition:opacity .13s ease}
+.kpi:hover .vd{opacity:1;text-decoration:underline}
+.kpi .vd:focus-visible{opacity:1;outline:2px solid var(--ink);outline-offset:2px}
+/* nút tải danh sách */
+.exp{display:flex;gap:6px;margin-left:auto}
+.expbtn{border:1px solid var(--line);background:var(--card);color:var(--ink2);font-size:10.5px;line-height:1;
+  padding:7px 12px;border-radius:999px;cursor:pointer;white-space:nowrap;font-weight:600}
+.expbtn:hover{border-color:var(--pill);color:var(--pill);background:#EAF2FA}
+.expbtn:disabled{opacity:.45;cursor:default}
 /* charts zone: fit remaining height */
 .charts{flex:1;min-height:0;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:1.15fr 1fr;gap:10px}
 .card{background:var(--card);border-radius:var(--r);padding:11px 14px 8px;box-shadow:var(--cshadow);display:flex;flex-direction:column;min-height:0;min-width:0}
@@ -128,6 +148,9 @@ tbody tr:hover td{background:#F5F9FD}
 .cls{display:inline-block;font-size:9.5px;padding:2.5px 9px;border-radius:999px;color:#fff}
 .badge{display:inline-block;font-size:9.5px;padding:2.5px 9px;border-radius:999px;background:#F2F3F5;color:var(--ink2)}
 .badge.alert{background:#FBEAE7;color:var(--sH)}
+/* reMKT = khách quay lại, hiện để theo dõi nhưng không đếm vào lead mới */
+.badge.re{background:#fec636;color:#404040}
+tr.remkt td{background:#FFFBEF}
 /* typography: một họ Inter duy nhất, cân nặng nhẹ — tối giản, không "đậm đậm" */
 body,#tip,table,svg text,.logo,h3,.kpi .v,.tabs button,.mini button,.lbl,.chip{
   font-family:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;font-feature-settings:"cv05","ss01","tnum"}
@@ -166,7 +189,7 @@ td b{font-weight:550}
   <main class="main">
     <div class="bar" role="toolbar">
       <div class="tabs" id="segDays">
-        <button data-v="0">Hôm nay</button><button data-v="1">Hôm qua</button><button data-v="7">7 ngày</button><button data-v="14" class="on">14 ngày</button><button data-v="30">30 ngày</button><button data-v="40">40 ngày</button>
+        <button data-v="0">Hôm nay</button><button data-v="1">Hôm qua</button><button data-v="7">7 ngày</button><button data-v="14" class="on">14 ngày</button><button data-v="30">30 ngày</button><button data-v="9999">Tất cả</button>
       </div>
       <div class="tabs" id="segGrp">
         <button data-v="all" class="on">Tất cả</button><button data-v="bi">BI</button><button data-v="fa">FA</button>
@@ -180,6 +203,13 @@ td b{font-weight:550}
             <span style="display:flex;gap:8px"><button class="ghost" id="calClear">Bỏ chọn</button><button id="calClose">Xong</button></span></div>
         </div>
       </div>
+      <span class="lbl" style="padding-left:8px">Khoá</span>
+      <div class="calwrap">
+        <button class="calbtn" id="coBtn" title="Lọc theo tag khoá trên SMAX (K61, F3…)">🎓 Tất cả khoá</button>
+        <div class="cal" id="coPop"><div id="coList" class="colist"></div>
+          <div class="calfoot"><button class="calbtn" id="coClear">Bỏ chọn</button><button class="calbtn" id="coClose">Xong</button></div>
+        </div>
+      </div>
       <span class="lbl" style="padding-left:8px">Kênh</span>
       <span id="chipCh" style="display:flex;gap:5px;flex-wrap:wrap"></span>
       <button class="chip" id="chipClear">✕</button>
@@ -191,7 +221,7 @@ td b{font-weight:550}
 
     <div class="charts">
       <div class="card" id="cardStack">
-        <div class="hd"><h3>Lead mới theo ngày</h3><span class="sub">theo ngày chat đầu · số trên cột = tổng lead mới</span>
+        <div class="hd"><h3>Lead mới theo ngày</h3><span class="sub">theo ngày chat đầu · đã loại khách quay lại (reMKT) · số trên cột = tổng</span>
           <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sU)"></i>Chưa gắn tag</span></div></div>
         <div class="plot"><svg id="cStack"></svg></div>
       </div>
@@ -220,7 +250,9 @@ td b{font-weight:550}
         <div class="hd"><h3 id="tblTitle">Chi tiết lead trong kỳ</h3><span class="sub" id="tblSub"></span>
           <div class="mini" id="tblTabs" style="flex-wrap:wrap">
             <button data-v="all" class="on">Tất cả</button><button data-v="hot">🔥 Hot mới</button><button data-v="P">Prospect</button><button data-v="C">Cold</button><button data-v="W">Warm</button><button data-v="U">Chưa tag</button><button data-v="cph">Chưa phản hồi</button>
-          </div></div>
+          </div>
+          <div class="exp"><button class="expbtn" id="expXlsx" title="Tải danh sách đang hiện ra Excel">⬇ Excel</button><button class="expbtn" id="expCsv" title="Tải danh sách đang hiện ra CSV">⬇ CSV</button></div>
+          </div>
         <div class="tblwrap"><table id="tbl"></table></div>
       </div>
     </div><!-- /pgLs -->
@@ -250,7 +282,7 @@ function showFatal(msg){
 addEventListener("error",e=>showFatal(String(e.message||e.error||"lỗi không rõ")));
 addEventListener("unhandledrejection",e=>showFatal(String(e.reason&&e.reason.message||e.reason||"lỗi tải dữ liệu")));
 const CHDEFS=[["Facebook MDA","FB MDA"],["Facebook PTA","FB PTA"],["Zalo 48","Zalo 48"],["Zalo OA MDA","Zalo OA"],["Website MDA","Website"],["Instagram MDA","IG MDA"],["Instagram PTA","IG PTA"]];
-const S={days:14,grp:"all",ch:new Set(),tbl:"all",from:null,to:null};
+const S={days:14,grp:"all",ch:new Set(),co:new Set(),tbl:"all",from:null,to:null};
 const $=id=>document.getElementById(id);
 const fmtD=d=>d.slice(8,10)+"/"+d.slice(5,7);
 const asofDate=DATA.asOf.slice(0,10);
@@ -262,38 +294,95 @@ function rangeLbl(){
   if(S.from&&S.to)return S.from===S.to?("Ngày "+fmtD(S.from)):(fmtD(S.from)+" – "+fmtD(S.to)+" ("+rangeDays(S.from,S.to).length+" ngày)");
   if(S.days===0)return "Hôm nay · "+fmtD(asofDate)+" (chưa trọn ngày)";
   if(S.days===1)return "Hôm qua · "+fmtD(YDAY);
-  return fmtD(addDays(asofDate,-(S.days-1)))+" – "+fmtD(asofDate);
+  // Kỳ "Tất cả" không có số ngày cố định → lấy đúng khoảng dữ liệu đang có
+  const sp=spanDays();
+  return fmtD(sp[0])+" – "+fmtD(sp[sp.length-1])+(S.days>=9999?" · toàn bộ ("+sp.length+" ngày)":"");
 }
 function leadPass(l){
   if(S.grp==="bi"&&!l.bi)return false;
   if(S.grp==="fa"&&!l.fa)return false;
   if(S.ch.size&&!l.ch.some(c=>S.ch.has(c)))return false;
+  // Lọc theo KHOÁ (tag SMAX: K61, KH61, F3…). Lead mang nhiều khoá thì chỉ cần
+  // trùng 1 khoá đang chọn. Lead không có tag khoá nào sẽ bị loại khi đang lọc.
+  if(S.co.size&&!(l.co||[]).some(c=>S.co.has(c)))return false;
   return true;
 }
 function daysList(n){const a=[];for(let i=n-1;i>=0;i--)a.push(addDays(asofDate,-i));return a}
+// Kỳ "Tất cả": lấy từ ngày sớm nhất CÓ THẬT trong dữ liệu, không cố định số ngày.
+function spanDays(){
+  if(S.from&&S.to)return rangeDays(S.from,S.to);
+  if(S.days===0)return [asofDate];
+  if(S.days===1)return [YDAY];
+  if(S.days>=9999){
+    let min=asofDate;
+    for(const l of DATA.leads){if(l.d&&l.d<min)min=l.d;if(l.ha&&l.ha<min)min=l.ha}
+    return rangeDays(min,asofDate);
+  }
+  return daysList(S.days);
+}
+// Kỳ dài mà vẽ mỗi ngày 1 cột thì thành hàng nghìn cột không đọc được → gom
+// theo tuần (>70 ngày) hoặc theo tháng (>400 ngày). KPI và bảng vẫn tính đủ,
+// chỉ có TRỤC của biểu đồ là gộp lại.
+const wkStart=d=>{const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()-((t.getUTCDay()+6)%7));return t.toISOString().slice(0,10)};
+function bucketize(span){
+  const gran=span.length<=70?"day":(span.length<=400?"week":"month");
+  const keyOf=d=>gran==="day"?d:(gran==="week"?wkStart(d):d.slice(0,7)+"-01");
+  const pos={},keys=[],lab=[],dIdx={};
+  for(const d of span){
+    const k=keyOf(d);
+    if(pos[k]===undefined){pos[k]=keys.length;keys.push(k);
+      lab.push(gran==="month"?(k.slice(5,7)+"/"+k.slice(2,4)):fmtD(k));}
+    dIdx[d]=pos[k];
+  }
+  return {gran,keys,lab,dIdx};
+}
 function agg(){
-  const days=(S.from&&S.to)?rangeDays(S.from,S.to):(S.days===0?[asofDate]:(S.days===1?[YDAY]:daysList(S.days)));
-  const idx=Object.fromEntries(days.map((d,i)=>[d,i]));
-  const prevSet=new Set(days.map(d=>addDays(d,-days.length)));
+  const span=spanDays();
+  const {gran,keys,lab,dIdx}=bucketize(span);
+  const days=keys,idx=dIdx;
+  const prevSet=new Set(span.map(d=>addDays(d,-span.length)));
   const z=()=>days.map(()=>0);
-  const r={days,moi:z(),P:z(),C:z(),W:z(),Hc:z(),U:z(),H:z(),chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],newWin:[],cphWin:0,prev:{moi:0,P:0,C:0,W:0,H:0}};
+  const r={days,lab,gran,moi:z(),P:z(),C:z(),W:z(),Hc:z(),U:z(),H:z(),chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],newWin:[],byCls:{P:[],C:[],W:[],H:[],U:[],cph:[]},cphWin:0,reWin:0,upWin:0,prev:{moi:0,P:0,C:0,W:0,H:0}};
   CHDEFS.forEach(([k])=>r.chCount[k]=0);
   for(const l of DATA.leads){
     if(!leadPass(l))continue;
     const has=c=>l.cls.includes(c);
+    // KHÁCH QUAY LẠI (reMKT) — chốt 2026-08-10: người đã là lead/học viên của
+    // khoá TRƯỚC (trường "Relevant Leads" bên SF, VD chị Thu Hà → "K45 - 2024").
+    // VẪN hiện trong danh sách kèm nhãn để sales theo dõi, nhưng KHÔNG đếm vào
+    // lead mới — đây là re-marketing, không phải lead mới sinh.
+    if(l.re){
+      const inWin=(l.d&&idx[l.d]!=null)||(l.ha&&idx[l.ha]!=null);
+      if(inWin){r.reWin++;r.newWin.push(l);if(l.ha&&idx[l.ha]!=null)r.hotLeads.push(l)}
+      continue;
+    }
+    // QUY TẮC ĐẾM (user chốt 2026-08-11):
+    //   · Prospect / Warm / Cold / Chưa tag → theo NGÀY CHAT ĐẦU.
+    //     "Nguyễn Văn A có tag Cold, chat đầu 10/08 ⇒ Cold new-in-day ngày 10/08".
+    //   · Hot → theo NGÀY GẮN TAG (xử lý riêng ở khối r.H bên dưới), vì lên Hot
+    //     là một sự kiện có thời điểm rõ ràng, khác với việc phân loại ban đầu.
+    // Danh sách chi tiết dựng NGAY TẠI CHỖ ĐẾM → số dòng trong bảng LUÔN bằng KPI
+    // (trước đây bảng lọc riêng nên lệch: KPI 4 Cold mà bảng hiện 5).
     if(l.d&&idx[l.d]!=null){
       const i=idx[l.d];r.moi[i]++;
-      // mỗi lead rơi vào ĐÚNG 1 nhóm → tổng các nhóm = "Lead mới" (không lệch như bug 9 vs 10)
-      if(has("P"))r.P[i]++;else if(has("W"))r.W[i]++;else if(has("C"))r.C[i]++;else if(has("H"))r.Hc[i]++;else r.U[i]++;
-      for(const c of l.ch)if(c in r.chCount)r.chCount[c]++;
-      r.newWin.push(l);if(l.cph)r.cphWin++;
-      for(const c of l.cls){const k={P:"P",C:"C",W:"W",H:"H"}[c];if(l.bi)r.biCls[k]++;if(l.fa)r.faCls[k]++}
+      // mỗi lead rơi vào ĐÚNG 1 nhóm → tổng các nhóm = "Lead mới"
+      const c=has("P")?"P":(has("W")?"W":(has("C")?"C":(has("H")?"H":"U")));
+      if(c==="H")r.Hc[i]++;else if(c==="U")r.U[i]++;else r[c][i]++;
+      r.byCls[c].push(l);
+      if(c!=="U"){if(l.bi)r.biCls[c]++;if(l.fa)r.faCls[c]++}
+      for(const ch2 of l.ch)if(ch2 in r.chCount)r.chCount[ch2]++;
+      r.newWin.push(l);
+      if(l.cph){r.cphWin++;r.byCls.cph.push(l)}
     }else if(l.d&&prevSet.has(l.d)){
       r.prev.moi++;
       if(has("P"))r.prev.P++;else if(has("W"))r.prev.W++;else if(has("C"))r.prev.C++;
     }
-    if(l.ha&&idx[l.ha]!=null){r.H[idx[l.ha]]++;r.hotLeads.push(l)}
-    else if(l.ha&&prevSet.has(l.ha))r.prev.H++;
+    // NÂNG HẠNG (user chốt 2026-08-11, ca Sơn Huyền): đã gắn Cold/Warm/Prospect
+    // từ ngày TRƯỚC rồi hôm nay mới lên Hot ⇒ KHÔNG phải "new in day", không
+    // tính vào KPI "Hot mới". Vẫn HIỆN trong bảng chi tiết kèm nhãn ↑ nâng hạng
+    // để sales theo dõi được — chỉ không đếm.
+    if(l.ha&&idx[l.ha]!=null){if(l.up)r.upWin++;else r.H[idx[l.ha]]++;r.hotLeads.push(l)}
+    else if(l.ha&&prevSet.has(l.ha)&&!l.up)r.prev.H++;
   }
   r.hotLeads.sort((a,b)=>(b.ha||"").localeCompare(a.ha||""));
   r.newWin.sort((a,b)=>(b.d||"").localeCompare(a.d||""));
@@ -317,11 +406,14 @@ function frame(svg,W,H,pad,maxV,nY){
   }
   return {g,plotH,plotW};
 }
-function xLabels(g,days,pad,plotH,band,step){
-  days.forEach((d,i)=>{if(i%step!==0&&i!==days.length-1)return;
+// nhận MẢNG NHÃN đã dựng sẵn (ngày/tuần/tháng), không tự format từ ngày nữa
+function xLabels(g,lab,pad,plotH,band,step){
+  lab.forEach((s,i)=>{if(i%step!==0&&i!==lab.length-1)return;
     const t=svgEl("text",{x:pad.l+band*i+band/2,y:pad.t+plotH+14,class:"axis","text-anchor":"middle"});
-    t.textContent=fmtD(d);g.appendChild(t)});
+    t.textContent=s;g.appendChild(t)});
 }
+// tiền tố cho tooltip: kỳ dài thì nói rõ đây là cả tuần / cả tháng
+const bkLbl=(a,i)=>(a.gran==="week"?"Tuần ":(a.gran==="month"?"Tháng ":""))+a.lab[i];
 function topRoundRect(x,y,w,h,r){if(h<=0)return null;r=Math.min(r,w/2,h);
   return "M"+x+" "+(y+h)+"V"+(y+r)+"Q"+x+" "+y+" "+(x+r)+" "+y+"H"+(x+w-r)+"Q"+(x+w)+" "+y+" "+(x+w)+" "+(y+r)+"V"+(y+h)+"Z"}
 /* ---- charts ---- */
@@ -343,7 +435,7 @@ function chartStack(a){
     });
     if(tot[i]>0){const t=svgEl("text",{x:x+bw/2,y:y-4,class:"dlab","text-anchor":"middle"});t.textContent=tot[i];g.appendChild(t)}
     const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
-    hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+fmtD(d)+"</div>"
+    hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+bkLbl(a,i)+"</div>"
       +"<div class='row'><span><i style='background:var(--sP)'></i>Prospect</span><b>"+a.P[i]+"</b></div>"
       +"<div class='row'><span><i style='background:var(--sC)'></i>Cold</span><b>"+a.C[i]+"</b></div>"
       +"<div class='row'><span><i style='background:var(--sW)'></i>Warm</span><b>"+a.W[i]+"</b></div>"
@@ -353,7 +445,7 @@ function chartStack(a){
     hit.addEventListener("mouseleave",hideTip);
     g.appendChild(hit);
   });
-  xLabels(g,a.days,pad,plotH,band,Math.ceil(a.days.length/12));
+  xLabels(g,a.lab,pad,plotH,band,Math.ceil(a.days.length/12));
 }
 function chartHot(a){
   const svg=$("cHot"),{W,H}=dims(svg,300,160),pad={t:12,b:22,l:26,r:6};
@@ -365,10 +457,10 @@ function chartHot(a){
     if(v>0){g.appendChild(svgEl("path",{d:topRoundRect(x,y,bw,hpx,4),style:"fill:var(--sH)",opacity:d===YDAY?"1":".8"}));
       const t=svgEl("text",{x:x+bw/2,y:y-3,class:"dlab","text-anchor":"middle"});t.textContent=v;g.appendChild(t)}
     const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
-    hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+fmtD(d)+"</div><div class='row'><span><i style='background:var(--sH)'></i>Lên Hot</span><b>"+v+"</b></div>",e.clientX,e.clientY));
+    hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+bkLbl(a,i)+"</div><div class='row'><span><i style='background:var(--sH)'></i>Lên Hot</span><b>"+v+"</b></div>",e.clientX,e.clientY));
     hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
   });
-  xLabels(g,a.days,pad,plotH,band,Math.ceil(a.days.length/6));
+  xLabels(g,a.lab,pad,plotH,band,Math.ceil(a.days.length/6));
 }
 function chartLine(a){
   const svg=$("cLine"),{W,H}=dims(svg,300,160),pad={t:12,b:22,l:26,r:8};
@@ -382,9 +474,9 @@ function chartLine(a){
   const li=a.days.length-1;
   g.appendChild(svgEl("circle",{cx:X(li),cy:Y(a.moi[li]),r:4,style:"fill:var(--sC);stroke:#fff","stroke-width":"2"}));
   a.days.forEach((d,i)=>{const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
-    hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+fmtD(d)+"</div><div class='row'><span>Lead mới</span><b>"+a.moi[i]+"</b></div><div class='row'><span>TB 7 ngày</span><b>"+ma[i].toFixed(1)+"</b></div>",e.clientX,e.clientY));
+    hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+bkLbl(a,i)+"</div><div class='row'><span>Lead mới</span><b>"+a.moi[i]+"</b></div><div class='row'><span>TB 7 ngày</span><b>"+ma[i].toFixed(1)+"</b></div>",e.clientX,e.clientY));
     hit.addEventListener("mouseleave",hideTip);g.appendChild(hit)});
-  xLabels(g,a.days,pad,plotH,band,Math.ceil(a.days.length/6));
+  xLabels(g,a.lab,pad,plotH,band,Math.ceil(a.days.length/6));
 }
 function chartGrp(a){
   const svg=$("cGrp"),{W,H}=dims(svg,300,160),pad={t:12,b:22,l:26,r:6};
@@ -426,38 +518,142 @@ function chartChan(a){
 const CLSN={P:["Prospect","--sP"],C:["Cold","--sC"],W:["Warm","--sW"],H:["Hot","--sH"]};
 function kpis(a){
   const sum=k=>a[k].reduce((p,c)=>p+c,0);
-  const items=[["Lead mới","moi","--pill"],["Hot mới","H","--sH"],["Cold","C","--sC"],["Prospect","P","--sP"],["Warm","W","--sW"]];
+  // cột thứ 4 = tab tương ứng bên Danh sách lead → bấm "Xem chi tiết" là nhảy
+  // thẳng sang danh sách ĐÃ lọc sẵn, thấy ngay con số đó gồm những ai.
+  const items=[["Lead mới","moi","--pill","all"],["Hot mới","H","--sH","hot"],["Cold","C","--sC","C"],["Prospect","P","--sP","P"],["Warm","W","--sW","W"]];
   let h="";
-  for(const [nm,k,cvar] of items){
+  for(const [nm,k,cvar,tab] of items){
     const v=sum(k),base=a.prev[k],diff=v-base;
     const cls=diff>0?"up":(diff<0?"down":"");
     const arrow=diff>0?"▲":(diff<0?"▼":"–");
-    h+="<div class='kpi'><span class='lbl'>"+nm+"</span><div class='v'>"+v+"</div><span class='tag' style='background:var("+cvar+")'></span><div class='delta'><span class='"+cls+"'>"+arrow+" "+Math.abs(diff)+"</span> so kỳ trước ("+base+")</div></div>";
+    h+="<div class='kpi'><span class='lbl'>"+nm+"</span><div class='v'>"+v+"</div><span class='tag' style='background:var("+cvar+")'></span>"
+      +"<div class='delta'><span class='"+cls+"'>"+arrow+" "+Math.abs(diff)+"</span> so kỳ trước ("+base+")</div>"
+      +"<button class='vd' data-tab='"+tab+"'>Xem chi tiết →</button></div>";
   }
-  h+="<div class='kpi'><span class='lbl'>Chưa phản hồi</span><div class='v'>"+a.cphWin+"</div><span class='tag' style='background:var(--sW)'></span><div class='delta'>trong "+sum("moi")+" lead mới</div></div>";
+  h+="<div class='kpi'><span class='lbl'>Chưa phản hồi</span><div class='v'>"+a.cphWin+"</div><span class='tag' style='background:var(--sW)'></span>"
+    +"<div class='delta'>trong "+sum("moi")+" lead mới</div><button class='vd' data-tab='cph'>Xem chi tiết →</button></div>";
   $("kpis").innerHTML=h;
 }
+// Bấm "Xem chi tiết" ở KPI → sang trang Danh sách lead, chọn đúng tab tương ứng
+$("kpis").addEventListener("click",e=>{
+  const b=e.target.closest("button.vd");if(!b)return;
+  S.tbl=b.dataset.tab;
+  [...$("tblTabs").children].forEach(x=>x.classList.toggle("on",x.dataset.v===S.tbl));
+  [...$("navPg").children].forEach(x=>x.classList.toggle("on",x.dataset.p==="ls"));
+  $("pgOv").style.display="none";$("pgLs").style.display="block";
+  renderAll();
+});
 function clsChip(c){const [nm,v]=CLSN[c];return "<span class='cls' style='background:var("+v+")'>"+nm+"</span>"}
+
+/* ---- XUẤT DANH SÁCH (Excel / CSV) ----
+   Xuất ĐÚNG danh sách đang hiện, tức là đã áp mọi bộ lọc: kỳ + khoá + kênh +
+   BI/FA + tab đang chọn. File .xlsx được dựng tay bằng ZIP + OOXML để không
+   phải nhúng thư viện ngoài (trang này chạy trong iframe, không tải CDN). */
+const EXP={rows:[],title:""};
+const EXP_COLS=[
+  ["Tên",             l=>l.n],
+  ["Tên bên SMAX",    l=>l.n2||""],
+  ["Nguồn",           l=>l.sf?"Salesforce":"SMAX"],
+  ["Ngày chat đầu",   l=>l.d||""],
+  ["Ngày lên Hot",    l=>l.ha||""],
+  ["Phân loại",       l=>l.cls.map(c=>CLSN[c]?CLSN[c][0]:c).join(" + ")||"Chưa gắn tag"],
+  ["Khoá",            l=>(l.co||[]).join(", ")],
+  ["Mảng",            l=>(l.bi?"BI":"")+(l.bi&&l.fa?" + ":"")+(l.fa?"FA":"")],
+  ["Kênh",            l=>(l.ch||[]).join(", ")],
+  ["SĐT",             l=>l.ph||""],
+  ["Chưa phản hồi",   l=>l.cph?"x":""],
+  ["reMKT (khoá cũ)", l=>l.re||""],
+  ["Nâng hạng từ",    l=>l.up?l.upFrom:""],
+];
+function expData(){
+  const head=EXP_COLS.map(c=>c[0]);
+  return [head,...EXP.rows.map(l=>EXP_COLS.map(c=>c[1](l)))];
+}
+function expName(ext){
+  const slug=s=>String(s).normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/đ/gi,"d").replace(/[^A-Za-z0-9]+/g,"_").replace(/^_|_$/g,"");
+  const co=S.co.size?"_"+[...S.co].join("-"):"";
+  return `MDA_lead_${slug(EXP.title)}${co}_${asofDate}.${ext}`;
+}
+function dl(blob,name){
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);
+}
+function expCsv(){
+  const q=v=>{const s=String(v??"");return /[",\n;]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s};
+  const body=expData().map(r=>r.map(q).join(",")).join("\r\n");
+  dl(new Blob(["﻿"+body],{type:"text/csv;charset=utf-8"}),expName("csv"));
+}
+/* ZIP store-only + OOXML tối giản → file .xlsx thật, Excel mở không cảnh báo */
+let CRCT=null;
+function crc32(u8){
+  if(!CRCT){CRCT=new Uint32Array(256);for(let i=0;i<256;i++){let c=i;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;CRCT[i]=c>>>0}}
+  let c=0xFFFFFFFF;for(let i=0;i<u8.length;i++)c=CRCT[(c^u8[i])&255]^(c>>>8);
+  return (c^0xFFFFFFFF)>>>0;
+}
+function zipStore(files){
+  const enc=new TextEncoder(),parts=[],cds=[];let off=0;
+  for(const f of files){
+    const nb=enc.encode(f.name),d=f.data,crc=crc32(d);
+    const lh=new Uint8Array(30+nb.length),lv=new DataView(lh.buffer);
+    lv.setUint32(0,0x04034b50,true);lv.setUint16(4,20,true);lv.setUint32(14,crc,true);
+    lv.setUint32(18,d.length,true);lv.setUint32(22,d.length,true);lv.setUint16(26,nb.length,true);
+    lh.set(nb,30);parts.push(lh,d);
+    const cd=new Uint8Array(46+nb.length),cv=new DataView(cd.buffer);
+    cv.setUint32(0,0x02014b50,true);cv.setUint16(4,20,true);cv.setUint16(6,20,true);
+    cv.setUint32(16,crc,true);cv.setUint32(20,d.length,true);cv.setUint32(24,d.length,true);
+    cv.setUint16(28,nb.length,true);cv.setUint32(42,off,true);cd.set(nb,46);cds.push(cd);
+    off+=lh.length+d.length;
+  }
+  const cdSize=cds.reduce((s,c)=>s+c.length,0);
+  const end=new Uint8Array(22),ev=new DataView(end.buffer);
+  ev.setUint32(0,0x06054b50,true);ev.setUint16(8,files.length,true);ev.setUint16(10,files.length,true);
+  ev.setUint32(12,cdSize,true);ev.setUint32(16,off,true);
+  return new Blob([...parts,...cds,end],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+}
+function expXlsx(){
+  const enc=new TextEncoder(),U=s=>enc.encode(s);
+  const data=expData();
+  const xe=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g,"");
+  const cn=n=>{let s="";n++;while(n>0){const m=(n-1)%26;s=String.fromCharCode(65+m)+s;n=(n-m-1)/26}return s};
+  const W=[26,22,12,13,13,20,16,10,26,13,13,26,14];
+  let sh='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    +'<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>';
+  W.forEach((w,i)=>{sh+=`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`});
+  sh+='</cols><sheetData>';
+  data.forEach((r,i)=>{
+    sh+=`<row r="${i+1}"${i===0?' ht="26" customHeight="1"':''}>`;
+    r.forEach((c,j)=>{sh+=`<c r="${cn(j)+(i+1)}"${i===0?' s="1"':''} t="inlineStr"><is><t xml:space="preserve">${xe(c)}</t></is></c>`});
+    sh+='</row>';
+  });
+  sh+=`</sheetData><autoFilter ref="A1:${cn(data[0].length-1)}${data.length}"/></worksheet>`;
+  const files=[
+    {name:"[Content_Types].xml",data:U('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>')},
+    {name:"_rels/.rels",data:U('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')},
+    {name:"xl/workbook.xml",data:U('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Lead" sheetId="1" r:id="rId1"/></sheets></workbook>')},
+    {name:"xl/_rels/workbook.xml.rels",data:U('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')},
+    {name:"xl/styles.xml",data:U('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0D47A1"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf></cellXfs></styleSheet>')},
+    {name:"xl/worksheets/sheet1.xml",data:U(sh)},
+  ];
+  dl(zipStore(files),expName("xlsx"));
+}
 function tableCard(a){
   const T={all:"Tất cả lead mới",hot:"🔥 Hot mới (theo giờ gắn tag)",P:"Prospect",C:"Cold",W:"Warm",U:"Chưa gắn tag",cph:"Chưa phản hồi"};
   $("tblTitle").textContent=T[S.tbl]+" trong kỳ";
   const exCls=l=>l.cls.includes("P")?"P":(l.cls.includes("W")?"W":(l.cls.includes("C")?"C":null));
-  let rows;
-  if(S.tbl==="hot")rows=a.hotLeads;
-  else{
-    rows=a.newWin.filter(l=>{
-      if(S.tbl==="all")return true;
-      if(S.tbl==="cph")return l.cph;
-      if(S.tbl==="U")return !l.cls.length;
-      return exCls(l)===S.tbl;
-    });
-  }
-  $("tblSub").textContent=rows.length+" người";
+  // Lấy đúng danh sách đã dựng lúc ĐẾM → số dòng luôn khớp KPI
+  const rows=S.tbl==="hot"?a.hotLeads:(S.tbl==="all"?a.newWin:(a.byCls[S.tbl]||[]));
+  // Danh sách hiện cả người bị loại khỏi phép đếm (reMKT / nâng hạng) nên phải
+  // nói rõ, không thì thấy "6 người" mà KPI ghi 4 lại tưởng sai.
+  const nRe=rows.filter(l=>l.re).length, nUp=rows.filter(l=>l.up&&!l.re).length;
+  const ghi=[nRe?nRe+" reMKT":"", nUp?nUp+" nâng hạng":""].filter(Boolean).join(" · ");
+  $("tblSub").textContent=rows.length+" người"+(ghi?" (gồm "+ghi+" — không tính vào KPI)":"");
+  EXP.rows=rows;EXP.title=T[S.tbl];   // giữ lại đúng danh sách đang hiện để export
   $("tbl").innerHTML="<tr><th>Tên</th><th>Nguồn</th><th>Chat đầu</th><th>Lên Hot</th><th>Phân loại</th><th>Mảng</th><th>Kênh</th><th>SĐT</th><th></th></tr>"+
     (rows.length?rows.map(l=>{
       const c=exCls(l)||(l.cls.includes("H")?"H":null);
       const mang=(l.bi?"BI":"")+(l.bi&&l.fa?" + ":"")+(l.fa?"FA":"")||"—";
-      return "<tr><td><b>"+l.n+"</b>"+(l.n2?"<div style='font-size:10.5px;color:var(--ink3)'>SMAX: "+l.n2+"</div>":"")+"</td><td>"+(l.sf?"<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>":"<span class='badge'>SMAX</span>")+"</td><td>"+(l.d?fmtD(l.d):"—")+"</td><td>"+(l.ha?fmtD(l.ha):"—")+"</td><td>"
+      return "<tr"+(l.re?" class='remkt'":"")+"><td><b>"+l.n+"</b>"+(l.re?" <span class='badge re' title='Đã là lead/học viên khoá trước — không tính lead mới'>⟲ reMKT</span><div style='font-size:10.5px;color:var(--sW)'>khoá cũ: "+l.re+"</div>":"")+(l.up?" <span class='badge up' title='Đã gắn Cold/Warm/Prospect trước đó — lên Hot là nâng hạng, không tính Hot mới'>↑ nâng hạng</span><div style='font-size:10.5px;color:var(--ink3)'>đã gắn tag từ "+fmtD(l.upFrom)+"</div>":"")+(l.n2?"<div style='font-size:10.5px;color:var(--ink3)'>SMAX: "+l.n2+"</div>":"")+"</td><td>"+(l.sf?"<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>":"<span class='badge'>SMAX</span>")+"</td><td>"+(l.d?fmtD(l.d):"—")+"</td><td>"+(l.ha?fmtD(l.ha):"—")+"</td><td>"
         +(l.cls.includes("H")?clsChip("H")+" ":"")+(c&&c!=="H"?clsChip(c):(!l.cls.length?"<span class='badge'>chưa tag</span>":""))
         +"</td><td>"+mang+"</td><td>"+(l.ch.join(", ")||"—")+"</td><td>"+(l.ph||"—")+"</td><td>"
         +(l.cph?"<span class='badge alert'>chưa phản hồi</span>":"")+"</td></tr>"}).join("")
@@ -470,11 +666,40 @@ function renderAll(){
     $("rangeLbl").textContent=rangeLbl();A=agg();kpis(A);chartStack(A);chartHot(A);chartLine(A);chartGrp(A);chartChan(A);tableCard(A);
   }catch(e){showFatal("khi vẽ biểu đồ — "+e.message);throw e}
 }
-$("segDays").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
+/* ---- nới cửa sổ dữ liệu ----
+   API mặc định chỉ trả 40 ngày cho nhanh. Khoá như K61 chạy suốt 3 tháng nên
+   40 ngày là không đủ — khi người dùng chọn kỳ dài hơn phần đang có thì gọi lại
+   API với cửa sổ lớn hơn rồi vẽ lại. Chỉ tải thêm, không bao giờ thu hẹp. */
+let LOADED=DATA.days||40;
+let loading=false;
+async function ensureWindow(n){
+  if(n<=LOADED||loading)return;
+  loading=true;
+  const lbl=$("rangeLbl"),old=lbl.textContent;
+  lbl.textContent="đang tải dữ liệu…";
+  try{
+    const r=await fetch("/api/radar?days="+n,{cache:"no-store"});
+    if(!r.ok)throw new Error("API "+r.status);
+    const j=await r.json();
+    if(j.error)throw new Error(j.error);
+    DATA.leads=j.leads;DATA.asOf=j.asOf;LOADED=j.days||n;
+    buildCourses();                       // khoá cũ giờ mới xuất hiện
+    MIN_D=addDays(asofDate,-(LOADED-1));  // lịch mở rộng theo
+    drawCal();
+  }catch(err){
+    lbl.textContent=old;
+    showFatal("không tải được dữ liệu kỳ dài — "+err.message);
+    throw err;
+  }finally{loading=false}
+}
+$("segDays").addEventListener("click",async e=>{const b=e.target.closest("button");if(!b)return;
   [...$("segDays").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");
-  S.days=+b.dataset.v;S.from=S.to=null;S.pick=[];syncCalBtn();renderAll()});
+  const v=+b.dataset.v;
+  S.days=v;S.from=S.to=null;S.pick=[];syncCalBtn();
+  await ensureWindow(v>=9999?3000:v);
+  renderAll()});
 /* ---- calendar picker (chọn 1 ngày hoặc khoảng) ---- */
-const MIN_D=addDays(asofDate,-39),MAX_D=asofDate;
+let MIN_D=addDays(asofDate,-((DATA.days||40)-1));const MAX_D=asofDate;
 let calM=asofDate.slice(0,7)+"-01";
 S.pick=[]; // [] chưa chọn · [d] đã chọn ngày đầu, chờ ngày thứ 2 · [a,b] khoảng hoàn chỉnh
 const monthAdd=(ym,n)=>{const [y,m]=ym.split("-").map(Number);const d=new Date(Date.UTC(y,m-1+n,1));return d.toISOString().slice(0,10)};
@@ -531,7 +756,12 @@ $("calClose").addEventListener("click",()=>$("cal").classList.remove("open"));
 $("calClear").addEventListener("click",()=>{S.from=S.to=null;S.pick=[];$("calInfo").textContent="Bấm 1 ngày để xem ngày đó · bấm ngày thứ 2 để chọn khoảng";
   [...$("segDays").children].forEach((x,i)=>x.classList.toggle("on",x.dataset.v==="14"));S.days=14;
   drawCal();syncCalBtn();renderAll();});
-document.addEventListener("click",e=>{if(!e.target.closest(".calwrap"))$("cal").classList.remove("open")});
+// Có 2 popover cùng dùng .calwrap (chọn ngày + chọn khoá) → chỉ giữ mở cái
+// đang được bấm vào, bấm ra ngoài thì đóng cả hai.
+document.addEventListener("click",e=>{
+  const w=e.target.closest(".calwrap");
+  for(const id of ["cal","coPop"]){const p=$(id);if(p&&(!w||!w.contains(p)))p.classList.remove("open")}
+});
 $("segGrp").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
   [...$("segGrp").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.grp=b.dataset.v;renderAll()});
 $("navPg").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
@@ -541,6 +771,46 @@ $("navPg").addEventListener("click",e=>{const b=e.target.closest("button");if(!b
   renderAll()});
 $("tblTabs").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
   [...$("tblTabs").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.tbl=b.dataset.v;if(A)tableCard(A)});
+for(const [id,fn] of [["expXlsx",expXlsx],["expCsv",expCsv]])
+  $(id).addEventListener("click",e=>{
+    const b=e.currentTarget;
+    if(!EXP.rows.length){const t=b.textContent;b.textContent="Không có dòng nào";setTimeout(()=>b.textContent=t,1400);return}
+    b.disabled=true;
+    try{fn()}catch(err){showFatal("khi xuất file — "+err.message)}
+    finally{setTimeout(()=>{b.disabled=false},600)}
+  });
+/* ---- lọc theo KHOÁ (tag SMAX: K61, KH61, F3…) ---- */
+// Danh sách khoá sinh từ chính dữ liệu, không hardcode — khoá mới mở là tự có.
+// Xếp theo số lead giảm dần để khoá đang chạy nằm trên đầu.
+function syncCoBtn(){
+  const n=S.co.size;
+  $("coBtn").textContent=n===0?"🎓 Tất cả khoá":(n===1?"🎓 "+[...S.co][0]:"🎓 "+n+" khoá");
+  $("coBtn").classList.toggle("on",n>0);
+}
+// Dựng lại mỗi khi nạp thêm dữ liệu — kỳ dài sẽ lòi ra các khoá cũ (K59, K58…)
+// mà cửa sổ 40 ngày không có. Giữ nguyên khoá đang chọn.
+function buildCourses(){
+  const c={};
+  for(const l of DATA.leads)for(const k of (l.co||[]))c[k]=(c[k]||0)+1;
+  const list=$("coList");list.innerHTML="";
+  const arr=Object.entries(c).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));
+  if(!arr.length){list.innerHTML="<div style='font-size:11px;color:var(--ink3);grid-column:1/-1'>Không có tag khoá nào trong kỳ</div>";return}
+  for(const [k,n] of arr){
+    const b=document.createElement("button");b.innerHTML=k+" <i>"+n+"</i>";
+    if(S.co.has(k))b.classList.add("on");
+    b.addEventListener("click",()=>{
+      if(S.co.has(k)){S.co.delete(k);b.classList.remove("on")}else{S.co.add(k);b.classList.add("on")}
+      syncCoBtn();renderAll();
+    });
+    list.appendChild(b);
+  }
+}
+buildCourses();
+$("coBtn").addEventListener("click",()=>{const o=$("coPop").classList.contains("open");$("cal").classList.remove("open");$("coPop").classList.toggle("open",!o)});
+$("coClose").addEventListener("click",()=>$("coPop").classList.remove("open"));
+$("coClear").addEventListener("click",()=>{S.co.clear();[...$("coList").children].forEach(x=>x.classList.remove("on"));syncCoBtn();renderAll()});
+syncCoBtn();
+
 CHDEFS.forEach(([k,s])=>{const b=document.createElement("button");b.className="chip";b.textContent=s;
   b.addEventListener("click",()=>{if(S.ch.has(k)){S.ch.delete(k);b.classList.remove("on")}else{S.ch.add(k);b.classList.add("on")}renderAll()});
   $("chipCh").appendChild(b)});

@@ -15,6 +15,25 @@ function sanitize(s: string | undefined | null): string {
     .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
 }
 
+/**
+ * "Relevant Leads" (RelevantLeads__c) là textarea chứa LINK HTML tới các lead
+ * CŨ của cùng một người — ví dụ lead 07/08 của chị Thu Hà trỏ về "K45 - 2024".
+ * Đây là căn cứ để nhận diện KHÁCH QUAY LẠI (reMKT) → không tính new-in-day.
+ * Trả về nhãn đã bỏ thẻ HTML, rỗng nếu không có lead cũ nào.
+ */
+function relevantText(html: string | null | undefined): string {
+  if (!html) return "";
+  return sanitize(
+    String(html)
+      .replace(/<br\s*\/?>/gi, " · ")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&amp;/g, "&").replace(/&nbsp;/g, " ")
+      .replace(/\s*·\s*$/, "")
+      .replace(/\s+/g, " ")
+      .trim()
+  ).slice(0, 200);
+}
+
 let cachedToken: string | null = null;
 let cachedExpire = 0;
 
@@ -114,6 +133,7 @@ type SfLead = {
   Product__c?: string | null;
   Owner?: { Name: string | null } | null;
   CreatedDate: string;
+  RelevantLeads__c?: string | null;
 };
 
 type SfOpportunity = {
@@ -238,7 +258,7 @@ export async function pullFromSalesforceReal() {
     // 2b. Leads
     console.log("📋 Pulling Leads (with Owner.Name)...");
     const leadSql = `
-      SELECT Id, Name, Email, Phone, Company, Status, Rating, LeadSource, Product__c, Owner.Name, CreatedDate
+      SELECT Id, Name, Email, Phone, Company, Status, Rating, LeadSource, Product__c, Owner.Name, CreatedDate, RelevantLeads__c
       FROM Lead
       WHERE (Email != null OR Phone != null) AND IsConverted = false
       ORDER BY CreatedDate DESC
@@ -306,20 +326,31 @@ export async function pullFromSalesforceReal() {
     // 2026-08-10: Lead tạo 05/08 11:09 nhưng Contact tạo 06/08 12:18 → đếm nhầm
     // sang 06/08). Xem [[project_sf_fix_todo]].
     const convertedLeadCreated = new Map<string, string>(); // contactId → Lead.CreatedDate
+    const convertedRelevant = new Map<string, string>();    // contactId → "Relevant Leads" (lead cũ)
+    // Lead ĐÃ CONVERT giữ Product/Rating, còn Contact thì không → phải lấy từ
+    // Lead gốc, nếu không thì 37/185 lead K61 (đều đã convert) mất khoá và mất
+    // phân loại trên dashboard, không đối chiếu được với báo cáo SF.
+    const convertedProduct = new Map<string, string>();     // contactId → tên sản phẩm
+    const convertedRating = new Map<string, string>();      // contactId → Rating
     {
       const cids = contacts.map((c) => c.Id).filter(Boolean);
       for (let i = 0; i < cids.length; i += 200) {
         const inList = cids.slice(i, i + 200).map((x) => `'${x}'`).join(",");
         if (!inList) continue;
         try {
-          const rows = await sfQuery<{ ConvertedContactId: string; CreatedDate: string }>(
-            `SELECT Id, ConvertedContactId, CreatedDate FROM Lead WHERE IsConverted = true AND ConvertedContactId IN (${inList})`
+          const rows = await sfQuery<{ ConvertedContactId: string; CreatedDate: string; RelevantLeads__c?: string | null; Product__c?: string | null; Rating?: string | null }>(
+            `SELECT Id, ConvertedContactId, CreatedDate, RelevantLeads__c, Product__c, Rating FROM Lead WHERE IsConverted = true AND ConvertedContactId IN (${inList})`
           );
           for (const r of rows) {
             if (!r.ConvertedContactId) continue;
             const prev = convertedLeadCreated.get(r.ConvertedContactId);
             // giữ mốc SỚM nhất nếu 1 contact đến từ nhiều lead
             if (!prev || r.CreatedDate < prev) convertedLeadCreated.set(r.ConvertedContactId, r.CreatedDate);
+            const rel = relevantText(r.RelevantLeads__c);
+            if (rel) convertedRelevant.set(r.ConvertedContactId, rel);
+            const pn = r.Product__c ? (productIdToName.get(r.Product__c) || r.Product__c) : "";
+            if (pn) convertedProduct.set(r.ConvertedContactId, sanitize(pn));
+            if (r.Rating) convertedRating.set(r.ConvertedContactId, sanitize(r.Rating));
           }
         } catch (e) {
           console.warn(`   ⚠️ query converted leads lỗi: ${(e as Error).message.slice(0, 100)}`);
@@ -345,6 +376,9 @@ export async function pullFromSalesforceReal() {
         payload: {
           sf_contact_id: c.Id,
           sf_name: sanitize(c.Name || ""),   // tên BÊN SF (khác tên SMAX) → tra cứu nhanh
+          prior_leads: convertedRelevant.get(c.Id) || "",  // có ⇒ khách quay lại (reMKT)
+          product: convertedProduct.get(c.Id) || "",       // khoá bên SF → lọc theo khoá
+          rating: convertedRating.get(c.Id) || "",         // Hot/Warm/Cold bên SF
           lead_source: sanitize(lsource),
           owner: sanitize(owner),
           real: true,
@@ -367,6 +401,9 @@ export async function pullFromSalesforceReal() {
         payload: {
           sf_lead_id: l.Id,
           sf_name: sanitize(l.Name || ""),   // tên BÊN SF (khác tên SMAX) → tra cứu nhanh
+          prior_leads: relevantText(l.RelevantLeads__c),   // có ⇒ khách quay lại (reMKT)
+          product: l.Product__c ? sanitize(productIdToName.get(l.Product__c) || l.Product__c) : "", // khoá bên SF
+          rating: sanitize(l.Rating || ""),                  // Hot/Warm/Cold bên SF
           lead_source: sanitize(lsource),
           owner: sanitize(owner),
           status: sanitize(l.Status),

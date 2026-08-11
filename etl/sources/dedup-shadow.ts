@@ -10,6 +10,11 @@
  * Chạy: npm run etl:dedup:shadow
  */
 import { admin } from "../lib/supabase-admin";
+import { isCompanyPhone, isCompanyEmail } from "../lib/company-contacts";
+/** khoá tên tuyệt đối: bỏ dấu, gộp khoảng trắng — dùng cho ngoại lệ SĐT công ty */
+const nameKey = (s: unknown) => String(s ?? "").toLowerCase()
+  .normalize("NFD").replace(/[̀-ͯ]/g, "")
+  .replace(/[^a-z0-9]+/g, " ").trim();
 
 const ID = process.env.LARK_APP_ID || "", SEC = process.env.LARK_APP_SECRET || "", APP = process.env.LARK_BASE_APP_TOKEN || "";
 const U = "https://open.larksuite.com/open-apis";
@@ -38,6 +43,72 @@ export async function runDedupShadow() {
     for (const o of others) { await admin.from("fact_touchpoint").update({ lead_id: keep.lid }).eq("lead_id", o.lid); await admin.from("fact_lead_score").delete().eq("lead_id", o.lid); const { error } = await admin.from("dim_lead").delete().eq("lead_id", o.lid); if (!error) { dropIds.push(o.lid); pidMerged++; } }
   }
   if (pidMerged) console.log(`[dedup-shadow] gộp pid-dup (đếm đôi): ${pidMerged}`);
+
+  // 0b) SĐT/GMAIL-DUP (user chốt 2026-08-11: "cùng sđt / cùng gmail → gộp").
+  //     PHẢI chạy mỗi giờ chứ không gộp một lần là xong: khách thường NHẮN
+  //     TRƯỚC rồi mới cho số (ca Quang Thảo chat 08/08, đưa số 10/08). Lúc SMAX
+  //     tạo bản ghi kênh mới thì chưa có SĐT → guard chống-đẻ-lead trong
+  //     identity.ts không chặn được → sinh lead mới; đến khi lead-first-chat
+  //     điền số vào thì đã thành 2 lead cùng số. Khối này dọn trong ≤1 giờ.
+  //     CHỈ dùng @gmail.com cho email — email công ty (ketoan@, info@) nhiều
+  //     người dùng chung, gộp là sai người.
+  {
+    const nph = (p: unknown) => { const d = String(p ?? "").replace(/\D/g, ""); return d.length >= 9 ? d.slice(-9) : ""; };
+    const gml = (e: unknown) => { const v = String(e ?? "").toLowerCase().trim(); return v.endsWith("@gmail.com") ? v : ""; };
+    // SĐT/email CỦA CÔNG TY không được dùng làm khoá gộp — SMAX gán nhầm chúng
+    // cho 22 người khác nhau, gộp theo đó sẽ dồn cả người lạ vào một hồ sơ (ca
+    // "Sơn Huyền" ôm mốc tag của 3 người). Ngoại lệ: TÊN trùng 100% thì vẫn gộp
+    // (tài khoản test như "Tưng Lan" dùng số này nhiều lần).
+    const keyPh = (l: { phone: string | null; full_name: string | null }) => {
+      const p = nph(l.phone); if (!p) return "";
+      return isCompanyPhone(l.phone) ? (l.full_name ? `ten:${nameKey(l.full_name)}|${p}` : "") : p;
+    };
+    const keyGm = (l: { email: string | null; full_name: string | null }) => {
+      const g3 = gml(l.email); if (!g3) return "";
+      return isCompanyEmail(l.email) ? (l.full_name ? `ten:${nameKey(l.full_name)}|${g3}` : "") : g3;
+    };
+    const all: { lid: string; email: string | null; phone: string | null; tags: string[] }[] = [];
+    let ff = 0;
+    while (ff < 90000) {
+      const { data } = await admin.from("dim_lead").select("lead_id, email, phone, smax_tags").range(ff, ff + 999);
+      if (!data?.length) break;
+      for (const l of data) all.push({ lid: l.lead_id, email: l.email, phone: l.phone, tags: Array.isArray(l.smax_tags) ? l.smax_tags : [] });
+      if (data.length < 1000) break; ff += 1000;
+    }
+    // union-find: cùng SĐT HOẶC cùng gmail ⇒ một người
+    const par = new Map<string, string>();
+    const find = (x: string): string => { let r = x; while (par.get(r) !== r) r = par.get(r)!; while (par.get(x) !== r) { const n = par.get(x)!; par.set(x, r); x = n; } return r; };
+    const uni = (a: string, b: string) => { const ra = find(a), rb = find(b); if (ra !== rb) par.set(ra, rb); };
+    for (const l of all) par.set(l.lid, l.lid);
+    const seenPh = new Map<string, string>(), seenGm = new Map<string, string>();
+    for (const l of all) {
+      const p = keyPh(l); if (p) { const o = seenPh.get(p); if (o) uni(o, l.lid); else seenPh.set(p, l.lid); }
+      const g2 = keyGm(l); if (g2) { const o = seenGm.get(g2); if (o) uni(o, l.lid); else seenGm.set(g2, l.lid); }
+    }
+    const grp = new Map<string, typeof all>();
+    for (const l of all) { const r = find(l.lid); const a = grp.get(r) || []; a.push(l); grp.set(r, a); }
+    let cMerged = 0;
+    for (const [, leads] of grp) {
+      if (leads.length < 2) continue;
+      let keep = leads[0], bn = -1;
+      for (const l of leads) { const { count } = await admin.from("fact_touchpoint").select("*", { count: "exact", head: true }).eq("lead_id", l.lid); if ((count || 0) > bn) { bn = count || 0; keep = l; } }
+      const others = leads.filter(l => l.lid !== keep.lid);
+      // GIỮ LẠI mọi định danh của nhóm, không chỉ điền ô trống — nếu bỏ rơi
+      // email/SĐT của bản bị xoá thì lần sync sau SMAX trả lại giá trị đó,
+      // không lead nào giữ ⇒ đẻ lead mới ⇒ trùng quay lại.
+      const unionTags = [...new Set([...keep.tags, ...others.flatMap(o => o.tags)])];
+      const email = keep.email || others.map(o => o.email).find(Boolean) || null;
+      const phone = keep.phone || others.map(o => o.phone).find(Boolean) || null;
+      await admin.from("dim_lead").update({ smax_tags: unionTags, ...(email ? { email } : {}), ...(phone ? { phone } : {}) }).eq("lead_id", keep.lid);
+      for (const o of others) {
+        await admin.from("fact_touchpoint").update({ lead_id: keep.lid }).eq("lead_id", o.lid);
+        await admin.from("fact_lead_score").delete().eq("lead_id", o.lid);
+        const { error } = await admin.from("dim_lead").delete().eq("lead_id", o.lid);
+        if (!error) { dropIds.push(o.lid); cMerged++; }
+      }
+    }
+    if (cMerged) console.log(`[dedup-shadow] gộp trùng SĐT/Gmail: ${cMerged}`);
+  }
   // leads thiếu pid
   const nullLeads: { lid: string; email: string | null; phone: string | null }[] = []; f = 0;
   while (f < 90000) { const { data } = await admin.from("dim_lead").select("lead_id, email, phone").is("external_profile_id", null).range(f, f + 999); if (!data?.length) break; for (const l of data) nullLeads.push({ lid: l.lead_id, email: l.email, phone: l.phone }); if (data.length < 1000) break; f += 1000; }

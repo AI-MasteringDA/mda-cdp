@@ -153,6 +153,24 @@ async function smaxPost(path: string, body: unknown, retries = 3): Promise<unkno
   throw new Error(`SMAX API failed after ${retries} retries: ${lastErr}`);
 }
 
+/**
+ * Tra ĐÍCH DANH một customer trên SMAX bằng tham số `q` (số điện thoại hoặc
+ * tên). Dùng để vá phần khuyết của trần 10.000: người nằm ngoài cả hai chiều
+ * asc/desc vẫn tra được — ca Lý Hồng Bảo (`q="0938360681"` → 31 tag, sớm nhất
+ * 10/02/2026) không hề xuất hiện trong 10k mới nhất.
+ * Lưu ý đã đo: tra bằng EMAIL trả về 0 kết quả — chỉ dùng phone/tên.
+ */
+export async function smaxFindCustomer(term: string): Promise<Record<string, unknown> | null> {
+  const t = String(term || "").trim();
+  if (!t) return null;
+  try {
+    const r = await smaxPost(`/bizs/${BIZ_SLUG}/customers`, { size: 5, q: t }) as { data?: Record<string, unknown>[] };
+    return r.data?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function pullFromSmaxReal() {
   console.log("📡 [SMAX REAL] Đang gọi API thật...");
 
@@ -322,13 +340,41 @@ export async function pullFromSmaxReal() {
     const customerCutoffMs = cutoffMs > 0
       ? cutoffMs
       : Date.now() - customerLookbackDays * 86400_000;
-    console.log(`   ↳ Pulling /customers (size=${CUSTOMER_SIZE}, filter interaction.last > ${new Date(customerCutoffMs).toISOString().slice(0, 19)})...`);
-    const custRes = await smaxPost(`/bizs/${BIZ_SLUG}/customers`, { size: CUSTOMER_SIZE }) as { data?: SmaxCustomer[]; total?: number };
-    const allCustomers = (custRes.data || []).filter((c) => {
+    // TRẦN 10.000 (đo 2026-08-10): biz có 22.283 customer nhưng /customers chặn
+    // cứng ở 10k — `page`/`offset`/`skip` bị BỎ QUA, `size>10000` trả lỗi. Kéo
+    // 10k mới nhất làm MẤT 852 Hot Lead cũ (audit: SMAX 2.978 ↔ Lark 2.126) →
+    // lead cũ trông như lead mới (ca Lý Hồng Bảo, SMAX tạo 2025-05-08).
+    // CÁCH PHỦ ĐỦ: `page_pids` CÓ lọc được, và tổng theo 7 page cộng lại đúng
+    // bằng tổng biz (lệch 0), page lớn nhất 8.572 < trần ⇒ kéo theo từng page
+    // là phủ 100%. Xem etl/debug/smax-audit.ts để đối soát lại bất cứ lúc nào.
+    console.log(`   ↳ Pulling /customers theo từng page (filter interaction.last > ${new Date(customerCutoffMs).toISOString().slice(0, 19)})...`);
+    const byId = new Map<string, SmaxCustomer>();
+    let bizTotal = 0, capHit = 0;
+    try {
+      const pagesRes = await fetch(`${BASE}/bizs/${BIZ_SLUG}/pages`, { headers: { Authorization: `Bearer ${TOKEN}` } }).then((r) => r.json()) as { data?: { pid: string; name?: string }[] };
+      const pageList = pagesRes.data || [];
+      if (!pageList.length) throw new Error("không lấy được danh sách page");
+      for (const p of pageList) {
+        const res = await smaxPost(`/bizs/${BIZ_SLUG}/customers`, { size: CUSTOMER_SIZE, page_pids: [p.pid] }) as { data?: SmaxCustomer[]; total?: number };
+        const rows = res.data || [];
+        bizTotal += res.total || 0;
+        // Chạm trần ở 1 page ⇒ page đó đang bị cắt, phải chia nhỏ hơn nữa.
+        if (rows.length >= CUSTOMER_SIZE) { capHit++; console.warn(`   ⚠️ page "${p.name}" chạm trần ${CUSTOMER_SIZE} — có thể đang bị cắt`); }
+        for (const c of rows) if (c.id) byId.set(c.id, c);
+      }
+    } catch (e) {
+      // Dự phòng: quay về cách cũ (10k mới nhất) để ETL không chết hẳn.
+      console.warn(`   ⚠️ kéo theo page lỗi (${(e as Error).message.slice(0, 80)}) → fallback 10k mới nhất`);
+      const fb = await smaxPost(`/bizs/${BIZ_SLUG}/customers`, { size: CUSTOMER_SIZE }) as { data?: SmaxCustomer[]; total?: number };
+      for (const c of fb.data || []) if (c.id) byId.set(c.id, c);
+      bizTotal = fb.total || 0;
+    }
+    const pulledCustomers = Array.from(byId.values());
+    const allCustomers = pulledCustomers.filter((c) => {
       const t = c.interaction?.last || c.updated_at || c.created_at;
       return t ? new Date(t).getTime() >= customerCutoffMs : false;
     });
-    console.log(`   ↳ /customers: ${custRes.data?.length || 0} pulled, ${allCustomers.length} past cutoff (SMAX total: ${custRes.total})`);
+    console.log(`   ↳ /customers: ${pulledCustomers.length}/${bizTotal} khách (phủ ${bizTotal ? Math.round(pulledCustomers.length / bizTotal * 100) : 0}%${capHit ? `, ${capHit} page chạm trần` : ""}), ${allCustomers.length} past cutoff`);
 
     // Identity resolution — merge threads + customers, with regex extraction
     // from name/message so "Nguyễn A_x@y.com" or "call me 0912345678" gets picked up.
