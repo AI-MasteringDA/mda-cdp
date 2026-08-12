@@ -13,7 +13,21 @@ const PUBLIC_ROUTES = [
   "/api/cron/",     // Vercel Cron endpoints (auth via x-vercel-cron header)
 ];
 
+// Cửa riêng cho bot chụp ảnh dashboard hằng ngày (etl/screenshot/radar-snapshot.ts).
+// Bot không đăng nhập Google được nên KHÔNG thể qua middleware bằng session
+// thường — thay vào đó, ?key=<RADAR_SNAPSHOT_KEY> mở đúng 2 đường dẫn cần
+// thiết (trang tĩnh + API dữ liệu) mà không mở toàn bộ app ra công khai.
+const SNAPSHOT_PATHS = ["/radar.html", "/api/radar"];
+function isSnapshotBypass(request: NextRequest): boolean {
+  const secret = process.env.RADAR_SNAPSHOT_KEY;
+  if (!secret) return false;
+  const pathname = request.nextUrl.pathname;
+  if (!SNAPSHOT_PATHS.includes(pathname)) return false;
+  return request.nextUrl.searchParams.get("key") === secret;
+}
+
 export async function updateSession(request: NextRequest) {
+  if (isSnapshotBypass(request)) return NextResponse.next({ request });
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(

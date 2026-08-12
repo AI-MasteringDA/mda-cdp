@@ -263,7 +263,10 @@ td b{font-weight:550}
 <script type="module">
 let DATA;
 try{
-  const __r = await fetch("/api/radar",{cache:"no-store"});
+  // Bot chụp ảnh (không đăng nhập Google) mở trang bằng ?key=... — chuyển tiếp
+  // đúng khoá đó sang API dữ liệu, không thì middleware chặn request này.
+  const __key=new URLSearchParams(location.search).get("key");
+  const __r = await fetch("/api/radar"+(__key?("?key="+encodeURIComponent(__key)):""),{cache:"no-store"});
   if(!__r.ok) throw new Error("API "+__r.status);
   DATA = await __r.json();
   if(DATA.error) throw new Error(DATA.error);

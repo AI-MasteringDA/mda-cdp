@@ -1,0 +1,36 @@
+name: Radar dashboard snapshot → gửi Lark group
+
+on:
+  schedule:
+    # 8:00 sáng giờ VN (UTC+7) = 1:00 UTC
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: radar-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund --prefer-offline
+      - name: Install Chromium (Playwright)
+        run: npx playwright install --with-deps chromium
+      - name: Chụp dashboard + gửi vào group Lark
+        env:
+          LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+          LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+          RADAR_SNAPSHOT_KEY: ${{ secrets.RADAR_SNAPSHOT_KEY }}
+          RADAR_DASHBOARD_URL: https://mda-cdp.vercel.app
+          LARK_DAILY_WEBHOOK: ${{ secrets.LARK_DAILY_WEBHOOK }}
+        run: npm run etl:radar:snapshot
