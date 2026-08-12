@@ -345,7 +345,7 @@ function agg(){
   const days=keys,idx=dIdx;
   const prevSet=new Set(span.map(d=>addDays(d,-span.length)));
   const z=()=>days.map(()=>0);
-  const r={days,lab,gran,moi:z(),P:z(),C:z(),W:z(),Hc:z(),U:z(),H:z(),chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],newWin:[],byCls:{P:[],C:[],W:[],H:[],U:[],cph:[]},cphWin:0,reWin:0,upWin:0,prev:{moi:0,P:0,C:0,W:0,H:0}};
+  const r={days,lab,gran,moi:z(),P:z(),C:z(),W:z(),Hc:z(),U:z(),H:z(),chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],newWin:[],byCls:{P:[],C:[],W:[],H:[],U:[],cph:[]},cphWin:0,reWin:0,upWin:0,Hsrc:{smax:0,sf:0},prev:{moi:0,P:0,C:0,W:0,H:0}};
   CHDEFS.forEach(([k])=>r.chCount[k]=0);
   for(const l of DATA.leads){
     if(!leadPass(l))continue;
@@ -384,7 +384,7 @@ function agg(){
     // từ ngày TRƯỚC rồi hôm nay mới lên Hot ⇒ KHÔNG phải "new in day", không
     // tính vào KPI "Hot mới". Vẫn HIỆN trong bảng chi tiết kèm nhãn ↑ nâng hạng
     // để sales theo dõi được — chỉ không đếm.
-    if(l.ha&&idx[l.ha]!=null){if(l.up)r.upWin++;else r.H[idx[l.ha]]++;r.hotLeads.push(l)}
+    if(l.ha&&idx[l.ha]!=null){if(l.up)r.upWin++;else{r.H[idx[l.ha]]++;r.Hsrc[l.sf?"sf":"smax"]++}r.hotLeads.push(l)}
     else if(l.ha&&prevSet.has(l.ha)&&!l.up)r.prev.H++;
   }
   r.hotLeads.sort((a,b)=>(b.ha||"").localeCompare(a.ha||""));
@@ -529,8 +529,11 @@ function kpis(a){
     const v=sum(k),base=a.prev[k],diff=v-base;
     const cls=diff>0?"up":(diff<0?"down":"");
     const arrow=diff>0?"▲":(diff<0?"▼":"–");
+    // Hot mới gộp từ 2 nguồn (SMAX gắn tag + Salesforce lead riêng) — tách nhỏ
+    // ra để Sales biết tỉ trọng, không phải đoán qua bảng chi tiết.
+    const srcSub=k==="H"?"<div class='delta' style='margin-top:1px'>SMAX "+a.Hsrc.smax+" · SF "+a.Hsrc.sf+"</div>":"";
     h+="<div class='kpi'><span class='lbl'>"+nm+"</span><div class='v'>"+v+"</div><span class='tag' style='background:var("+cvar+")'></span>"
-      +"<div class='delta'><span class='"+cls+"'>"+arrow+" "+Math.abs(diff)+"</span> so kỳ trước ("+base+")</div>"
+      +"<div class='delta'><span class='"+cls+"'>"+arrow+" "+Math.abs(diff)+"</span> so kỳ trước ("+base+")</div>"+srcSub
       +"<button class='vd' data-tab='"+tab+"'>Xem chi tiết →</button></div>";
   }
   h+="<div class='kpi'><span class='lbl'>Chưa phản hồi</span><div class='v'>"+a.cphWin+"</div><span class='tag' style='background:var(--sW)'></span>"
@@ -819,6 +822,23 @@ CHDEFS.forEach(([k,s])=>{const b=document.createElement("button");b.className="c
   $("chipCh").appendChild(b)});
 $("chipClear").addEventListener("click",()=>{S.ch.clear();[...$("chipCh").children].forEach(x=>x.classList.remove("on"));renderAll()});
 $("pinBtn").addEventListener("click",()=>$("side").classList.toggle("pinned"));
+
+// DEEP LINK — mở trang kèm ?days=1&grp=bi (VD gửi từ bot Lark) là dashboard tự
+// vào đúng kỳ + bộ lọc, không phải bấm tay lại. Bấm NÚT THẬT (không tự lặp lại
+// logic S/ensureWindow/renderAll) để không sót bước nào của handler gốc.
+(()=>{
+  const qs=new URLSearchParams(location.search);
+  const qDays=qs.get("days"),qGrp=qs.get("grp");
+  if(qDays!=null){
+    const btn=[...$("segDays").children].find(x=>x.dataset.v===qDays);
+    if(btn)btn.click();
+  }
+  if(qGrp==="bi"||qGrp==="fa"||qGrp==="all"){
+    const btn=[...$("segGrp").children].find(x=>x.dataset.v===qGrp);
+    if(btn)btn.click();
+  }
+})();
+
 renderAll();
 requestAnimationFrame(()=>renderAll()); /* render lần 2 sau khi layout ổn định để chart đo đúng kích thước */
 addEventListener("resize",()=>{clearTimeout(window.__rz);window.__rz=setTimeout(renderAll,120)});
