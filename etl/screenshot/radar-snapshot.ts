@@ -29,6 +29,11 @@ const WEBHOOK = process.env.LARK_DAILY_WEBHOOK || "";
 const ID = process.env.LARK_APP_ID || "", SEC = process.env.LARK_APP_SECRET || "";
 const U = "https://open.larksuite.com/open-apis";
 
+// data-v của nút kỳ trong #segDays: 0=Hôm nay, 1=Hôm qua, 7/14/30=N ngày, 9999=Tất cả.
+// Báo cáo hằng ngày phải chốt đúng "Hôm qua" (ngày đã trọn), không phải cửa sổ
+// rolling 14 ngày mặc định lúc mở trang — số liệu mới có ý nghĩa "báo cáo ngày".
+const PERIOD = process.env.RADAR_SNAPSHOT_PERIOD || "1";
+
 async function shoot(): Promise<Buffer> {
   const browser = await chromium.launch();
   try {
@@ -37,9 +42,12 @@ async function shoot(): Promise<Buffer> {
     console.log(`[snapshot] mở ${url}`);
     await page.goto(url, { waitUntil: "networkidle", timeout: 45_000 });
     // radar.html vẽ SVG bằng JS sau khi fetch xong — đợi thêm để chart kịp render.
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(2000);
     const errBox = await page.locator("text=Không tải được dữ liệu").count();
     if (errBox > 0) throw new Error("trang báo lỗi tải dữ liệu — key sai hoặc API lỗi");
+    // Chuyển sang đúng kỳ báo cáo rồi đợi biểu đồ vẽ lại.
+    await page.click(`#segDays button[data-v="${PERIOD}"]`);
+    await page.waitForTimeout(1200);
     return await page.screenshot({ fullPage: false });
   } finally {
     await browser.close();
