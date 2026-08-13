@@ -189,7 +189,7 @@ td b{font-weight:550}
   <main class="main">
     <div class="bar" role="toolbar">
       <div class="tabs" id="segDays">
-        <button data-v="0">Hôm nay</button><button data-v="1">Hôm qua</button><button data-v="7">7 ngày</button><button data-v="14" class="on">14 ngày</button><button data-v="30">30 ngày</button><button data-v="9999">Tất cả</button>
+        <button data-v="am" title="17:00 hôm qua – 10:30 hôm nay">🌙 Sáng</button><button data-v="pm" title="10:30 – 17:00 hôm nay">☀️ Chiều</button><button data-v="0">Hôm nay</button><button data-v="1">Hôm qua</button><button data-v="7">7 ngày</button><button data-v="14" class="on">14 ngày</button><button data-v="30">30 ngày</button><button data-v="9999">Tất cả</button>
       </div>
       <div class="tabs" id="segGrp">
         <button data-v="all" class="on">Tất cả</button><button data-v="bi">BI</button><button data-v="fa">FA</button>
@@ -285,7 +285,7 @@ function showFatal(msg){
 addEventListener("error",e=>showFatal(String(e.message||e.error||"lỗi không rõ")));
 addEventListener("unhandledrejection",e=>showFatal(String(e.reason&&e.reason.message||e.reason||"lỗi tải dữ liệu")));
 const CHDEFS=[["Facebook MDA","FB MDA"],["Facebook PTA","FB PTA"],["Zalo 48","Zalo 48"],["Zalo OA MDA","Zalo OA"],["Website MDA","Website"],["Instagram MDA","IG MDA"],["Instagram PTA","IG PTA"]];
-const S={days:14,grp:"all",ch:new Set(),co:new Set(),tbl:"all",from:null,to:null};
+const S={days:14,grp:"all",ch:new Set(),co:new Set(),tbl:"all",from:null,to:null,customWin:null};
 const $=id=>document.getElementById(id);
 const fmtD=d=>d.slice(8,10)+"/"+d.slice(5,7);
 const asofDate=DATA.asOf.slice(0,10);
@@ -293,7 +293,20 @@ $("asof").textContent=DATA.asOf;
 const addDays=(d,n)=>{const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10)};
 const YDAY=addDays(asofDate,-1);
 function rangeDays(a,b){const out=[];let d=a;while(d<=b){out.push(d);d=addDays(d,1)}return out}
+// KHUNG GIỜ CỐ ĐỊNH (chốt 2026-08-12) — báo cáo bot 2 đợt/ngày cần đúng nhịp
+// bàn giao ca, không phải biên ngày lịch 00:00: đợt sáng (10:30) chốt số liệu
+// "17:00 hôm qua → 10:30 hôm nay"; đợt chiều (17:00) chốt "10:30 → 17:00 hôm
+// nay". vnMs quy đổi ngày+giờ VN sang epoch ms thật (VN = UTC+7).
+const vnMs=(dateStr,hh,mm)=>{const [y,m,d]=dateStr.split("-").map(Number);return Date.UTC(y,m-1,d,hh,mm,0)-7*3600000};
+function customWinFor(kind){
+  if(kind==="am"){const from=vnMs(YDAY,17,0),to=vnMs(asofDate,10,30);
+    return {from,to,pFrom:from-(to-from),pTo:from,label:"17:00 "+fmtD(YDAY)+" – 10:30 "+fmtD(asofDate)};}
+  if(kind==="pm"){const from=vnMs(asofDate,10,30),to=vnMs(asofDate,17,0);
+    return {from,to,pFrom:from-(to-from),pTo:from,label:"10:30 – 17:00 · "+fmtD(asofDate)};}
+  return null;
+}
 function rangeLbl(){
+  if(S.customWin)return S.customWin.label;
   if(S.from&&S.to)return S.from===S.to?("Ngày "+fmtD(S.from)):(fmtD(S.from)+" – "+fmtD(S.to)+" ("+rangeDays(S.from,S.to).length+" ngày)");
   if(S.days===0)return "Hôm nay · "+fmtD(asofDate)+" (chưa trọn ngày)";
   if(S.days===1)return "Hôm qua · "+fmtD(YDAY);
@@ -339,7 +352,48 @@ function bucketize(span){
   }
   return {gran,keys,lab,dIdx};
 }
+// aggCustom(): BẢN SAO của agg() bên dưới, thích ứng cho khung GIỜ chính xác
+// (VD "17:00 hôm qua → 10:30 hôm nay") thay vì bó theo NGÀY LỊCH. Chủ động copy
+// nguyên logic (không tái dùng qua idx[ngày]) để giữ ĐÚNG mọi quy tắc đã chốt —
+// reMKT loại hẳn, Prospect/Cold/Warm/chưa-tag theo dMs, Hot theo haMs + loại
+// nâng hạng, mỗi lead 1 nhóm — sửa 1 chỗ ở đây thì nhớ soi lại agg() và ngược
+// lại, 2 hàm phải luôn khớp quy tắc.
+function aggCustom(cw){
+  const days=["·"],lab=[cw.label],gran="custom";
+  const z=()=>days.map(()=>0);
+  const r={days,lab,gran,moi:z(),P:z(),C:z(),W:z(),Hc:z(),U:z(),H:z(),chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],newWin:[],byCls:{P:[],C:[],W:[],H:[],U:[],cph:[]},cphWin:0,reWin:0,upWin:0,Hsrc:{smax:0,sf:0},prev:{moi:0,P:0,C:0,W:0,H:0}};
+  CHDEFS.forEach(([k])=>r.chCount[k]=0);
+  const inCur=ms=>ms!=null&&ms>=cw.from&&ms<cw.to;
+  const inPrev=ms=>ms!=null&&ms>=cw.pFrom&&ms<cw.pTo;
+  for(const l of DATA.leads){
+    if(!leadPass(l))continue;
+    const has=c=>l.cls.includes(c);
+    if(l.re){
+      if(inCur(l.dMs)||inCur(l.haMs)){r.reWin++;r.newWin.push(l);if(inCur(l.haMs))r.hotLeads.push(l)}
+      continue;
+    }
+    if(inCur(l.dMs)){
+      r.moi[0]++;
+      const c=has("P")?"P":(has("W")?"W":(has("C")?"C":(has("H")?"H":"U")));
+      if(c==="H")r.Hc[0]++;else if(c==="U")r.U[0]++;else r[c][0]++;
+      r.byCls[c].push(l);
+      if(c!=="U"){if(l.bi)r.biCls[c]++;if(l.fa)r.faCls[c]++}
+      for(const ch2 of l.ch)if(ch2 in r.chCount)r.chCount[ch2]++;
+      r.newWin.push(l);
+      if(l.cph){r.cphWin++;r.byCls.cph.push(l)}
+    }else if(inPrev(l.dMs)){
+      r.prev.moi++;
+      if(has("P"))r.prev.P++;else if(has("W"))r.prev.W++;else if(has("C"))r.prev.C++;
+    }
+    if(inCur(l.haMs)){if(l.up)r.upWin++;else{r.H[0]++;r.Hsrc[l.sf?"sf":"smax"]++}r.hotLeads.push(l)}
+    else if(inPrev(l.haMs)&&!l.up)r.prev.H++;
+  }
+  r.hotLeads.sort((a,b)=>(b.ha||"").localeCompare(a.ha||""));
+  r.newWin.sort((a,b)=>(b.d||"").localeCompare(a.d||""));
+  return r;
+}
 function agg(){
+  if(S.customWin)return aggCustom(S.customWin);
   const span=spanDays();
   const {gran,keys,lab,dIdx}=bucketize(span);
   const days=keys,idx=dIdx;
@@ -700,7 +754,15 @@ async function ensureWindow(n){
 }
 $("segDays").addEventListener("click",async e=>{const b=e.target.closest("button");if(!b)return;
   [...$("segDays").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");
-  const v=+b.dataset.v;
+  const raw=b.dataset.v;
+  // "am"/"pm" = khung giờ cố định (không phải số ngày) → không qua ensureWindow,
+  // dữ liệu 1 ngày gần nhất luôn nằm sẵn trong cửa sổ mặc định đã tải.
+  if(raw==="am"||raw==="pm"){
+    S.customWin=customWinFor(raw);S.from=S.to=null;S.pick=[];syncCalBtn();
+    renderAll();return;
+  }
+  S.customWin=null;
+  const v=+raw;
   S.days=v;S.from=S.to=null;S.pick=[];syncCalBtn();
   await ensureWindow(v>=9999?3000:v);
   renderAll()});
@@ -751,7 +813,7 @@ $("calMs").addEventListener("click",e=>{const b=e.target.closest("button[data-d]
     S.pick=[d];
     $("calInfo").textContent="Đã chọn ngày đầu — BẤM TIẾP 1 NGÀY để tạo khoảng";
   }
-  S.from=S.pick[0];S.to=S.pick[S.pick.length-1];
+  S.from=S.pick[0];S.to=S.pick[S.pick.length-1];S.customWin=null;
   [...$("segDays").children].forEach(x=>x.classList.remove("on"));
   drawCal();syncCalBtn();renderAll();});
 $("calBtn").addEventListener("click",e=>{e.stopPropagation();const c=$("cal");const open=c.classList.toggle("open");
@@ -759,7 +821,7 @@ $("calBtn").addEventListener("click",e=>{e.stopPropagation();const c=$("cal");co
 $("calPrev").addEventListener("click",()=>{calM=monthAdd(calM,-1);drawCal()});
 $("calNext").addEventListener("click",()=>{calM=monthAdd(calM,1);drawCal()});
 $("calClose").addEventListener("click",()=>$("cal").classList.remove("open"));
-$("calClear").addEventListener("click",()=>{S.from=S.to=null;S.pick=[];$("calInfo").textContent="Bấm 1 ngày để xem ngày đó · bấm ngày thứ 2 để chọn khoảng";
+$("calClear").addEventListener("click",()=>{S.from=S.to=null;S.customWin=null;S.pick=[];$("calInfo").textContent="Bấm 1 ngày để xem ngày đó · bấm ngày thứ 2 để chọn khoảng";
   [...$("segDays").children].forEach((x,i)=>x.classList.toggle("on",x.dataset.v==="14"));S.days=14;
   drawCal();syncCalBtn();renderAll();});
 // Có 2 popover cùng dùng .calwrap (chọn ngày + chọn khoá) → chỉ giữ mở cái

@@ -42,6 +42,11 @@ function toLead(f: Record<string, Cell>, cutoff: string) {
   if (!tags.length && g(f["Communication Channels"]).includes(COMMENT_ONLY)) return null;
   const bc = vnDate(f["Báo cáo ngày"]), ha = vnDate(f["Hot Lead lúc"]);
   if ((!bc || bc < cutoff) && (!ha || ha < cutoff)) return null;
+  // Mốc GIỜ CHÍNH XÁC (epoch ms thật, KHÔNG dịch +7h như vnDate) — vnDate() bên
+  // trên chỉ giữ được ngày, mất giờ. Cần cho báo cáo theo khung giờ (VD
+  // "17:00 hôm qua → 10:30 hôm nay") không rơi khớp biên ngày lịch.
+  const bcMs = typeof f["Báo cáo ngày"] === "number" ? f["Báo cáo ngày"] as number : null;
+  const haMs = typeof f["Hot Lead lúc"] === "number" ? f["Hot Lead lúc"] as number : null;
   // LUỒNG CHỊ LA (chốt 2026-08-10): ĐÃ gắn tag phân loại từ trước thì hôm nay
   // lên Hot chỉ là NÂNG HẠNG, không phải "Hot lead mới trong ngày". Mốc gắn tag
   // nằm ngay trên cùng dòng (SMAX gộp mọi tag của 1 khách vào 1 bản ghi) nên
@@ -60,7 +65,7 @@ function toLead(f: Record<string, Cell>, cutoff: string) {
     const dd = vnDate(f[col]); if (dd) cd[k] = dd;
   }
   return {
-    n: gs(f["Lead Name"]) || "(?)", d: bc, ha, cd, up, upFrom: up ? priorCls : "",
+    n: gs(f["Lead Name"]) || "(?)", d: bc, ha, dMs: bcMs, haMs, cd, up, upFrom: up ? priorCls : "",
     cls: tags.map(t => ({ hotlead: "H", coldlead: "C", warmlead: "W", prospect: "P" } as Record<string, string>)[norm(t)]).filter(Boolean),
     bi: tags.some(t => /^kh?\d{2,3}$/i.test(t.trim())),
     fa: tags.some(t => /^f\d(\.\d)?$/i.test(t.trim())),
@@ -73,7 +78,7 @@ function toLead(f: Record<string, Cell>, cutoff: string) {
   };
 }
 
-type Lead = { n: string; n2?: string; d: string | null; ha: string | null; cd: Record<string, string>; up: boolean; upFrom: string; cls: string[]; bi: boolean; fa: boolean; co: string[]; ch: string[]; ph: string; cph: boolean; ky: string[]; re: string; sf?: boolean };
+type Lead = { n: string; n2?: string; d: string | null; ha: string | null; dMs: number | null; haMs: number | null; cd: Record<string, string>; up: boolean; upFrom: string; cls: string[]; bi: boolean; fa: boolean; co: string[]; ch: string[]; ph: string; cph: boolean; ky: string[]; re: string; sf?: boolean };
 
 export async function GET(req: Request) {
   // Cửa sổ dữ liệu tính bằng ngày. Mặc định 40 cho nhanh (~2,6s); dashboard tự
@@ -187,6 +192,7 @@ export async function GET(req: Request) {
         // không đủ điều kiện để đếm ⇒ mất hẳn (16 ca khoá K61, đo 2026-08-10).
         if (g(f["Tag SMAX"]).some(t => norm(t) === "hotlead")) continue;
         const ha = vnDate(f["Time"]); if (!ha || ha < cutoff) continue;
+        const haMs2 = typeof f["Time"] === "number" ? f["Time"] as number : null;
         // Tên SF thường khác tên SMAX (SMAX "K40-Bảo Lee" ↔ SF "Lý Hồng Bảo") →
         // hiện tên SF làm chính để tra trên Salesforce được ngay, kèm tên SMAX.
         const sfName = gs(f["Tên SF"]).trim(), smaxName = gs(f["Lead Name"]).trim();
@@ -201,7 +207,7 @@ export async function GET(req: Request) {
         const m = prod.match(/^(KH?\d{2,3}|F\d(?:\.\d)?)\b/i);
         leads.push({
           n: sfName || smaxName || "(?)", n2: sfName && smaxName && sfName !== smaxName ? smaxName : "",
-          d: null, ha, cd: ha ? { H: ha } : {}, up: false, upFrom: "", cls: ["H"],
+          d: null, ha, dMs: null, haMs: haMs2, cd: ha ? { H: ha } : {}, up: false, upFrom: "", cls: ["H"],
           bi: /^KH?\d/i.test(prod), fa: /^F\d/i.test(prod),
           co: m ? [m[1].toUpperCase()] : [],
           ch: ["Salesforce"], ph: gs(f["Phone"]), cph: false, sf: true,

@@ -2,9 +2,17 @@ name: Radar dashboard snapshot → gửi Lark group
 
 on:
   schedule:
-    # 8:00 sáng giờ VN (UTC+7) = 1:00 UTC
-    - cron: '0 1 * * *'
+    # 10:30 sáng giờ VN (UTC+7) = 03:30 UTC — đợt Sáng: 17:00 hôm qua→10:30 hôm nay
+    - cron: '30 3 * * *'
+    # 17:00 chiều giờ VN = 10:00 UTC — đợt Chiều: 10:30→17:00 hôm nay + tổng quan 30 ngày
+    - cron: '0 10 * * *'
   workflow_dispatch:
+    inputs:
+      run:
+        description: "Ép đợt (bỏ trống = tự đoán theo giờ chạy)"
+        type: choice
+        options: ["", "am", "pm"]
+        default: ""
 
 concurrency:
   group: radar-snapshot
@@ -26,6 +34,14 @@ jobs:
         run: npm install --no-audit --no-fund --prefer-offline
       - name: Install Chromium (Playwright)
         run: npx playwright install --with-deps chromium
+      - name: Xác định đợt (Sáng/Chiều) theo lịch cron vừa kích hoạt
+        id: pick
+        run: |
+          case "${{ github.event.schedule }}" in
+            "30 3 * * *") echo "run=am" >> "$GITHUB_OUTPUT" ;;
+            "0 10 * * *") echo "run=pm" >> "$GITHUB_OUTPUT" ;;
+            *) echo "run=${{ github.event.inputs.run }}" >> "$GITHUB_OUTPUT" ;;
+          esac
       - name: Chụp dashboard + gửi vào group Lark
         env:
           LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
@@ -33,4 +49,5 @@ jobs:
           RADAR_SNAPSHOT_KEY: ${{ secrets.RADAR_SNAPSHOT_KEY }}
           RADAR_DASHBOARD_URL: https://mda-cdp.vercel.app
           LARK_DAILY_WEBHOOK: ${{ secrets.LARK_DAILY_WEBHOOK }}
+          RADAR_RUN: ${{ steps.pick.outputs.run }}
         run: npm run etl:radar:snapshot

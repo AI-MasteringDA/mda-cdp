@@ -1,5 +1,5 @@
 /**
- * Chụp ảnh dashboard /radar.html mỗi ngày rồi gửi vào group chat Lark.
+ * Chụp ảnh dashboard /radar.html, 2 đợt/ngày, gửi vào group chat Lark.
  *
  * Trang /radar yêu cầu đăng nhập Google nên bot KHÔNG vào được bằng session
  * thường. Thay vào đó dùng "cửa riêng": mở thẳng /radar.html?key=<SECRET>
@@ -7,15 +7,19 @@
  * lib/supabase/middleware.ts). Loader trong radar.html tự chuyển tiếp key đó
  * sang /api/radar để lấy dữ liệu.
  *
- * CẦN 3 biến môi trường:
+ * CẦN 4 biến môi trường:
  *   RADAR_SNAPSHOT_KEY  — khoá bí mật, PHẢI khớp với giá trị đã đặt trên Vercel
  *   RADAR_DASHBOARD_URL — mặc định https://mda-cdp.vercel.app
  *   LARK_DAILY_WEBHOOK  — URL Custom Bot Webhook của group muốn nhận ảnh
+ *   RADAR_RUN           — "am" (đợt Sáng) hoặc "pm" (đợt Chiều). Bỏ trống thì
+ *                         tự đoán theo giờ VN thực tế lúc chạy (< 14h ⇒ am).
  *
  * Gửi ảnh cần app Lark (LARK_APP_ID/SECRET) có scope `im:resource:upload` —
  * kiểm bằng: npx tsx etl/debug/test-lark-image.ts
  *
  * Chạy: npm run etl:radar:snapshot
+ *   ép đợt Sáng : RADAR_RUN=am npm run etl:radar:snapshot
+ *   ép đợt Chiều: RADAR_RUN=pm npm run etl:radar:snapshot
  */
 import { config } from "dotenv";
 import { resolve } from "path";
@@ -29,24 +33,40 @@ const WEBHOOK = process.env.LARK_DAILY_WEBHOOK || "";
 const ID = process.env.LARK_APP_ID || "", SEC = process.env.LARK_APP_SECRET || "";
 const U = "https://open.larksuite.com/open-apis";
 
-// data-v của nút kỳ trong #segDays: 0=Hôm nay, 1=Hôm qua, 7/14/30=N ngày, 9999=Tất cả.
-// data-v của nút bộ lọc trong #segGrp: all/bi/fa.
-// 3 báo cáo (user chốt 2026-08-12): BI + FA "Hôm qua" (đủ Sales rà nhanh trong
-// ngày), cộng 1 báo cáo TỔNG QUAN 30 NGÀY (đủ dài để thấy xu hướng, không lọc
-// khoá) — mỗi báo cáo tự nêu rõ kỳ trong tiêu đề nên không lo nhầm với nhau.
-const REPORTS: { period: string; grp: string; label: string; color: string }[] = [
-  { period: "1", grp: "bi", label: "BI — Hôm qua", color: "blue" },
-  { period: "1", grp: "fa", label: "FA — Hôm qua", color: "turquoise" },
-  { period: "30", grp: "all", label: "Tổng quan — 30 ngày qua", color: "purple" },
+// data-v của nút kỳ trong #segDays: am=17:00 hôm qua→10:30 hôm nay (Sáng),
+// pm=10:30→17:00 hôm nay (Chiều), 30=30 ngày. data-v của #segGrp: all/bi/fa.
+//
+// LỊCH 2 ĐỢT/NGÀY (user chốt 2026-08-13):
+//   Đợt Sáng (chạy 10:30) — chốt sổ ca đêm: 17:00 hôm qua → 10:30 hôm nay.
+//   Đợt Chiều (chạy 17:00) — chốt sổ ca ngày: 10:30 → 17:00 hôm nay, kèm thêm
+//   1 báo cáo Tổng quan 30 ngày (không lọc khoá, đủ dài thấy xu hướng).
+// 2 đợt gộp lại đúng 1 vòng 24h liên tục (17:00 hôm qua → 17:00 hôm nay),
+// không trùng không hở.
+const AM_REPORTS = [
+  { win: "am", grp: "bi", label: "BI — Sáng", color: "blue" },
+  { win: "am", grp: "fa", label: "FA — Sáng", color: "turquoise" },
 ];
+const PM_REPORTS = [
+  { win: "pm", grp: "bi", label: "BI — Chiều", color: "blue" },
+  { win: "pm", grp: "fa", label: "FA — Chiều", color: "turquoise" },
+  { win: "30", grp: "all", label: "Tổng quan — 30 ngày qua", color: "purple" },
+];
+// RADAR_RUN=am|pm ép chạy đúng đợt (cron truyền vào theo giờ trigger). Không
+// truyền thì tự đoán theo giờ VN thực tế lúc chạy — tiện chạy tay giữa chừng.
+function pickRun(): "am" | "pm" {
+  const env = (process.env.RADAR_RUN || "").toLowerCase();
+  if (env === "am" || env === "pm") return env;
+  const vnHour = new Date(Date.now() + 7 * 3600_000).getUTCHours();
+  return vnHour < 14 ? "am" : "pm";
+}
 
-async function shoot(page: import("playwright").Page, period: string, grp: string): Promise<Buffer> {
+async function shoot(page: import("playwright").Page, win: string, grp: string): Promise<Buffer> {
   // Áp kỳ + bộ lọc bằng cách BẤM ĐÚNG NÚT trên trang (không tự lặp lại state
   // logic) — dashboard tự lo phần ensureWindow/render, xem "DEEP LINK" trong
   // dash-template.html. Kỳ dài (30 ngày) cần chờ ensureWindow tải thêm dữ liệu
   // + biểu đồ gom lại theo tuần, nên đợi lâu hơn kỳ ngắn.
-  await page.click(`#segDays button[data-v="${period}"]`);
-  await page.waitForTimeout(period === "1" ? 600 : 1800);
+  await page.click(`#segDays button[data-v="${win}"]`);
+  await page.waitForTimeout(win === "30" ? 1800 : 700);
   await page.click(`#segGrp button[data-v="${grp}"]`);
   await page.waitForTimeout(1200);
   return await page.screenshot({ fullPage: false });
@@ -69,12 +89,10 @@ async function uploadImage(tk: string, png: Buffer): Promise<string> {
   return r.data.image_key;
 }
 
-const fmtVN = (d: Date) => `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-
 /** Thẻ = ảnh chụp + nút bấm dẫn thẳng tới /radar (đăng nhập Google, KHÔNG lộ
  * key bí mật của bot) đã set sẵn ?days=&grp= để vào đúng đúng kỳ + bộ lọc. */
-async function sendCard(imageKey: string, label: string, color: string, period: string, grp: string) {
-  const deepLink = `${BASE}/radar?days=${period}&grp=${grp}`;
+async function sendCard(imageKey: string, label: string, color: string, win: string, grp: string) {
+  const deepLink = `${BASE}/radar?days=${win}&grp=${grp}`;
   const card = {
     msg_type: "interactive",
     card: {
@@ -94,8 +112,11 @@ async function main() {
   if (!KEY) { console.log("[snapshot] thiếu RADAR_SNAPSHOT_KEY, bỏ qua"); return; }
   if (!WEBHOOK) { console.log("[snapshot] thiếu LARK_DAILY_WEBHOOK, bỏ qua"); return; }
 
+  const run = pickRun();
+  const REPORTS = run === "am" ? AM_REPORTS : PM_REPORTS;
+  console.log(`[snapshot] đợt: ${run === "am" ? "SÁNG (10:30)" : "CHIỀU (17:00)"} · ${REPORTS.length} báo cáo`);
+
   const tk = await larkToken();
-  const yday = new Date(Date.now() + 7 * 3600_000 - 86_400_000);
 
   const browser = await chromium.launch();
   try {
@@ -107,16 +128,19 @@ async function main() {
     const errBox = await page.locator("text=Không tải được dữ liệu").count();
     if (errBox > 0) throw new Error("trang báo lỗi tải dữ liệu — key sai hoặc API lỗi");
 
-    for (const { period, grp, label, color } of REPORTS) {
-      const fullLabel = period === "1" ? `${label} (${fmtVN(yday)})` : label;
-      const png = await shoot(page, period, grp);
-      writeFileSync(`radar-snapshot-${grp}-${period}.png`, png); // giữ lại làm bằng chứng khi debug local
+    for (const { win, grp, label, color } of REPORTS) {
+      const png = await shoot(page, win, grp);
+      // Lấy đúng khoảng ngày/giờ mà TRANG đang hiện (không tự tính lại) — luôn
+      // khớp 100% với những gì thấy trong ảnh, kể cả khi đổi quy tắc sau này.
+      const rangeTxt = await page.locator(".range").innerText().catch(() => "");
+      const fullLabel = `${label} (${rangeTxt.replace(/^🗓\s*/, "")})`;
+      writeFileSync(`radar-snapshot-${grp}-${win}.png`, png); // giữ lại làm bằng chứng khi debug local
       console.log(`[snapshot] [${fullLabel}] chụp xong: ${(png.length / 1024).toFixed(0)} KB`);
 
       const imageKey = await uploadImage(tk, png);
       console.log(`[snapshot] [${fullLabel}] upload xong: image_key=${imageKey}`);
 
-      await sendCard(imageKey, fullLabel, color, period, grp);
+      await sendCard(imageKey, fullLabel, color, win, grp);
       console.log(`[snapshot] [${fullLabel}] đã gửi vào group ✅`);
     }
   } finally {
