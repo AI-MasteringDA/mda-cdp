@@ -65,7 +65,18 @@ export async function runLeadFirstChat() {
   const leadToCid = new Map<string, string>();    // lead → smax_customer_id (fallback "ID" khi không có pid)
   let from = 0;
   while (from < 60000) {
-    const { data } = await admin.from("dim_lead").select("lead_id, phone, email, external_profile_id, smax_customer_id, full_name, smax_tags").range(from, from + 999);
+    const { data, error } = await admin.from("dim_lead").select("lead_id, phone, email, external_profile_id, smax_customer_id, full_name, smax_tags").range(from, from + 999);
+    // GUARD (2026-08-15, sự cố Supabase egress quota): trước đây không kiểm
+    // `error` — Supabase lỗi thì `data` về null/rỗng, code coi như "hết trang"
+    // rồi CHẠY TIẾP với lookup map RỖNG → mọi customer đều "không khớp lead" →
+    // job báo ✅ success nhưng thực chất không gán được ngày/tag-time cho ai
+    // (dashboard "hôm nay" ra toàn 0, âm thầm suốt nhiều giờ không ai biết).
+    // Giờ lỗi đọc trang đầu (from=0) thì DỪNG hẳn — thà job báo ❌ fail rõ ràng
+    // còn hơn chạy "thành công" mà không làm gì.
+    if (error) {
+      if (from === 0) { console.log(`[first-chat] đọc dim_lead lỗi ngay từ đầu — DỪNG (tránh chạy với lookup map rỗng): ${error.message}`); throw new Error(`dim_lead read failed: ${error.message}`); }
+      console.log(`[first-chat] đọc dim_lead lỗi giữa chừng (from=${from}) — DỪNG, giữ nguyên phần đã đọc: ${error.message}`); break;
+    }
     if (!data?.length) break;
     for (const l of data) { if (l.smax_customer_id) byCust.set(l.smax_customer_id, l.lead_id); if (l.external_profile_id) byPid.set(l.external_profile_id, l.lead_id); if (l.phone) byPhone.set(normPh(l.phone), l.lead_id); const np2 = phoneFromName(l.full_name); if (np2 && !byPhone.has(np2)) byPhone.set(np2, l.lead_id); if (l.email) byEmail.set(String(l.email).toLowerCase().trim(), l.lead_id); if (Array.isArray(l.smax_tags)) tagsByLead.set(l.lead_id, l.smax_tags); if (l.external_profile_id) leadToPid.set(l.lead_id, l.external_profile_id); if (l.smax_customer_id) leadToCid.set(l.lead_id, l.smax_customer_id); curPhone.set(l.lead_id, l.phone); curEmail.set(l.lead_id, l.email); }
     if (data.length < 1000) break; from += 1000;
