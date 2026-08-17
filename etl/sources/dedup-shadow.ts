@@ -25,8 +25,18 @@ export async function runDedupShadow() {
   // pid → owner lead + contact info
   const owner = new Map<string, string>(); const info = new Map<string, { email: string | null; phone: string | null }>();
   const pidGroups = new Map<string, { lid: string; email: string | null; phone: string | null; tags: string[] }[]>();
+  // GUARD (2026-08-17, cùng sự cố Supabase egress quota với lead-first-chat):
+  // không check `error` thì Supabase lỗi → data rỗng → job coi như "0 lead
+  // trùng" rồi báo ✅ success, trong khi thực chất không dọn được gì. Lỗi ngay
+  // trang đầu thì DỪNG hẳn (throw) — thà fail rõ còn hơn "thành công" giả.
   let f = 0;
-  while (f < 90000) { const { data } = await admin.from("dim_lead").select("lead_id, external_profile_id, email, phone, smax_tags").range(f, f + 999); if (!data?.length) break; for (const l of data) { if (l.external_profile_id) { owner.set(l.external_profile_id, l.lead_id); const a = pidGroups.get(l.external_profile_id) || []; a.push({ lid: l.lead_id, email: l.email, phone: l.phone, tags: Array.isArray(l.smax_tags) ? l.smax_tags : [] }); pidGroups.set(l.external_profile_id, a); } info.set(l.lead_id, { email: l.email, phone: l.phone }); } if (data.length < 1000) break; f += 1000; }
+  while (f < 90000) {
+    const { data, error } = await admin.from("dim_lead").select("lead_id, external_profile_id, email, phone, smax_tags").range(f, f + 999);
+    if (error) { if (f === 0) throw new Error(`dim_lead read failed: ${error.message}`); console.log(`[dedup-shadow] đọc dim_lead lỗi giữa chừng (f=${f}) — DỪNG: ${error.message}`); break; }
+    if (!data?.length) break;
+    for (const l of data) { if (l.external_profile_id) { owner.set(l.external_profile_id, l.lead_id); const a = pidGroups.get(l.external_profile_id) || []; a.push({ lid: l.lead_id, email: l.email, phone: l.phone, tags: Array.isArray(l.smax_tags) ? l.smax_tags : [] }); pidGroups.set(l.external_profile_id, a); } info.set(l.lead_id, { email: l.email, phone: l.phone }); }
+    if (data.length < 1000) break; f += 1000;
+  }
 
   // 0) PID-DUP: 2+ lead cùng giữ 1 pid (cùng 1 hội thoại → cùng người, gây ĐẾM ĐÔI
   //    như ca Văn Việt 2026-08-06) → gộp về lead nhiều touchpoint nhất, union tag/contact.
@@ -70,7 +80,8 @@ export async function runDedupShadow() {
     const all: { lid: string; email: string | null; phone: string | null; tags: string[] }[] = [];
     let ff = 0;
     while (ff < 90000) {
-      const { data } = await admin.from("dim_lead").select("lead_id, email, phone, smax_tags").range(ff, ff + 999);
+      const { data, error } = await admin.from("dim_lead").select("lead_id, email, phone, smax_tags").range(ff, ff + 999);
+      if (error) { if (ff === 0) throw new Error(`dim_lead read failed: ${error.message}`); console.log(`[dedup-shadow] đọc dim_lead lỗi giữa chừng (ff=${ff}) — DỪNG: ${error.message}`); break; }
       if (!data?.length) break;
       for (const l of data) all.push({ lid: l.lead_id, email: l.email, phone: l.phone, tags: Array.isArray(l.smax_tags) ? l.smax_tags : [] });
       if (data.length < 1000) break; ff += 1000;
@@ -111,7 +122,13 @@ export async function runDedupShadow() {
   }
   // leads thiếu pid
   const nullLeads: { lid: string; email: string | null; phone: string | null }[] = []; f = 0;
-  while (f < 90000) { const { data } = await admin.from("dim_lead").select("lead_id, email, phone").is("external_profile_id", null).range(f, f + 999); if (!data?.length) break; for (const l of data) nullLeads.push({ lid: l.lead_id, email: l.email, phone: l.phone }); if (data.length < 1000) break; f += 1000; }
+  while (f < 90000) {
+    const { data, error } = await admin.from("dim_lead").select("lead_id, email, phone").is("external_profile_id", null).range(f, f + 999);
+    if (error) { if (f === 0) throw new Error(`dim_lead read failed: ${error.message}`); console.log(`[dedup-shadow] đọc dim_lead (null pid) lỗi giữa chừng (f=${f}) — DỪNG: ${error.message}`); break; }
+    if (!data?.length) break;
+    for (const l of data) nullLeads.push({ lid: l.lead_id, email: l.email, phone: l.phone });
+    if (data.length < 1000) break; f += 1000;
+  }
 
   let merged = 0, claimed = 0;
   for (let i = 0; i < nullLeads.length; i += 200) {
