@@ -98,11 +98,8 @@ const SMAX_LEAD_FIELDS = [
   // Full chat history split across 5 text cells (Lark caps a cell at 10k
   // chars). Newest-kept when longer. Populated for changed leads each run;
   // bulk backfill via etl/debug/backfill-chat-history.ts. Hide in Sales view.
-  { field_name: "Chat History 1", type: 1 },
-  { field_name: "Chat History 2", type: 1 },
-  { field_name: "Chat History 3", type: 1 },
-  { field_name: "Chat History 4", type: 1 },
-  { field_name: "Chat History 5", type: 1 },
+  // "Chat History 1..5" đã bỏ 2026-08-17 — KHÔNG khai báo lại ở đây, nếu không
+  // ensureFields() sẽ tự tạo lại 5 cột vừa xoá.
   // "Chưa phản hồi" is CODE-owned: ticked when the newest message in the chat
   // is from the customer (TVV hasn't replied). Computed deterministically from
   // the chat data during each push — no AI needed.
@@ -803,11 +800,17 @@ async function pushSmaxLeadSnapshot(token: string) {
   // fetching straight from the SMAX messages API is cheap and adds zero
   // Supabase IO. Cap at 150 leads/run to stay inside the workflow timeout;
   // anything beyond that gets picked up by the periodic full window.
+  // "Chat History 1..5" ĐÃ BỎ HẲN (user chốt 2026-08-17: "chat history cũng k
+  // quan trọng, bỏ luôn đi"). 5 cột đã xoá khỏi Lark và job chat-sweep đã tắt
+  // (.disabled). Khối dựng transcript bên dưới KHÔNG chạy nữa — giữ code lại để
+  // tham chiếu lịch sử; bật lại thì phải tạo lại cột trước, nếu không Lark trả
+  // FieldNameNotFound. "Total Chats" cũng nằm trong khối này nên ngừng cập nhật.
+  const CHAT_HISTORY_ENABLED = false;
   const CHAT_LEADS_CAP = 150;
-  const changedLeadIds = [
+  const changedLeadIds = CHAT_HISTORY_ENABLED ? [
     ...toInsert.map((r) => r.leadId),
     ...toUpdate.map((r) => r.leadId),
-  ].slice(0, CHAT_LEADS_CAP);
+  ].slice(0, CHAT_LEADS_CAP) : [];
   if (changedLeadIds.length > 0) {
     const pidByLead = new Map<string, string | null>();
     for (const r of rows) pidByLead.set(r.lead_id, r.external_profile_id);
