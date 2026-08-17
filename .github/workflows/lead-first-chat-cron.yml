@@ -2,16 +2,13 @@ name: Lead first-chat sync (Ngày chat đầu + Hot Score)
 
 on:
   schedule:
-    # 4 lần/ngày (đổi từ hourly 2026-08-15 — Supabase project bị khoá vì vượt
-    # egress quota: job này full-scan ~19k dòng dim_lead MỖI LẦN chạy, hourly =
-    # ~5.5GB/tháng chỉ riêng job này). Report Lark chỉ bắn 2 lần/ngày (10:30 &
-    # 17:00 VN) nên không cần tươi theo giờ — canh chạy ngay TRƯỚC mỗi giờ bắn
-    # report để data luôn mới lúc chụp, cộng 2 lần rải rác giữ ID/tag không kẹt
-    # quá lâu ngoài giờ report:
+    # 2 lần/ngày (đổi từ hourly 2026-08-15 — Supabase project bị khoá vì vượt
+    # egress quota: job này full-scan ~19k dòng dim_lead MỖI LẦN chạy). Report
+    # Lark chỉ bắn 2 lần/ngày (10:30 & 17:00 VN) — bỏ luôn 2 lần rải rác đêm
+    # khuya (không ai xem lúc đó), chỉ giữ ngay TRƯỚC mỗi giờ bắn report:
     #   02:45 UTC = 09:45 VN (45' trước report Sáng 10:30)
     #   08:45 UTC = 15:45 VN (75' trước report Chiều 17:00)
-    #   14:45 UTC = 21:45 VN · 20:45 UTC = 03:45 VN (rải rác qua đêm)
-    - cron: '45 2,8,14,20 * * *'
+    - cron: '45 2,8 * * *'
   workflow_dispatch:
 
 concurrency:

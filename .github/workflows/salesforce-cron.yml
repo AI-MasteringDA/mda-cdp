@@ -2,8 +2,10 @@ name: Salesforce incremental sync
 
 on:
   schedule:
-    # Every 1 hour — SF has more volume + longer processing
-    - cron: '0 * * * *'
+    # Every 1 hour, CHỈ trong khung 8AM-6PM VN (2026-08-15 — Supabase bị khoá
+    # vì vượt egress quota, không ai xem SF lead lúc nửa đêm). 1-10 UTC =
+    # 8AM-6PM VN.
+    - cron: '0 1-10 * * *'
   workflow_dispatch:
 
 # 2026-07-20: SF ETL takes ~9 min normally, longer when the DB is slow. Without

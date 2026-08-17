@@ -2,17 +2,16 @@ name: Dedup shadow leads (gộp bản trùng email/kênh → dòng có ID)
 
 on:
   schedule:
-    # 4 lần/ngày (đổi từ hourly 2026-08-15 — Supabase project bị khoá vì vượt
-    # egress quota: job này full-scan tới 90k dòng dim_lead 2-3 LẦN mỗi lần chạy,
-    # hourly = ~2.8GB/tháng chỉ riêng job này). Cam kết "tự lành trong ≤1h" (dedup
-    # pid/SĐT/gmail trùng, chống đếm đôi Hot) nới thành "≤3h" — chấp nhận được vì
-    # report Lark chỉ bắn 2 lần/ngày (10:30 & 17:00 VN). Canh chạy NGAY TRƯỚC mỗi
-    # report (lệch 10' sau lead-first-chat cùng giờ, tránh 2 job đụng Supabase cùng
-    # lúc) + 2 lần rải rác giữ ID/tag không kẹt lâu ngoài giờ report:
+    # 2 lần/ngày (đổi từ hourly 2026-08-15 — Supabase project bị khoá vì vượt
+    # egress quota: job này full-scan tới 90k dòng dim_lead 2-3 LẦN mỗi lần chạy).
+    # Cam kết "tự lành trong ≤1h" (dedup pid/SĐT/gmail trùng, chống đếm đôi Hot)
+    # nới thành "trước mỗi report" — chấp nhận được vì report Lark chỉ bắn 2
+    # lần/ngày (10:30 & 17:00 VN) và không ai xem dashboard ngoài giờ đó. Canh
+    # chạy NGAY TRƯỚC mỗi report (lệch 10' sau lead-first-chat cùng giờ, tránh
+    # 2 job đụng Supabase cùng lúc):
     #   02:55 UTC = 09:55 VN (35' trước report Sáng 10:30)
     #   08:55 UTC = 15:55 VN (65' trước report Chiều 17:00)
-    #   14:55 UTC = 21:55 VN · 20:55 UTC = 03:55 VN (rải rác qua đêm)
-    - cron: '55 2,8,14,20 * * *'
+    - cron: '55 2,8 * * *'
   workflow_dispatch:
 
 concurrency:

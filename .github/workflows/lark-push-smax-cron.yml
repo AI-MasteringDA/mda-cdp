@@ -2,17 +2,14 @@ name: Lark Base push (SMAX only, fast)
 
 on:
   schedule:
-    # Every ~7 minutes (2026-07-16). Two expensive full-pulls in lark-push.ts
-    # used to be implicitly rate-limited by the 15-min cron itself — bumping
-    # cadence alone (first attempted same day) would have made them fire 2-3x
-    # too often, adding real egress right when the org is already over quota.
-    # Both are now explicitly rate-limited via etl_state (claimIfDue()) instead
-    # of relying on cron cadence, verified live by running back-to-back:
+    # Every ~7 minutes, CHỈ trong khung 8AM-6PM VN (2026-08-15, cùng lý do với
+    # smax-cron — xem comment ở đó). 2 lần pull nặng trong lark-push.ts đã tự
+    # rate-limit qua etl_state (claimIfDue()) nên KHÔNG đụng gì thêm ở đây:
     #   - Full snapshot refresh (~9k rows): real cap once per 6h.
     #   - Hot-leads pull (~2709 rows, ~1.16MB): real cap once per ~14 min —
     #     confirmed run #2 logs "Đã pull hot-leads <14 phút trước, skip".
-    # REMINDER: cron-job.org trigger must also be set to every 7 min.
-    - cron: '*/7 * * * *'
+    # REMINDER: cron-job.org trigger phải đổi theo (chỉ bắn trong khung này).
+    - cron: '*/7 1-10 * * *'
   workflow_dispatch:
 
 # Concurrency lock: kept as a safety net even though real run time (~2-3.5 min)
