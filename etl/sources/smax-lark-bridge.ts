@@ -108,12 +108,27 @@ export async function runSmaxLarkBridge() {
   if (fR.code !== 0) throw new Error(`đọc fields Lark lỗi: ${fR.code} ${fR.msg}`);
   const existing = new Set<string>((fR.data?.items || []).map((f: any) => f.field_name));
   const CHK = "Lần cập nhật cuối", BC = "Báo cáo ngày", NC = "Ngày check", COL = "Ngày chat đầu";
+  // "Chat đầu lúc" — GIỜ CHÍNH XÁC của tin nhắn đầu (interaction.first).
+  // Vì sao cần: "Ngày chat đầu"/"Báo cáo ngày" cố tình lưu 00:00 để gom theo
+  // NGÀY, nhưng báo cáo khung giờ (Chiều = 10:30–17:00) lọc theo mốc đó thì
+  // nửa đêm KHÔNG BAO GIỜ lọt vào khoảng ⇒ Lead mới/Cold/Prospect/Warm luôn ra
+  // 0 (bug 2026-08-17, mọi báo cáo Chiều đều rỗng). Cột này giữ giờ thật để
+  // /api/radar lọc đúng; các view theo ngày vẫn dùng "Báo cáo ngày" như cũ.
+  const EXACT = "Chat đầu lúc";
+  if (!existing.has(EXACT)) {
+    const cr = await fetch(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/fields`, {
+      method: "POST", headers: { Authorization: `Bearer ${tk}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ field_name: EXACT, type: 5, property: { date_formatter: "yyyy-MM-dd HH:mm", auto_fill: false } }),
+    }).then(r => r.json());
+    if (cr.code === 0) { existing.add(EXACT); console.log(`[bridge] đã tạo cột "${EXACT}"`); }
+    else console.log(`[bridge] ⚠ không tạo được cột "${EXACT}": ${cr.code} ${cr.msg}`);
+  }
   // CHỈ đụng cột ĐANG TỒN TẠI. Bridge cố tình KHÔNG tạo cột mới (việc của
   // lead-first-chat.ts) — đưa cột chưa có vào field_names thì Lark trả 1254045
   // FieldNameNotFound và hỏng cả lần chạy (gặp 2026-08-17 với "K62 lúc").
   const lucCols = [...existing].filter(n => / lúc$/.test(n));
   const idCols = ["Lead ID", "ID", "Phone", "Email", "Lead Name"].filter(n => existing.has(n));
-  const valCols = [COL, BC, NC, "Time", "Event", "Chưa phản hồi"].filter(n => existing.has(n));
+  const valCols = [COL, BC, NC, EXACT, "Time", "Event", "Chưa phản hồi"].filter(n => existing.has(n));
 
   type Row = { rid: string; f: Record<string, unknown> };
   const rows: Row[] = [];
@@ -150,6 +165,7 @@ export async function runSmaxLarkBridge() {
 
   // ── 3) Khớp customer SMAX → dòng Lark, gom trạng thái mong muốn.
   const firstMs = new Map<string, number>();          // rid → ngày chat đầu (00:00 VN)
+  const firstExact = new Map<string, number>();       // rid → giờ chat đầu CHÍNH XÁC
   const tagTimes = new Map<string, Record<string, number>>(); // rid → {"Hot Lead lúc": ms}
   const lucSeen = new Set<string>();
   // 1 dòng Lark có thể ứng nhiều customer SMAX (nhiều kênh) → giữ bản ghi có
@@ -164,7 +180,11 @@ export async function runSmaxLarkBridge() {
     if (!rid) continue;
     matched++;
     const first = c.interaction?.first ?? c.created_at;
-    if (first) { const ms = vnMidnightMs(first); const prev = firstMs.get(rid); if (prev == null || ms < prev) firstMs.set(rid, ms); }
+    if (first) {
+      const ms = vnMidnightMs(first); const prev = firstMs.get(rid); if (prev == null || ms < prev) firstMs.set(rid, ms);
+      const exact = new Date(first).getTime();
+      const pe = firstExact.get(rid); if (Number.isFinite(exact) && (pe == null || exact < pe)) firstExact.set(rid, exact);
+    }
     const act = classifyLast(c);
     if (act.timeMs != null) {
       const prev = lastAct.get(rid);
@@ -195,6 +215,8 @@ export async function runSmaxLarkBridge() {
       const nc = want + 86400000;
       if (existing.has(NC) && nc !== (typeof f[NC] === "number" ? f[NC] : null)) patch[NC] = nc;
     }
+    const wantExact = firstExact.get(rid);
+    if (wantExact != null && existing.has(EXACT) && wantExact !== (typeof f[EXACT] === "number" ? f[EXACT] : null)) patch[EXACT] = wantExact;
     const act = lastAct.get(rid);
     if (act) {
       if (existing.has("Time") && act.timeMs !== (typeof f["Time"] === "number" ? f["Time"] : null)) patch["Time"] = act.timeMs;

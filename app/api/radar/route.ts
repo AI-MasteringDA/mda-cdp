@@ -11,7 +11,7 @@ export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 const U = "https://open.larksuite.com/open-apis";
-const FIELDS = ["Lead Name", "Báo cáo ngày", "Hot Lead lúc", "Prospect lúc", "Cold Lead lúc", "Warm Lead lúc", "Tag SMAX", "Communication Channels", "Phone", "Email", "Chưa phản hồi"];
+const FIELDS = ["Lead Name", "Báo cáo ngày", "Chat đầu lúc", "Hot Lead lúc", "Prospect lúc", "Cold Lead lúc", "Warm Lead lúc", "Tag SMAX", "Communication Channels", "Phone", "Email", "Chưa phản hồi"];
 // Lead chỉ-comment (chưa inbox) được đánh dấu bằng option riêng trong
 // "Communication Channels" — vì app Lark hiện KHÔNG tạo được cột mới (lỗi 9499).
 const COMMENT_ONLY = "Comment (chưa inbox)";
@@ -45,7 +45,13 @@ function toLead(f: Record<string, Cell>, cutoff: string) {
   // Mốc GIỜ CHÍNH XÁC (epoch ms thật, KHÔNG dịch +7h như vnDate) — vnDate() bên
   // trên chỉ giữ được ngày, mất giờ. Cần cho báo cáo theo khung giờ (VD
   // "17:00 hôm qua → 10:30 hôm nay") không rơi khớp biên ngày lịch.
-  const bcMs = typeof f["Báo cáo ngày"] === "number" ? f["Báo cáo ngày"] as number : null;
+  // Ưu tiên "Chat đầu lúc" (giờ THẬT của tin đầu, do smax-lark-bridge ghi) rồi
+  // mới tới "Báo cáo ngày". LÝ DO: "Báo cáo ngày" cố ý lưu 00:00 để gom theo
+  // NGÀY — dùng nó cho bộ lọc khung giờ thì nửa đêm không bao giờ nằm trong
+  // 10:30–17:00 ⇒ báo cáo Chiều luôn ra 0 (bug phát hiện 2026-08-17). Lead cũ
+  // chưa có cột này vẫn rơi về mốc nửa đêm như trước, không hỏng view theo ngày.
+  const bcMs = typeof f["Chat đầu lúc"] === "number" ? f["Chat đầu lúc"] as number
+    : (typeof f["Báo cáo ngày"] === "number" ? f["Báo cáo ngày"] as number : null);
   const haMs = typeof f["Hot Lead lúc"] === "number" ? f["Hot Lead lúc"] as number : null;
   // LUỒNG CHỊ LA (chốt 2026-08-10): ĐÃ gắn tag phân loại từ trước thì hôm nay
   // lên Hot chỉ là NÂNG HẠNG, không phải "Hot lead mới trong ngày". Mốc gắn tag
