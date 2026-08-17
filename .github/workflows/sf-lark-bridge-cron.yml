@@ -1,0 +1,44 @@
+name: Salesforce→Lark trực tiếp (không qua Supabase)
+
+# Anh em với smax-lark-bridge. Gọi Salesforce API → ghi thẳng bảng
+# Salesforce_Database trên Lark. KHÔNG đụng Supabase nên vẫn chạy khi Supabase
+# bị khoá. Dashboard đếm "Hot mới" = Hot SMAX + lead chỉ-có-trên-SF, nên job này
+# đứng là số Hot bị hụt (đã xảy ra: SF đóng băng từ 14/08).
+# Chi tiết + giới hạn: etl/sources/sf-lark-bridge.ts
+
+on:
+  schedule:
+    # 30 phút/lần trong giờ làm việc 8AM-6PM VN (1-10 UTC). Thưa hơn SMAX vì
+    # lead SF phát sinh chậm hơn nhiều (~250 lead/45 ngày) và mỗi lần chạy phải
+    # đọc cả bảng SMAX_Database để tra Tag SMAX (chống đếm đôi).
+    - cron: '12,42 1-10 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: sf-lark-bridge
+  cancel-in-progress: false
+
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund --prefer-offline
+      - name: Đẩy Salesforce → Lark
+        env:
+          SALESFORCE_INSTANCE_URL: ${{ secrets.SALESFORCE_INSTANCE_URL }}
+          SALESFORCE_CLIENT_ID: ${{ secrets.SALESFORCE_CLIENT_ID }}
+          SALESFORCE_CLIENT_SECRET: ${{ secrets.SALESFORCE_CLIENT_SECRET }}
+          SALESFORCE_API_VERSION: v59.0
+          LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+          LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+          LARK_BASE_APP_TOKEN: ${{ secrets.LARK_BASE_APP_TOKEN }}
+        run: npm run etl:sf:lark:bridge

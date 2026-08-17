@@ -21,6 +21,7 @@
     "etl:lead:firstchat": "tsx etl/sources/lead-first-chat.ts",
     "etl:dedup:shadow": "tsx etl/sources/dedup-shadow.ts",
     "etl:smax:lark:bridge": "tsx etl/sources/smax-lark-bridge.ts",
+    "etl:sf:lark:bridge": "tsx etl/sources/sf-lark-bridge.ts",
     "etl:daily:report": "tsx etl/sources/daily-report.ts",
     "etl:lark:daily": "tsx etl/sources/lark-daily-message.ts",
     "etl:radar:snapshot": "tsx etl/screenshot/radar-snapshot.ts",
