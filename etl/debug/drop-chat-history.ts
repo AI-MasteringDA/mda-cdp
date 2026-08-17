@@ -1,7 +1,11 @@
 /**
- * XOÁ VĨNH VIỄN 5 cột "Chat History 1..5" khỏi Lark SMAX_Database.
- * User chốt 2026-08-17 sau khi được báo rõ: 14.601 dòng có nội dung (~54MB),
- * và SMAX chỉ trả ~20 tin gần nhất nên KHÔNG kéo lại đầy đủ được.
+ * XOÁ VĨNH VIỄN các cột thuộc tính năng chat-history khỏi Lark SMAX_Database:
+ * "Chat History 1..5" + "Total Chats".
+ *
+ * User chốt 2026-08-17 sau khi được báo rõ: 14.601 dòng có nội dung (~54MB), và
+ * SMAX chỉ trả ~20 tin gần nhất nên KHÔNG kéo lại đầy đủ được. "Total Chats"
+ * xoá kèm vì do cùng khối code sinh ra và không nơi nào đọc (đã kiểm: cả
+ * public/radar.html lẫn app/api/radar/route.ts đều không dùng).
  *
  * Chạy: npx tsx etl/debug/drop-chat-history.ts --apply   (không có --apply = chỉ xem)
  */

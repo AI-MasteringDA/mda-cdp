@@ -39,6 +39,13 @@ const U = "https://open.larksuite.com/open-apis";
 //     toàn để SỐ LUÔN ĐÚNG — đừng bỏ lịch chạy này.
 const FULL = process.env.BRIDGE_FULL === "1";
 const LOOKBACK_MIN = Number(process.env.BRIDGE_LOOKBACK_MIN || 90);
+// BRIDGE_DRYRUN=1 — xem sẽ tạo dòng nào mà KHÔNG ghi (dùng trước mỗi lần đổi
+// luật tạo lead, vì tạo nhầm ra dòng trùng là đếm đôi Hot lead).
+const DRYRUN = process.env.BRIDGE_DRYRUN === "1";
+// Chỉ tạo dòng cho khách còn hoạt động trong ngần này ngày. Dashboard chỉ đọc
+// ~40 ngày nên tạo cũ hơn là vô ích, mà bảng Lark có TRẦN 20.000 dòng
+// (đang 19.284 — thả hết 1.679 ca tồn đọng vào là vỡ).
+const CREATE_MAX_AGE_DAYS = Number(process.env.BRIDGE_CREATE_MAX_AGE_DAYS || 45);
 
 const normPh = (p: unknown) => (p ? String(p).replace(/\D/g, "").replace(/^84/, "").replace(/^0/, "") : "");
 const phoneFromName = (name: unknown) => { const m = String(name || "").match(/0\d{8,10}/); return m ? normPh(m[0]) : ""; };
@@ -251,7 +258,96 @@ export async function runSmaxLarkBridge() {
   const missingLuc = [...lucSeen].filter(n => !existing.has(n));
   if (missingLuc.length) console.log(`[bridge] ⚠ SMAX có tag-time chưa có cột trên Lark, BỎ QUA: ${missingLuc.join(", ")}`);
   console.log(`[bridge] khớp: ${matched}/${targets.length} khách → dòng Lark | chưa khớp: ${targets.length - matched}`);
-  if (!matched) { console.log("[bridge] 0 khách khớp — xong, không ghi gì."); return; }
+
+  // ── 3b) TẠO DÒNG MỚI cho khách chưa từng có trên Lark.
+  // CHỈ chạy ở chế độ ĐỐI SOÁT: lúc đó mới có ĐỦ bản đồ SĐT/email của cả bảng
+  // để biết chắc người này chưa có dòng nào. Chế độ NHANH chỉ tra theo pid nên
+  // không thấy dòng khớp bằng SĐT ⇒ tạo là đẻ trùng.
+  //
+  // Luật loại trừ (bám đúng quy tắc sales đang dùng ở /api/radar):
+  //   - comment chưa inbox  → không tính lead
+  //   - Spam / Block        → bỏ
+  //   - chưa từng chat      → bỏ (hồ sơ rỗng, 1.613 ca tồn đọng)
+  // Và gộp trong chính lô mới: 2 customer cùng SĐT/gmail = 1 người → 1 dòng
+  // (đo 2026-08-17: 29 nhóm trùng SĐT, nếu tạo rời là đếm đôi Hot lead).
+  const created: any[] = [];
+  if (FULL && existing.has("Lead ID")) {
+    const nphOf = (c: any) => normPh(c.phone) || phoneFromName(c.name);
+    const gmailOf = (c: any) => { const e = String(c.email ?? "").toLowerCase().trim(); return e.endsWith("@gmail.com") ? e : ""; };
+    const seenPh = new Map<string, number>(), seenEm = new Map<string, number>();
+    let skipComment = 0, skipSpam = 0, skipNoChat = 0, skipOld = 0, mergedInBatch = 0;
+    for (const c of (customers as any[])) {
+      const namePh = phoneFromName(c.name);
+      const hit = byPid.get(stripSmaxId(c.pid)) || byPid.get(String(c.id ?? ""))
+        || (c.phone && byPhone.get(normPh(c.phone))) || (namePh && byPhone.get(namePh))
+        || (c.email && byEmail.get(String(c.email).toLowerCase().trim()));
+      if (hit) continue;
+      const tagNames = (c.tags || []).map((t: any) => String(t.name || t.alias || "").toLowerCase());
+      if (tagNames.some((t: string) => t === "spam" || t.includes("block"))) { skipSpam++; continue; }
+      if (String(c.platform || "") === "facebook" && !c.facebook?.conversation_id) { skipComment++; continue; }
+      // CHƯA TỪNG NHẮN TIN ⇒ không phải lead (1.613 hồ sơ rỗng kiểu này).
+      // Phải xét last_message_at: created_at LÚC NÀO CŨNG CÓ (chỉ là lúc SMAX
+      // tạo hồ sơ) nên dùng nó để lọc thì không loại được ai.
+      if (!c.last_message_at && !c.interaction?.first) { skipNoChat++; continue; }
+      const first = c.interaction?.first ?? c.created_at;
+      if (!first) { skipNoChat++; continue; }
+      // CHỈ TẠO KHÁCH CÒN MỚI. Hai lý do:
+      //  1) Dashboard chỉ đọc ~40 ngày gần nhất ⇒ tạo dòng 2024-2025 là vô ích.
+      //  2) Bảng Lark đang 19.284 dòng, TRẦN FREE TIER LÀ 20.000 — thả hết
+      //     1.679 ca tồn đọng vào là vỡ bảng (đo lúc chạy thử 2026-08-17).
+      const actMs = Math.max(
+        c.last_message_at ? new Date(c.last_message_at).getTime() : 0,
+        new Date(first).getTime(),
+      );
+      if (actMs < Date.now() - CREATE_MAX_AGE_DAYS * 86400_000) { skipOld++; continue; }
+      // Gộp trong lô: cùng SĐT hoặc cùng gmail ⇒ cùng người, chỉ giữ dòng đầu.
+      // Chú ý dùng ba-ngôi chứ KHÔNG dùng `ph && ...` — chuỗi rỗng không phải
+      // null nên `??` không bắt, khiến MỌI khách không có SĐT bị coi là trùng
+      // và loại sạch (bug bắt được lúc chạy thử: 1.458 ca bị loại oan).
+      const ph = nphOf(c), gm = gmailOf(c);
+      const dupIdx = (ph ? seenPh.get(ph) : undefined) ?? (gm ? seenEm.get(gm) : undefined);
+      if (dupIdx != null) { mergedInBatch++; continue; }
+
+      const exactMs = new Date(first).getTime();
+      const midMs = vnMidnightMs(first);
+      const act = classifyLast(c);
+      const fields: Record<string, unknown> = { "Lead ID": crypto.randomUUID() };
+      const put = (k: string, v: unknown) => { if (existing.has(k) && v != null && v !== "") fields[k] = v; };
+      put("ID", stripSmaxId(c.pid) || String(c.id ?? ""));
+      put("Lead Name", String(c.name ?? "").trim());
+      put("Email", String(c.email ?? "").toLowerCase().trim());
+      put("Phone", c.phone ? String(c.phone).trim() : "");
+      put(COL, midMs); put(BC, midMs); put(NC, midMs + 86400000); put(EXACT, exactMs);
+      if (act.timeMs != null) { put("Time", act.timeMs); put("Event", act.event); }
+      if (existing.has("Chưa phản hồi")) fields["Chưa phản hồi"] = act.chuaPhanHoi;
+      const tagList = (c.tags || []).map((t: any) => String(t.name || t.alias || "").trim()).filter(Boolean);
+      if (existing.has("Tag SMAX") && tagList.length) fields["Tag SMAX"] = tagList;
+      for (const tg of (c.tags || [])) {
+        const nm = trackName(String(tg.name || tg.alias || "").trim()); if (!nm) continue;
+        const tms = tg.time ? new Date(tg.time).getTime() : 0; if (!tms) continue;
+        put(`${nm} lúc`, tms);
+      }
+      if (existing.has(CHK)) fields[CHK] = Date.now();
+      created.push({ fields });
+      if (ph) seenPh.set(ph, created.length); if (gm) seenEm.set(gm, created.length);
+    }
+    console.log(`[bridge] tạo mới: ${created.length} dòng | bỏ qua — comment chưa inbox=${skipComment} spam/block=${skipSpam} chưa từng chat=${skipNoChat} quá cũ(>${CREATE_MAX_AGE_DAYS}d)=${skipOld} gộp trùng trong lô=${mergedInBatch}`);
+    if (DRYRUN) {
+      console.log(`[bridge] [CHẠY THỬ] KHÔNG ghi. 10 dòng đầu sẽ tạo:`);
+      for (const c of created.slice(0, 10)) console.log(`   ${JSON.stringify({ ten: c.fields["Lead Name"], id: c.fields["ID"], sdt: c.fields["Phone"], mail: c.fields["Email"], tag: c.fields["Tag SMAX"] })}`);
+      return;
+    }
+    for (let i = 0; i < created.length; i += 400) {
+      const rr = await fetch(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/records/batch_create`, {
+        method: "POST", headers: { Authorization: `Bearer ${tk}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ records: created.slice(i, i + 400) }),
+      }).then(r => r.json());
+      if (rr.code !== 0) console.log(`[bridge] batch_create lỗi: ${rr.code} ${rr.msg}`);
+    }
+    if (created.length) console.log(`[bridge] ✅ ĐÃ TẠO ${created.length} dòng mới`);
+  }
+
+  if (!matched && !created.length) { console.log("[bridge] không có gì để ghi — xong."); return; }
 
   // ── 4) So lệch & ghi ngược lên Lark (chỉ đụng dòng thật sự đổi).
   const runMs = Date.now();
