@@ -1,7 +1,7 @@
 /**
  * CẦU NỐI TẠM (2026-08-17, lúc Supabase REST API/PostgREST bị khoá exceed_egress_quota,
  * chờ reset chu kỳ billing 01/09 hoặc user tự upgrade) — làm lại đúng việc
- * lead-first-chat.ts vẫn làm (tính "Ngày chat đầu"/"Hot Lead lúc"/Hot Score từ
+ * lead-first-chat.ts vẫn làm (tính "Ngày chat đầu"/"Hot Lead lúc" từ
  * SMAX API rồi đẩy lên Lark SMAX_Database), nhưng đọc dim_lead qua kết nối
  * Postgres TRỰC TIẾP (session pooler — xác nhận KHÔNG bị khoá cùng lúc với REST
  * API, xem etl/debug/test-pg-write.ts) thay vì admin.from(...) (đi qua PostgREST
@@ -9,8 +9,21 @@
  *
  * CHỈ ĐỌC Supabase, KHÔNG GHI — an toàn, không đụng logic reconcile/backfill/dedup
  * phức tạp của lead-first-chat.ts/dedup-shadow.ts (rủi ro cao nếu viết vội).
- * GIỚI HẠN: lead HOÀN TOÀN MỚI (chưa có trong dim_lead) KHÔNG được tạo ở đây —
- * phải đợi Supabase mở lại mới chạy pipeline đầy đủ.
+ *
+ * CỘT ĐƯỢC CẬP NHẬT: "Ngày chat đầu"/"Báo cáo ngày"/"Ngày check", "<class> lúc",
+ * và (thêm 2026-08-17) "Time"/"Event"/"Chưa phản hồi" — hoạt động chat mới nhất,
+ * vốn do lark-push.ts lo nhưng đang đứng cùng smax-real.ts nên cột "Time" đóng
+ * băng từ 15/08.
+ *
+ * GIỚI HẠN:
+ *  - Lead HOÀN TOÀN MỚI (chưa có trong dim_lead) KHÔNG được tạo ở đây — đợi
+ *    Supabase mở lại mới chạy pipeline đầy đủ (identity.ts chống trùng kênh).
+ *  - "Hot Score" KHÔNG đụng tới (user chốt bỏ) — số hiển thị là số cũ trước lúc khoá.
+ *  - "Event"/"Chưa phản hồi" là XẤP XỈ: bản gốc so theo từng THREAD
+ *    (last_message_by_customer_at), ở đây chỉ có object CUSTOMER nên dùng
+ *    interaction.last — xem classifyLast() bên dưới.
+ *  - KHÔNG cập nhật: "Total Chats", "Chat History 1..5", Lead Name/Email/Phone,
+ *    và dữ liệu Salesforce/Wix/Instantly.
  *
  * TẮT JOB NÀY (xoá/disable file cron tương ứng) ngay khi Supabase REST API mở
  * lại — chạy song song với lead-first-chat/lark-push-smax sẽ dư thừa/ghi đè lẫn
@@ -45,6 +58,36 @@ function trackName(name: string): string | null {
   return null;
 }
 
+// Tin auto (thiệp sinh nhật…) bị SMAX tính là tin khách — copy y hệt
+// smax-real.ts để phân loại người gửi cuối cho khớp.
+function isAutoCustomerNote(text: string | undefined | null): boolean {
+  if (!text) return false;
+  return /sinh nh[aậ]t c[uủ]a/i.test(text) || text.includes("res-zalo.zadn.vn");
+}
+
+/**
+ * Ai nhắn CUỐI + có đang chờ mình trả lời không.
+ *
+ * Bản gốc (smax-real.ts) so `thread.last_message_at` vs
+ * `thread.last_message_by_customer_at`. Ở đây chỉ có object CUSTOMER nên dùng
+ * cặp tương đương gần nhất: `last_message_at` (tin cuối bất kỳ ai) vs
+ * `interaction.last` (tương tác cuối CỦA KHÁCH) — XẤP XỈ, không phải 1:1 với
+ * pipeline gốc (xem ghi chú GIỚI HẠN ở đầu file).
+ *
+ * "Chưa phản hồi" theo đúng công thức view v_smax_lead_snapshot:
+ *   event_type='chat' AND occurred_at > now()-30d AND auto_last_note != true
+ */
+function classifyLast(c: any): { timeMs: number | null; event: "chat" | "chat_staff"; chuaPhanHoi: boolean } {
+  const lastMsgMs = c.last_message_at ? new Date(c.last_message_at).getTime() : 0;
+  const lastCustomerMs = c.interaction?.last ? new Date(c.interaction.last).getTime() : 0;
+  const senderIsStaff = lastMsgMs > 0 && lastCustomerMs > 0 && lastMsgMs > lastCustomerMs;
+  const noCustomerMsg = lastMsgMs > 0 && lastCustomerMs === 0;
+  const autoLastNote = isAutoCustomerNote(c.last_content_by_user);
+  const event = senderIsStaff || noCustomerMsg || autoLastNote ? "chat_staff" : "chat";
+  const chuaPhanHoi = event === "chat" && lastMsgMs > Date.now() - 30 * 86400_000 && !autoLastNote;
+  return { timeMs: lastMsgMs || null, event, chuaPhanHoi };
+}
+
 export async function runSmaxLarkBridge() {
   if (!T || !APP) { console.log("[bridge] thiếu creds SMAX/Lark, dừng"); return; }
   const password = process.env.SUPABASE_DB_PASSWORD;
@@ -63,12 +106,8 @@ export async function runSmaxLarkBridge() {
   }
   console.log(`[bridge] dim_lead: ${leadRows.length} dòng (đọc qua raw pg)`);
 
-  const scoreMap = new Map<string, number>();
-  const { rows: latestRows } = await pool.query("select scored_at from fact_lead_score order by scored_at desc limit 1");
-  if (latestRows[0]?.scored_at) {
-    const { rows: scoreRows } = await pool.query("select lead_id, hot_score from fact_lead_score where scored_at = $1", [latestRows[0].scored_at]);
-    for (const r of scoreRows) if (r.hot_score != null) scoreMap.set(r.lead_id, r.hot_score);
-  }
+  // Trước đây còn đọc fact_lead_score để đẩy "Hot Score" — BỎ 2026-08-17 theo
+  // yêu cầu user: job tính điểm đang đứng nên chỉ đẩy lại số cũ, tốn query vô ích.
   await pool.end();
 
   const custPost = (body: unknown) => fetch(`${BASE}/bizs/${BIZ}/customers`, { method: "POST", headers: { Authorization: `Bearer ${T}`, "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
@@ -86,6 +125,10 @@ export async function runSmaxLarkBridge() {
   const firstMs = new Map<string, number>();
   const tagTimes = new Map<string, Record<string, number>>();
   const lucSet = new Set<string>();
+  // Hoạt động chat gần nhất: 1 lead có thể ứng nhiều customer SMAX (nhiều kênh)
+  // → giữ bản ghi có last_message_at MỚI NHẤT, khớp cách view gốc lấy touchpoint
+  // mới nhất của lead (DISTINCT ON lead_id ORDER BY occurred_at DESC).
+  const lastAct = new Map<string, { timeMs: number; event: string; chuaPhanHoi: boolean }>();
   let matched = 0;
   for (const c of (customers as any[])) {
     const namePh = phoneFromName(c.name);
@@ -94,6 +137,11 @@ export async function runSmaxLarkBridge() {
     matched++;
     const first = c.interaction?.first ?? c.created_at;
     if (first) { const ms = vnMidnightMs(first); const prev = firstMs.get(lead); if (prev == null || ms < prev) firstMs.set(lead, ms); }
+    const act = classifyLast(c);
+    if (act.timeMs != null) {
+      const prev = lastAct.get(lead);
+      if (!prev || act.timeMs > prev.timeMs) lastAct.set(lead, { timeMs: act.timeMs, event: act.event, chuaPhanHoi: act.chuaPhanHoi });
+    }
     for (const tg of (c.tags || [])) {
       const nmRaw = String(tg.name || tg.alias || "").trim();
       const nm = trackName(nmRaw); if (!nm) continue;
@@ -102,7 +150,7 @@ export async function runSmaxLarkBridge() {
       const m = tagTimes.get(lead) || {}; if (!m[col] || tms > m[col]) m[col] = tms; tagTimes.set(lead, m);
     }
   }
-  console.log(`[bridge] khớp được lead có sẵn: ${matched} | lead có ngày chat đầu: ${firstMs.size} | cột tag-time: ${lucSet.size}`);
+  console.log(`[bridge] khớp được lead có sẵn: ${matched} | lead có ngày chat đầu: ${firstMs.size} | có hoạt động chat: ${lastAct.size} | cột tag-time: ${lucSet.size}`);
   if (!matched) { console.log("[bridge] 0 lead khớp — dừng, không đẩy gì lên Lark (tránh ghi rỗng)."); return; }
 
   const tk = await larkToken();
@@ -110,16 +158,32 @@ export async function runSmaxLarkBridge() {
   const dbTbl = tR.data.items.find((t: any) => t.name === "SMAX_Database"); if (!dbTbl) { console.log("[bridge] không thấy SMAX_Database"); return; }
   const dbId = dbTbl.table_id;
   const fR = await fetch(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/fields?page_size=100`, { headers: { Authorization: `Bearer ${tk}` } }).then(r => r.json());
-  const lucCols = [...new Set<string>([...lucSet, ...(fR.data?.items || []).map((f: any) => f.field_name).filter((n: string) => / lúc$/.test(n))])];
+  if (fR.code !== 0) throw new Error(`đọc fields Lark lỗi: ${fR.code} ${fR.msg}`);
+  const existing = new Set<string>((fR.data?.items || []).map((f: any) => f.field_name));
+  // CHỈ đụng cột ĐANG TỒN TẠI. Bridge cố tình KHÔNG tạo cột mới (việc đó của
+  // lead-first-chat.ts) — nếu SMAX có tag-class chưa có cột tương ứng mà vẫn
+  // đưa vào field_names thì Lark trả 1254045 FieldNameNotFound và hỏng cả lần
+  // chạy (gặp 2026-08-17: SMAX 30 tag-time vs Lark 29 cột).
+  const lucCols = [...existing].filter(n => / lúc$/.test(n));
+  const missingLuc = [...lucSet].filter(n => !existing.has(n));
+  if (missingLuc.length) console.log(`[bridge] ⚠ SMAX có tag-time chưa có cột trên Lark, BỎ QUA: ${missingLuc.join(", ")}`);
   const CHK = "Lần cập nhật cuối", BC = "Báo cáo ngày", NC = "Ngày check", COL = "Ngày chat đầu";
+  const wantCols = ["Lead ID", COL, BC, NC, "Time", "Event", "Chưa phản hồi"].filter(n => existing.has(n));
 
   const runMs = Date.now();
   const upd: any[] = []; let pt: string | undefined;
   while (true) {
     const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/records`); url.searchParams.set("page_size", "500");
-    url.searchParams.set("field_names", JSON.stringify(["Lead ID", COL, "Hot Score", ...lucCols]));
+    // BC/NC PHẢI nằm trong field_names (wantCols), nếu không r.fields[BC] luôn
+    // undefined ⇒ lần nào cũng tưởng "lệch" và ghi đè lại 2 cột đó vô ích.
+    url.searchParams.set("field_names", JSON.stringify([...wantCols, ...lucCols]));
     if (pt) url.searchParams.set("page_token", pt);
     const d = await fetch(url.toString(), { headers: { Authorization: `Bearer ${tk}` } }).then(r => r.json());
+    // GUARD: Lark hay trả 1254607 "Data not ready" khi bảng lớn. Không check
+    // code thì d.data undefined ⇒ vòng lặp im lặng thoát ⇒ job báo "0 dòng cần
+    // cập nhật" và ✅ success dù chưa đọc được gì (đúng bug đã gặp 2026-08-17:
+    // cột Time đứng ở 15/08 mà job vẫn báo không có gì để làm).
+    if (d.code !== 0) throw new Error(`đọc Lark lỗi: ${d.code} ${d.msg}`);
     for (const r of d.data?.items || []) {
       const lid = txt(r.fields?.["Lead ID"]); if (!lid) continue;
       const patch: Record<string, unknown> = {};
@@ -129,8 +193,20 @@ export async function runSmaxLarkBridge() {
         const curBC = typeof r.fields?.[BC] === "number" ? r.fields[BC] : null; if (want !== curBC) patch[BC] = want;
         const nc = want + 86400000; const curNC = typeof r.fields?.[NC] === "number" ? r.fields[NC] : null; if (nc !== curNC) patch[NC] = nc;
       }
-      const ws = scoreMap.get(lid); const cs = typeof r.fields?.["Hot Score"] === "number" ? r.fields["Hot Score"] : null;
-      if (ws != null && ws !== cs) patch["Hot Score"] = ws;
+      // "Hot Score" BỎ (user chốt 2026-08-17: "cột score bỏ luôn đi, k cần pull
+      // về") — job tính điểm đang đứng nên giá trị chỉ là số cũ, đẩy lại vô nghĩa.
+      // Hoạt động chat mới nhất — phần này lark-push.ts thường lo (đọc
+      // v_smax_lead_snapshot qua PostgREST), nhưng cả nó lẫn smax-real.ts đều
+      // đang đứng vì bị khoá ⇒ cột "Time" đóng băng. Ở đây lấy THẲNG từ SMAX API.
+      const act = lastAct.get(lid);
+      if (act) {
+        const curT = typeof r.fields?.["Time"] === "number" ? r.fields["Time"] : null;
+        if (act.timeMs !== curT) patch["Time"] = act.timeMs;
+        const curE = txt(r.fields?.["Event"]).trim();
+        if (act.event !== curE) patch["Event"] = act.event;
+        const curC = r.fields?.["Chưa phản hồi"] === true;
+        if (act.chuaPhanHoi !== curC) patch["Chưa phản hồi"] = act.chuaPhanHoi;
+      }
       const tt = tagTimes.get(lid) || {};
       for (const col of lucCols) { const w = tt[col]; const curL = typeof r.fields?.[col] === "number" ? r.fields[col] : null; if (w != null && w !== curL) patch[col] = w; }
       patch[CHK] = runMs;
