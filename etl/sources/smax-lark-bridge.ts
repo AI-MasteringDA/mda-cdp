@@ -31,6 +31,14 @@ const BASE = process.env.SMAX_BASE_URL || "https://api.smax.ai";
 const BIZ = "mastering-data-analytics";
 const ID = process.env.LARK_APP_ID || "", SEC = process.env.LARK_APP_SECRET || "", APP = process.env.LARK_BASE_APP_TOKEN || "";
 const U = "https://open.larksuite.com/open-apis";
+// 2 CHẾ ĐỘ (user chốt 2026-08-17 "chỉ sync cái nào mới/được update trong interval"):
+//   NHANH (mặc định, mỗi 7'): chỉ đụng khách vừa đổi trong LOOKBACK_MIN phút →
+//     tra đúng vài chục dòng thay vì đọc cả 19k (39 trang).
+//   ĐỐI SOÁT (BRIDGE_FULL=1, chạy theo giờ): quét toàn bảng, bắt phần bản nhanh
+//     có thể sót (khách khớp bằng SĐT/email chứ không bằng pid). Đây là lưới an
+//     toàn để SỐ LUÔN ĐÚNG — đừng bỏ lịch chạy này.
+const FULL = process.env.BRIDGE_FULL === "1";
+const LOOKBACK_MIN = Number(process.env.BRIDGE_LOOKBACK_MIN || 90);
 
 const normPh = (p: unknown) => (p ? String(p).replace(/\D/g, "").replace(/^84/, "").replace(/^0/, "") : "");
 const phoneFromName = (name: unknown) => { const m = String(name || "").match(/0\d{8,10}/); return m ? normPh(m[0]) : ""; };
@@ -133,17 +141,9 @@ export async function runSmaxLarkBridge() {
   type Row = { rid: string; f: Record<string, unknown> };
   const rows: Row[] = [];
   const byPid = new Map<string, string>(), byPhone = new Map<string, string>(), byEmail = new Map<string, string>();
-  let pt: string | undefined;
-  while (true) {
-    const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/records`); url.searchParams.set("page_size", "500");
-    url.searchParams.set("field_names", JSON.stringify([...idCols, ...valCols, ...lucCols]));
-    if (pt) url.searchParams.set("page_token", pt);
-    const d = await fetch(url.toString(), { headers: { Authorization: `Bearer ${tk}` } }).then(r => r.json());
-    // GUARD: Lark hay trả 1254607 "Data not ready" với bảng lớn. Không check code
-    // thì d.data undefined ⇒ vòng lặp im lặng thoát ⇒ job báo "0 dòng cần cập
-    // nhật" + ✅ success dù chưa đọc được gì (bug thật, gặp 2026-08-17).
-    if (d.code !== 0) throw new Error(`đọc records Lark lỗi: ${d.code} ${d.msg}`);
-    for (const r of d.data?.items || []) {
+  const readCols = [...idCols, ...valCols, ...lucCols];
+  const collect = (items: any[]) => {
+    for (const r of items) {
       const f = r.fields || {};
       rows.push({ rid: r.record_id, f });
       const pidKey = txt(f["ID"]).trim();
@@ -152,10 +152,60 @@ export async function runSmaxLarkBridge() {
       const nph = phoneFromName(txt(f["Lead Name"])); if (nph && !byPhone.has(nph)) byPhone.set(nph, r.record_id);
       const em = txt(f["Email"]).toLowerCase().trim(); if (em && !byEmail.has(em)) byEmail.set(em, r.record_id);
     }
-    if (!d.data?.has_more) break; pt = d.data.page_token;
+  };
+
+  // Khách SMAX có động tĩnh gì trong khoảng lookback không? Lấy mốc MUỘN NHẤT
+  // trong mọi dấu vết thay đổi — chỉ nhìn updated_at là hụt (SMAX không phải
+  // lúc nào cũng đụng vào nó khi gắn tag).
+  const touchedMs = (c: any): number => {
+    let m = 0;
+    for (const v of [c.updated_at, c.last_message_at, c.interaction?.last, c.interaction?.first, c.created_at]) {
+      const t = v ? new Date(v).getTime() : 0; if (t > m) m = t;
+    }
+    for (const tg of (c.tags || [])) { const t = tg.time ? new Date(tg.time).getTime() : 0; if (t > m) m = t; }
+    return m;
+  };
+
+  let targets = customers as any[];
+  if (FULL) {
+    // ĐỐI SOÁT TOÀN BỘ: đọc hết bảng. Chậm (~39 trang) nhưng dựng đủ bản đồ
+    // SĐT/email nên bắt được cả ca khớp-không-bằng-pid mà bản incremental bỏ sót.
+    let pt: string | undefined;
+    while (true) {
+      const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/records`); url.searchParams.set("page_size", "500");
+      url.searchParams.set("field_names", JSON.stringify(readCols));
+      if (pt) url.searchParams.set("page_token", pt);
+      const d = await fetch(url.toString(), { headers: { Authorization: `Bearer ${tk}` } }).then(r => r.json());
+      // GUARD: Lark hay trả 1254607 "Data not ready" với bảng lớn. Không check code
+      // thì d.data undefined ⇒ vòng lặp im lặng thoát ⇒ job báo "0 dòng cần cập
+      // nhật" + ✅ success dù chưa đọc được gì (bug thật, gặp 2026-08-17).
+      if (d.code !== 0) throw new Error(`đọc records Lark lỗi: ${d.code} ${d.msg}`);
+      collect(d.data?.items || []);
+      if (!d.data?.has_more) break; pt = d.data.page_token;
+    }
+    console.log(`[bridge] [ĐỐI SOÁT] Lark: ${rows.length} dòng | pid=${byPid.size} sđt=${byPhone.size} email=${byEmail.size}`);
+  } else {
+    // INCREMENTAL: chỉ đụng khách vừa có thay đổi trong LOOKBACK_MIN phút, rồi
+    // tra ĐÚNG những dòng đó trên Lark (search lọc theo "ID", tối đa 50 điều
+    // kiện/lần — thử 100 là Lark trả 99992402 field validation failed).
+    // Cửa sổ rộng hơn nhịp cron nhiều lần để lỡ vài lần chạy hỏng vẫn không sót;
+    // phần sót hiếm (khớp bằng SĐT/email chứ không bằng pid) do lần ĐỐI SOÁT
+    // theo giờ quét lại.
+    const cutoff = Date.now() - LOOKBACK_MIN * 60_000;
+    targets = (customers as any[]).filter(c => touchedMs(c) >= cutoff);
+    const pids = [...new Set(targets.map(c => stripSmaxId(c.pid)).filter(Boolean))];
+    for (let i = 0; i < pids.length; i += 50) {
+      const batch = pids.slice(i, i + 50);
+      const d = await fetch(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/records/search?page_size=500`, {
+        method: "POST", headers: { Authorization: `Bearer ${tk}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ field_names: readCols, filter: { conjunction: "or", conditions: batch.map(v => ({ field_name: "ID", operator: "is", value: [v] })) } }),
+      }).then(r => r.json());
+      if (d.code !== 0) throw new Error(`search Lark lỗi: ${d.code} ${d.msg}`);
+      collect(d.data?.items || []);
+    }
+    console.log(`[bridge] [NHANH] khách đổi trong ${LOOKBACK_MIN}': ${targets.length}/${customers.length} → tra ${pids.length} pid (${Math.ceil(pids.length / 50)} lượt) → ${rows.length} dòng Lark`);
   }
-  console.log(`[bridge] Lark: ${rows.length} dòng | bản đồ pid=${byPid.size} sđt=${byPhone.size} email=${byEmail.size}`);
-  if (!rows.length) { console.log("[bridge] Lark 0 dòng — DỪNG."); return; }
+  if (!rows.length) { console.log("[bridge] không có dòng Lark nào cần đụng — xong."); return; }
 
   // KHÔNG đọc dim_lead ở đây — đã ĐO và loại bỏ (2026-08-17): thêm 17.149 khoá
   // tra cứu từ dim_lead chỉ khớp thêm ĐÚNG 3 khách (20.192 → 20.195), vì phần
@@ -172,7 +222,7 @@ export async function runSmaxLarkBridge() {
   // last_message_at MỚI NHẤT, khớp cách view gốc lấy touchpoint mới nhất.
   const lastAct = new Map<string, { timeMs: number; event: string; chuaPhanHoi: boolean }>();
   let matched = 0;
-  for (const c of (customers as any[])) {
+  for (const c of targets) {
     const namePh = phoneFromName(c.name);
     const rid = byPid.get(stripSmaxId(c.pid)) || byPid.get(String(c.id ?? ""))
       || (c.phone && byPhone.get(normPh(c.phone))) || (namePh && byPhone.get(namePh))
@@ -200,8 +250,8 @@ export async function runSmaxLarkBridge() {
   }
   const missingLuc = [...lucSeen].filter(n => !existing.has(n));
   if (missingLuc.length) console.log(`[bridge] ⚠ SMAX có tag-time chưa có cột trên Lark, BỎ QUA: ${missingLuc.join(", ")}`);
-  console.log(`[bridge] khớp: ${matched}/${customers.length} khách → dòng Lark | chưa khớp (lead mới, chờ pipeline đầy đủ): ${customers.length - matched}`);
-  if (!matched) { console.log("[bridge] 0 khách khớp — DỪNG, không ghi gì."); return; }
+  console.log(`[bridge] khớp: ${matched}/${targets.length} khách → dòng Lark | chưa khớp: ${targets.length - matched}`);
+  if (!matched) { console.log("[bridge] 0 khách khớp — xong, không ghi gì."); return; }
 
   // ── 4) So lệch & ghi ngược lên Lark (chỉ đụng dòng thật sự đổi).
   const runMs = Date.now();
@@ -234,7 +284,13 @@ export async function runSmaxLarkBridge() {
     if (existing.has(CHK)) patch[CHK] = runMs;
     upd.push({ record_id: rid, fields: patch });
   }
-  console.log(`[bridge] cần cập nhật: ${upd.length} dòng`);
+  // Thống kê cột nào đang bị ghi — nếu lần nào cũng thấy cùng một cột với số
+  // dòng y hệt thì nhiều khả năng là ghi lặp vô ích (so lệch sai kiểu dữ liệu),
+  // chứ không phải khách thật sự vừa nhắn.
+  const byField: Record<string, number> = {};
+  for (const u of upd) for (const k of Object.keys(u.fields)) if (k !== CHK) byField[k] = (byField[k] || 0) + 1;
+  const detail = Object.entries(byField).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}=${n}`).join(" · ");
+  console.log(`[bridge] cần cập nhật: ${upd.length} dòng${detail ? ` (${detail})` : ""}`);
   let uw = 0;
   for (let i = 0; i < upd.length; i += 400) {
     const rr = await fetch(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/records/batch_update`, { method: "POST", headers: { Authorization: `Bearer ${tk}`, "Content-Type": "application/json" }, body: JSON.stringify({ records: upd.slice(i, i + 400) }) }).then(r => r.json());

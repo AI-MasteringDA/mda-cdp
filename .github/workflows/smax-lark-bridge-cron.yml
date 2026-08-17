@@ -8,10 +8,20 @@ name: SMAX→Lark trực tiếp (không qua Supabase)
 
 on:
   schedule:
-    # Mỗi 7 phút, chỉ trong giờ làm việc 8AM-6PM VN (1-10 UTC) — cùng khung với
-    # smax-cron/lark-push-smax-cron đang tạm nghỉ vì bị khoá.
+    # NHANH — mỗi 7 phút trong giờ làm việc 8AM-6PM VN (1-10 UTC). Chỉ đụng
+    # khách vừa đổi trong 90 phút gần nhất (~25/22.373) → xong trong ~15 giây.
     - cron: '*/7 1-10 * * *'
+    # ĐỐI SOÁT — đầu mỗi giờ, quét toàn bảng để bắt phần bản nhanh có thể sót
+    # (khách khớp bằng SĐT/email chứ không bằng pid). Chạy ~1.5 phút.
+    # ĐỪNG BỎ lịch này: đây là lưới an toàn giữ cho số liệu luôn đúng.
+    - cron: '3 1-10 * * *'
   workflow_dispatch:
+    inputs:
+      full:
+        description: "Ép đối soát toàn bộ (1 = có)"
+        type: choice
+        options: ["", "1"]
+        default: ""
 
 concurrency:
   group: smax-lark-bridge
@@ -20,7 +30,7 @@ concurrency:
 jobs:
   bridge:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -31,8 +41,14 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm install --no-audit --no-fund --prefer-offline
+      - name: Xác định chế độ (nhanh / đối soát) theo lịch vừa kích hoạt
+        id: pick
+        run: |
+          if [ "${{ github.event.schedule }}" = "3 1-10 * * *" ]; then echo "full=1" >> "$GITHUB_OUTPUT";
+          else echo "full=${{ github.event.inputs.full }}" >> "$GITHUB_OUTPUT"; fi
       - name: Đẩy SMAX → Lark (không qua Supabase)
         env:
+          BRIDGE_FULL: ${{ steps.pick.outputs.full }}
           LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
           LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
           LARK_BASE_APP_TOKEN: ${{ secrets.LARK_BASE_APP_TOKEN }}
