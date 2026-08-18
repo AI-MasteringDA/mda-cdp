@@ -203,11 +203,16 @@ export async function GET(req: Request) {
         // hiện tên SF làm chính để tra trên Salesforce được ngay, kèm tên SMAX.
         const sfName = gs(f["Tên SF"]).trim(), smaxName = gs(f["Lead Name"]).trim();
         // Nhánh này chỉ bổ sung HOT. Trước đây coi MỌI lead SF là Hot — sai, vì
-        // riêng khoá K61 trên SF đã có 80 lead Cold. Giờ loại khi SF ghi rõ
-        // không phải Hot; Rating trống thì vẫn giữ hành vi cũ để dữ liệu chưa
-        // backfill không bị hụt.
+        // riêng khoá K61 trên SF đã có 80 lead Cold.
+        //
+        // RATING TRỐNG: trước kia VẪN tính, vì dữ liệu đi qua Supabase có thể
+        // chưa backfill xong nên trống = "chưa biết". Từ 2026-08-18 KHÔNG tính
+        // nữa (user chốt): sf-lark-bridge.ts luôn ghi Rating thẳng từ Salesforce
+        // ⇒ trống nghĩa là sales THẬT SỰ chưa đánh giá, không phải thiếu dữ liệu.
+        // Đo lúc đổi: 21/86 lead SF đang được tính Hot chỉ nhờ rating trống — ca
+        // "Julie Vu" (không email, không SĐT, không rating) là ví dụ user bắt được.
         const rating = norm(gs(f["Rating (SF)"]));
-        if (rating && rating !== "hot") continue;
+        if (rating !== "hot") continue;
         // "K61 - ONL - 2026" → "K61" để lọc chung một rổ với tag SMAX.
         const prod = gs(f["Khoá (SF)"]).trim();
         const m = prod.match(/^(KH?\d{2,3}|F\d(?:\.\d)?)\b/i);
