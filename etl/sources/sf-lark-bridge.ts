@@ -83,7 +83,10 @@ async function readAll(tk: string, tbl: string, fields: string[]): Promise<{ rid
   return out;
 }
 
-type SfLead = { Id: string; Name: string; Email: string | null; Phone: string | null; Rating: string | null; Product__c: string | null; CreatedDate: string; RelevantLeads__c: string | null; Company?: string | null; Status?: string | null };
+type SfLead = { Id: string; Name: string; Email: string | null; Phone: string | null; Rating: string | null; Product__c: string | null; CreatedDate: string; RelevantLeads__c: string | null; Company?: string | null; Status?: string | null; IsConverted?: boolean; ConvertedDate?: string | null };
+
+/** Cột đánh dấu lead đã chốt (convert sang Contact/Opportunity bên SF). */
+const CONV = "Đã chốt (SF)";
 
 export async function runSfLarkBridge() {
   if (!INST || !CID || !APP) { console.log("[sf-bridge] thiếu creds SF/Lark, dừng"); return; }
@@ -94,7 +97,13 @@ export async function runSfLarkBridge() {
   const products = await sfQuery<{ Id: string; Name: string }>(stk, `SELECT Id, Name FROM Product2 LIMIT 5000`);
   const prodName = new Map(products.map(p => [p.Id, p.Name]));
 
-  const soql = `SELECT Id, Name, Email, Phone, Company, Status, Rating, Product__c, CreatedDate, RelevantLeads__c FROM Lead WHERE CreatedDate >= LAST_N_DAYS:${DAYS} AND IsConverted = false ORDER BY CreatedDate DESC`;
+  // LẤY CẢ LEAD ĐÃ CONVERT (bỏ điều kiện IsConverted = false).
+  // Vì sao (user chốt 2026-08-18): lead chốt xong rồi thì KHÔNG còn là "Hot
+  // lead" nữa. Nếu chỉ kéo lead chưa convert thì dòng tạo TRƯỚC lúc convert vẫn
+  // nằm lại trên Lark và tiếp tục được đếm mãi — đo được 51 lead đã convert
+  // trong 45 ngày, 10 trong đó Rating=Hot (ca "Vũ Thị Thu Uyên" user bắt được).
+  // Kéo cả về rồi đánh dấu để /api/radar biết mà loại.
+  const soql = `SELECT Id, Name, Email, Phone, Company, Status, Rating, Product__c, CreatedDate, RelevantLeads__c, IsConverted, ConvertedDate FROM Lead WHERE CreatedDate >= LAST_N_DAYS:${DAYS} ORDER BY CreatedDate DESC`;
   const leads = await sfQuery<SfLead>(stk, soql);
   console.log(`[sf-bridge] Salesforce: ${leads.length} lead trong ${DAYS} ngày | ${prodName.size} sản phẩm`);
   if (!leads.length) { console.log("[sf-bridge] SF trả 0 lead — DỪNG, không ghi gì."); return; }
@@ -117,7 +126,19 @@ export async function runSfLarkBridge() {
     console.log(`[sf-bridge] Tag SMAX tra được: ${tagByPhone.size} sđt · ${tagByEmail.size} email`);
   }
 
-  const existing = await readAll(ltk, sfTbl, ["Time", "Event", "Tên SF", "Rating (SF)", "Tag SMAX"]);
+  // Đảm bảo cột "Đã chốt (SF)" tồn tại (checkbox, type 7).
+  const fR = await fetch(`${U}/bitable/v1/apps/${APP}/tables/${sfTbl}/fields?page_size=100`, { headers: { Authorization: `Bearer ${ltk}` } }).then(r => r.json());
+  if (fR.code !== 0) throw new Error(`đọc fields SF lỗi: ${fR.code} ${fR.msg}`);
+  const haveConv = (fR.data?.items || []).some((f: any) => f.field_name === CONV);
+  if (!haveConv) {
+    const cr = await fetch(`${U}/bitable/v1/apps/${APP}/tables/${sfTbl}/fields`, {
+      method: "POST", headers: { Authorization: `Bearer ${ltk}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ field_name: CONV, type: 7 }),
+    }).then(r => r.json());
+    console.log(cr.code === 0 ? `[sf-bridge] đã tạo cột "${CONV}"` : `[sf-bridge] ⚠ không tạo được cột "${CONV}": ${cr.code} ${cr.msg}`);
+  }
+
+  const existing = await readAll(ltk, sfTbl, ["Time", "Event", "Tên SF", "Rating (SF)", "Tag SMAX", CONV]);
   const byKey = new Map<string, { rid: string; f: Record<string, unknown> }>();
   for (const r of existing) {
     const t = typeof r.f["Time"] === "number" ? r.f["Time"] as number : 0;
@@ -144,6 +165,7 @@ export async function runSfLarkBridge() {
       "Rating (SF)": l.Rating ?? "",
       "Khoá (SF)": l.Product__c ? (prodName.get(l.Product__c) ?? "") : "",
       "Lead cũ (SF)": l.RelevantLeads__c ?? "",
+      [CONV]: l.IsConverted === true,
     };
     if (tags.length) fields["Tag SMAX"] = tags;
     const hit = byKey.get(rowKey(timeMs, String(l.Name ?? "")));
@@ -154,6 +176,9 @@ export async function runSfLarkBridge() {
     if ((l.Rating ?? "") !== txt(hit.f["Rating (SF)"]).trim()) patch["Rating (SF)"] = l.Rating ?? "";
     const curTags = lst(hit.f["Tag SMAX"]).slice().sort().join("|");
     if (tags.length && tags.slice().sort().join("|") !== curTags) patch["Tag SMAX"] = tags;
+    // Lead chốt xong thì phải đánh dấu lại — đây là đường DUY NHẤT để dòng cũ
+    // (tạo lúc còn là lead) ngừng được đếm Hot.
+    if ((l.IsConverted === true) !== (hit.f[CONV] === true)) patch[CONV] = l.IsConverted === true;
     if (Object.keys(patch).length) updates.push({ record_id: hit.rid, fields: patch });
   }
 

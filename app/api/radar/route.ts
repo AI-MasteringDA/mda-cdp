@@ -169,7 +169,7 @@ export async function GET(req: Request) {
       const d = await fetch(url.toString(), {
         method: "POST", headers: H, cache: "no-store",
         body: JSON.stringify({
-          field_names: ["Time", "Event", "Lead Name", "Tên SF", "Tag SMAX", "Phone", "Email", "Lead cũ (SF)", "Khoá (SF)", "Rating (SF)"],
+          field_names: ["Time", "Event", "Lead Name", "Tên SF", "Tag SMAX", "Phone", "Email", "Lead cũ (SF)", "Khoá (SF)", "Rating (SF)", "Đã chốt (SF)"],
           filter: { conjunction: "and", conditions: [
             { field_name: "Event", operator: "is", value: ["lead_created"] },
             { field_name: "Time", operator: "isGreater", value: ["ExactDate", String(cutoffMs)] },
@@ -213,6 +213,12 @@ export async function GET(req: Request) {
         // "Julie Vu" (không email, không SĐT, không rating) là ví dụ user bắt được.
         const rating = norm(gs(f["Rating (SF)"]));
         if (rating !== "hot") continue;
+        // ĐÃ CHỐT SALES thì thôi đếm Hot (user chốt 2026-08-18): lead convert
+        // sang Contact/Opportunity bên SF đã thành KHÁCH, không còn nằm trong
+        // phễu "Hot lead" nữa. Cột này do sf-lark-bridge.ts ghi từ IsConverted.
+        // Đo lúc thêm: 51 lead convert trong 45 ngày, 10 mang Rating=Hot vẫn
+        // đang được đếm (ca "Vũ Thị Thu Uyên" user bắt được).
+        if (f["Đã chốt (SF)"] === true) continue;
         // "K61 - ONL - 2026" → "K61" để lọc chung một rổ với tag SMAX.
         const prod = gs(f["Khoá (SF)"]).trim();
         const m = prod.match(/^(KH?\d{2,3}|F\d(?:\.\d)?)\b/i);
