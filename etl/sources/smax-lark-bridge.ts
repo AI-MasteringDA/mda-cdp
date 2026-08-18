@@ -25,6 +25,7 @@
  */
 import { config } from "dotenv"; import { resolve } from "path";
 config({ path: resolve(process.cwd(), ".env.local") });
+import { isCompanyPhone, isCompanyEmail } from "../lib/company-contacts";
 
 const T = process.env.SMAX_USER_TOKEN || process.env.SMAX_API_KEY;
 const BASE = process.env.SMAX_BASE_URL || "https://api.smax.ai";
@@ -66,7 +67,12 @@ function vnMidnightMs(iso: string): number { const d = new Date(new Date(iso).ge
 async function larkToken() { const r = await fetch(`${U}/auth/v3/tenant_access_token/internal`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ app_id: ID, app_secret: SEC }) }).then(r => r.json()); return r.tenant_access_token; }
 
 const CLASS: Record<string, string> = { coldlead: "Cold Lead", hotlead: "Hot Lead", warmlead: "Warm Lead", prospect: "Prospect" };
+const CLASS_KEYS = new Set(Object.keys(CLASS));
 const norm2 = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
+/** Đọc cột multi-select của Lark ra mảng chuỗi. */
+const lstOf = (v: unknown): string[] => Array.isArray(v)
+  ? (v as any[]).map(x => typeof x === "object" && x ? (x.text ?? x.name ?? "") : String(x)).filter(Boolean)
+  : (v ? [String(v)] : []);
 function trackName(name: string): string | null {
   const n = norm2(name); if (CLASS[n]) return CLASS[n];
   const m = name.trim().match(/^(kh?\d{2,3}|f\d(\.\d)?)$/i); if (m) return name.trim().toUpperCase();
@@ -152,7 +158,11 @@ export async function runSmaxLarkBridge() {
   // FieldNameNotFound và hỏng cả lần chạy (gặp 2026-08-17 với "K62 lúc").
   const lucCols = [...existing].filter(n => / lúc$/.test(n));
   const idCols = ["Lead ID", "ID", "Phone", "Email", "Lead Name"].filter(n => existing.has(n));
-  const valCols = [COL, BC, NC, EXACT, "Time", "Event", "Chưa phản hồi"].filter(n => existing.has(n));
+  // "Tag SMAX" BẮT BUỘC phải nằm đây. Thiếu nó thì f["Tag SMAX"] luôn undefined
+  // ⇒ code tưởng ô đang rỗng ⇒ (a) lần nào cũng ghi lại 7.800 dòng vô ích, và
+  // (b) nguy hiểm hơn: phép union "giữ tag cũ" mất tác dụng, biến mirror thành
+  // GHI ĐÈ — đúng loại lỗi làm mất tag hàng loạt hồi 2026-08-06 (Hot 2004→1148).
+  const valCols = [COL, BC, NC, EXACT, "Time", "Event", "Chưa phản hồi", "Tag SMAX"].filter(n => existing.has(n));
 
   type Row = { rid: string; f: Record<string, unknown> };
   const rows: Row[] = [];
@@ -247,6 +257,18 @@ export async function runSmaxLarkBridge() {
   // 1 dòng Lark có thể ứng nhiều customer SMAX (nhiều kênh) → giữ bản ghi có
   // last_message_at MỚI NHẤT, khớp cách view gốc lấy touchpoint mới nhất.
   const lastAct = new Map<string, { timeMs: number; event: string; chuaPhanHoi: boolean }>();
+  // Tag hiện tại của khách, gom theo dòng Lark (union nếu 1 người nhiều kênh).
+  // CẦN để mirror cột "Tag SMAX" — thiếu bước này thì tag trên Lark kẹt ở giá
+  // trị cũ: ca "Mận Bùi" 2026-08-18 SMAX đã đổi Cold→Hot mà Lark vẫn hiện Cold,
+  // kèm "Cold Lead lúc" cũ còn sót nên bị tính nhầm là NÂNG HẠNG thay vì Hot mới.
+  const tagsNow = new Map<string, Set<string>>();
+  // SĐT/email SMAX có mà ô trên Lark đang TRỐNG → điền vào.
+  // Vì sao cần (ca "Mận Bùi" 2026-08-18): SMAX có manbui07@gmail.com nhưng ô
+  // Email trên Lark trống ⇒ sf-lark-bridge không tra được "Tag SMAX" của cô ấy
+  // ⇒ tưởng SMAX chưa đếm ⇒ TẠO THÊM một dòng Hot bên SF ⇒ ĐẾM ĐÔI.
+  // BỎ QUA số/mail của công ty (xem company-contacts.ts — SMAX hay nhặt nhầm
+  // hotline trong đoạn chat thành thông tin khách, từng gây ca "Sơn Huyền").
+  const fillPhone = new Map<string, string>(), fillEmail = new Map<string, string>();
   let matched = 0;
   for (const c of targets) {
     const namePh = phoneFromName(c.name);
@@ -266,6 +288,15 @@ export async function runSmaxLarkBridge() {
       const prev = lastAct.get(rid);
       if (!prev || act.timeMs > prev.timeMs) lastAct.set(rid, { timeMs: act.timeMs, event: act.event, chuaPhanHoi: act.chuaPhanHoi });
     }
+    const ts = tagsNow.get(rid) ?? new Set<string>();
+    for (const tg of (c.tags || [])) {
+      const raw = String(tg.name || tg.alias || "").trim(); if (raw) ts.add(raw);
+    }
+    tagsNow.set(rid, ts);
+    if (c.phone && !isCompanyPhone(c.phone) && !fillPhone.has(rid)) {
+      const p = String(c.phone).trim(); fillPhone.set(rid, p.startsWith("0") ? p : "0" + normPh(p));
+    }
+    if (c.email && !isCompanyEmail(c.email) && !fillEmail.has(rid)) fillEmail.set(rid, String(c.email).toLowerCase().trim());
     for (const tg of (c.tags || [])) {
       const nm = trackName(String(tg.name || tg.alias || "").trim()); if (!nm) continue;
       const tms = tg.time ? new Date(tg.time).getTime() : 0; if (!tms) continue;
@@ -393,12 +424,44 @@ export async function runSmaxLarkBridge() {
       if (existing.has("Event") && act.event !== txt(f["Event"]).trim()) patch["Event"] = act.event;
       if (existing.has("Chưa phản hồi") && act.chuaPhanHoi !== (f["Chưa phản hồi"] === true)) patch["Chưa phản hồi"] = act.chuaPhanHoi;
     }
+    // ĐIỀN LIÊN HỆ — chỉ khi ô Lark đang TRỐNG, không đè giá trị sẵn có.
+    const wp = fillPhone.get(rid);
+    if (wp && existing.has("Phone") && !txt(f["Phone"]).trim()) patch["Phone"] = wp;
+    const we = fillEmail.get(rid);
+    if (we && existing.has("Email") && !txt(f["Email"]).trim()) patch["Email"] = we;
+    // ── MIRROR TAG (chuyển từ lead-first-chat.ts sang, 2026-08-18).
+    // Bỏ bước này là tag trên Lark kẹt ở giá trị cũ mãi: ca "Mận Bùi" SMAX đã
+    // đổi Cold→Hot mà Lark vẫn hiện Cold Lead.
+    // Quy tắc GIỮ NGUYÊN như bản gốc (đã trả giá 2026-08-06 khi mirror toàn bộ
+    // làm mất tag, Hot 2004→1148, phải revert):
+    //   - tag PHÂN LOẠI (hot/cold/warm/prospect): customer là nguồn chuẩn →
+    //     THAY THẾ. Chỉ thay khi customer thực sự có tag phân loại.
+    //   - tag khác (khoá, SF_Done, Bot…): chỉ UNION thêm, KHÔNG BAO GIỜ xoá.
+    const ts = tagsNow.get(rid);
+    if (ts && existing.has("Tag SMAX")) {
+      const cur = lstOf(f["Tag SMAX"]);
+      const isCls = (t: string) => CLASS_KEYS.has(norm2(t));
+      const custArr = [...ts];
+      const custCls = custArr.filter(isCls);
+      const newCls = custCls.length ? custCls : cur.filter(isCls);
+      const merged = [...new Set([...newCls, ...cur.filter(t => !isCls(t)), ...custArr.filter(t => !isCls(t))])];
+      if (merged.slice().sort().join("|") !== cur.slice().sort().join("|")) patch["Tag SMAX"] = merged;
+    }
     const tt = tagTimes.get(rid) || {};
     for (const col of lucCols) {
-      const w = tt[col]; if (w == null) continue;   // KHÔNG xoá mốc cũ ở đây — việc
-      // xoá (khi SMAX gỡ tag) là của lead-first-chat.ts, nó biết chắc đã quét đủ
-      // customer của lead; bridge chỉ điền/sửa, tránh xoá oan.
-      if (w !== (typeof f[col] === "number" ? f[col] : null)) patch[col] = w;
+      const w = tt[col];
+      if (w != null) { if (w !== (typeof f[col] === "number" ? f[col] : null)) patch[col] = w; continue; }
+      // XOÁ mốc của tag PHÂN LOẠI đã bị gỡ khỏi SMAX. Bắt buộc: "Cold Lead lúc"
+      // cũ còn sót khiến lead lên Hot bị tính là NÂNG HẠNG thay vì Hot mới
+      // (ca "Mận Bùi"). Chỉ xoá khi (a) biết chắc tập tag hiện tại của dòng này
+      // — tức có customer khớp trong lần quét — và (b) là cột phân loại; cột
+      // khoá (K61 lúc…) giữ nguyên vì là dữ liệu lịch sử, gỡ tag không có nghĩa
+      // là chưa từng học khoá đó.
+      if (!ts) continue;
+      const cls = col.replace(/ lúc$/, "");
+      if (!CLASS_KEYS.has(norm2(cls))) continue;
+      if ([...ts].some(t => norm2(t) === norm2(cls))) continue;
+      if (f[col] != null) patch[col] = null;
     }
     if (!Object.keys(patch).length) continue;
     if (existing.has(CHK)) patch[CHK] = runMs;
