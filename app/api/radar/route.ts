@@ -34,6 +34,20 @@ const keysOf = (phone: string, email: string): string[] => {
   return out;
 };
 
+// SĐT/EMAIL CỦA CHÍNH CÔNG TY — không được dùng làm khoá nhận diện người.
+// SMAX/sales hay gõ hotline ngay trong đoạn chat rồi bị gán nhầm vào hồ sơ
+// khách. Đo 2026-08-18 trên Salesforce: số 0961486648 đang nằm trên 2 lead của
+// HAI người khác nhau ("Nhi Hoàng", "Nguyễn Trung Tấn") — gộp theo đó là dồn
+// người lạ vào một, đúng ca "Sơn Huyền" cũ. Giữ đồng bộ với
+// etl/lib/company-contacts.ts (đó là nguồn chuẩn cho các job ETL).
+const COMPANY_PHONE_TAILS = new Set(["961486648"]);
+const COMPANY_EMAIL_RE = /@mastering-da\.com$|^(sales|info|ketoan|admin|contact|hotro|support)@/i;
+/** Khoá nhận diện đã LỌC BỎ liên hệ của công ty. */
+const idKeysOf = (phone: string, email: string): string[] =>
+  keysOf(phone, email).filter(k =>
+    k.startsWith("p:") ? !COMPANY_PHONE_TAILS.has(k.slice(2))
+      : !COMPANY_EMAIL_RE.test(k.slice(2)));
+
 function toLead(f: Record<string, Cell>, cutoff: string) {
   const tags = g(f["Tag SMAX"]);
   // RULE SALES: Spam / Đã Block là rác — KHÔNG phải lead.
@@ -162,6 +176,11 @@ export async function GET(req: Request) {
   // của lead_created = CreatedDate của Lead gốc (đã sửa 2026-08-10).
   const sfTable = tR.data?.items?.find((t: { name: string; table_id: string }) => t.name === "Salesforce_Database")?.table_id;
   if (sfTable) {
+    // Khoá của những người ĐÃ được đếm — vừa để gộp lead SF trùng nhau, vừa để
+    // không đếm lại người mà nhánh SMAX đã tính (bổ sung cho phép kiểm tag
+    // "Hot Lead" bên dưới, vì lead SF có thể không mang tag SMAX nào).
+    const sfSeen = new Set<string>();
+    for (const l of leads) for (const k of idKeysOf(l.ph, "")) sfSeen.add(k);
     let spt: string | undefined; let pages = 0;
     while (pages < 30) {
       const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${sfTable}/records/search`);
@@ -219,6 +238,17 @@ export async function GET(req: Request) {
         // Đo lúc thêm: 51 lead convert trong 45 ngày, 10 mang Rating=Hot vẫn
         // đang được đếm (ca "Vũ Thị Thu Uyên" user bắt được).
         if (f["Đã chốt (SF)"] === true) continue;
+        // GỘP LEAD TRÙNG BÊN SF (user chốt 2026-08-18 "gộp lead chính xác trên
+        // SF, để k dup"). Salesforce cho phép cùng một người tồn tại nhiều Lead
+        // — đo trên 486 lead/90 ngày: 17 nhóm trùng email, 16 nhóm trùng SĐT.
+        // Không gộp thì mỗi bản ghi đếm một lần ⇒ thổi phồng Hot.
+        // Khoá gộp đã LỌC BỎ liên hệ công ty (idKeysOf) vì 0961486648 đang nằm
+        // trên 2 lead của hai người khác nhau — gộp theo đó là sai người.
+        // Lead không có cả email lẫn SĐT thì KHÔNG có căn cứ nào để gộp (2 ca:
+        // "Julie Vu", "Mai Trinh") — đành để riêng, phải sửa dữ liệu bên SF.
+        const idKeys = idKeysOf(gs(f["Phone"]), gs(f["Email"]));
+        if (idKeys.some(k => sfSeen.has(k))) continue;
+        for (const k of idKeys) sfSeen.add(k);
         // "K61 - ONL - 2026" → "K61" để lọc chung một rổ với tag SMAX.
         const prod = gs(f["Khoá (SF)"]).trim();
         const m = prod.match(/^(KH?\d{2,3}|F\d(?:\.\d)?)\b/i);

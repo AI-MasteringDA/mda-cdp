@@ -37,6 +37,14 @@ const normPh = (p: unknown) => { const d = String(p ?? "").replace(/\D/g, ""); r
 const normEm = (e: unknown) => String(e ?? "").toLowerCase().trim();
 /** Khoá chống trùng — khớp keyOf() bên lark-push.ts (Time|Event|Tên). */
 const rowKey = (timeMs: number, name: string) => `${timeMs}|lead_created|${name.trim().toLowerCase()}`;
+/**
+ * Chuẩn hoá TÊN để dò giữa SF và SMAX. Bỏ dấu, bỏ đuôi "_0912345678" mà SMAX
+ * hay gắn vào tên ("Julie Vu_0376565355" → "julie vu").
+ */
+const nameKey = (s: unknown): string => String(s ?? "")
+  .replace(/[_\s-]*\+?\d[\d\s.]{7,}$/, "")
+  .toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+  .replace(/đ/g, "d").replace(/[^a-z0-9]+/g, " ").trim();
 
 async function sfToken(): Promise<string> {
   const r = await fetch(`${INST}/services/oauth2/token`, {
@@ -116,14 +124,26 @@ export async function runSfLarkBridge() {
   // Tag SMAX theo SĐT/email — thay cho dim_lead. Dashboard dùng cột này để bỏ
   // qua lead mà SMAX đã đếm Hot rồi (chống đếm đôi).
   const tagByPhone = new Map<string, string[]>(), tagByEmail = new Map<string, string[]>();
+  // Tên (đã chuẩn hoá) → liên hệ trên SMAX. Dùng để VÁ liên hệ cho lead SF
+  // trống cả email lẫn SĐT — xem khối "MƯỢN LIÊN HỆ" bên dưới.
+  const contactByName = new Map<string, { ph: string; em: string } | null>();
   if (smaxTbl) {
-    const sm = await readAll(ltk, smaxTbl, ["Phone", "Email", "Tag SMAX"]);
+    const sm = await readAll(ltk, smaxTbl, ["Phone", "Email", "Tag SMAX", "Lead Name"]);
     for (const { f } of sm) {
-      const tags = lst(f["Tag SMAX"]); if (!tags.length) continue;
-      const ph = normPh(txt(f["Phone"])); if (ph && !tagByPhone.has(ph)) tagByPhone.set(ph, tags);
-      const em = normEm(txt(f["Email"])); if (em && !tagByEmail.has(em)) tagByEmail.set(em, tags);
+      const ph = normPh(txt(f["Phone"])), em = normEm(txt(f["Email"]));
+      const tags = lst(f["Tag SMAX"]);
+      if (tags.length) {
+        if (ph && !tagByPhone.has(ph)) tagByPhone.set(ph, tags);
+        if (em && !tagByEmail.has(em)) tagByEmail.set(em, tags);
+      }
+      if (!ph && !em) continue;
+      const key = nameKey(txt(f["Lead Name"])); if (!key) continue;
+      // Tên trùng NHIỀU người ⇒ đánh dấu null để KHÔNG dám dùng (tránh vá nhầm
+      // liên hệ của người khác — "Uyên Lê" chẳng hạn có tới 3 bản ghi).
+      if (contactByName.has(key)) { contactByName.set(key, null); continue; }
+      contactByName.set(key, { ph, em });
     }
-    console.log(`[sf-bridge] Tag SMAX tra được: ${tagByPhone.size} sđt · ${tagByEmail.size} email`);
+    console.log(`[sf-bridge] Tag SMAX tra được: ${tagByPhone.size} sđt · ${tagByEmail.size} email | tên duy nhất có liên hệ: ${[...contactByName.values()].filter(Boolean).length}`);
   }
 
   // Đảm bảo cột "Đã chốt (SF)" tồn tại (checkbox, type 7).
@@ -138,7 +158,7 @@ export async function runSfLarkBridge() {
     console.log(cr.code === 0 ? `[sf-bridge] đã tạo cột "${CONV}"` : `[sf-bridge] ⚠ không tạo được cột "${CONV}": ${cr.code} ${cr.msg}`);
   }
 
-  const existing = await readAll(ltk, sfTbl, ["Time", "Event", "Tên SF", "Rating (SF)", "Tag SMAX", CONV]);
+  const existing = await readAll(ltk, sfTbl, ["Time", "Event", "Tên SF", "Rating (SF)", "Tag SMAX", "Phone", "Email", CONV]);
   const byKey = new Map<string, { rid: string; f: Record<string, unknown> }>();
   for (const r of existing) {
     const t = typeof r.f["Time"] === "number" ? r.f["Time"] as number : 0;
@@ -151,15 +171,29 @@ export async function runSfLarkBridge() {
   for (const l of leads) {
     const timeMs = new Date(l.CreatedDate).getTime();
     if (!Number.isFinite(timeMs)) continue;
-    const ph = normPh(l.Phone), em = normEm(l.Email);
+    let ph = normPh(l.Phone), em = normEm(l.Email);
+    let borrowed = "";
+    // MƯỢN LIÊN HỆ TỪ SMAX khi lead SF trống cả email lẫn SĐT.
+    // Ca "Julie Vu" (user 2026-08-18): SF có 2 bản ghi của CÙNG một người —
+    // "Vũ Thị Thu Uyên" (uyenvtt.bmg@gmail.com / 0376565355) và "Julie Vu"
+    // (trống trơn) ⇒ không có khoá nào để gộp ⇒ đếm đôi. Nhưng SMAX có bản ghi
+    // "Julie Vu_0376565355" mang đúng email/SĐT đó ⇒ dò theo TÊN là nối được.
+    // CHỈ dùng khi tên khớp DUY NHẤT một người bên SMAX (contactByName lưu null
+    // cho tên trùng nhiều người) — tên phổ biến mà vá bừa là gán nhầm liên hệ.
+    if (!ph && !em) {
+      const c = contactByName.get(nameKey(l.Name));
+      if (c) { ph = c.ph; em = c.em; borrowed = `${l.Name} ← SMAX`; }
+    }
     const tags = (ph && tagByPhone.get(ph)) || (em && tagByEmail.get(em)) || [];
     const fields: Record<string, unknown> = {
       "Time": timeMs,
       "Event": "lead_created",
       "Tên SF": String(l.Name ?? "").trim(),
       "Lead Name": String(l.Name ?? "").trim(),
-      "Email": l.Email ?? "",
-      "Phone": l.Phone ?? "",
+      // Ghi liên hệ ĐÃ MƯỢN (nếu có) chứ không phải giá trị rỗng của SF —
+      // /api/radar dùng chính 2 cột này làm khoá gộp người.
+      "Email": l.Email ?? (em || ""),
+      "Phone": l.Phone ?? (ph ? "0" + ph : ""),
       "Company": l.Company ?? "",
       "Stage": l.Status ?? "",
       "Rating (SF)": l.Rating ?? "",
@@ -179,6 +213,11 @@ export async function runSfLarkBridge() {
     // Lead chốt xong thì phải đánh dấu lại — đây là đường DUY NHẤT để dòng cũ
     // (tạo lúc còn là lead) ngừng được đếm Hot.
     if ((l.IsConverted === true) !== (hit.f[CONV] === true)) patch[CONV] = l.IsConverted === true;
+    // Vá liên hệ đã mượn vào dòng cũ (dòng tạo trước khi có tính năng này).
+    if (borrowed) {
+      if (em && !txt(hit.f["Email"]).trim()) patch["Email"] = em;
+      if (ph && !txt(hit.f["Phone"]).trim()) patch["Phone"] = "0" + ph;
+    }
     if (Object.keys(patch).length) updates.push({ record_id: hit.rid, fields: patch });
   }
 
