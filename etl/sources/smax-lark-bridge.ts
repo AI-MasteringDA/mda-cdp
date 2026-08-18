@@ -37,8 +37,17 @@ const U = "https://open.larksuite.com/open-apis";
 //   ĐỐI SOÁT (BRIDGE_FULL=1, chạy theo giờ): quét toàn bảng, bắt phần bản nhanh
 //     có thể sót (khách khớp bằng SĐT/email chứ không bằng pid). Đây là lưới an
 //     toàn để SỐ LUÔN ĐÚNG — đừng bỏ lịch chạy này.
-const FULL = process.env.BRIDGE_FULL === "1";
-const LOOKBACK_MIN = Number(process.env.BRIDGE_LOOKBACK_MIN || 90);
+// TỰ ĐỐI SOÁT ĐẦU MỖI GIỜ — KHÔNG dựa vào lịch cron của GitHub.
+// Lý do (sự cố 2026-08-18): lịch GitHub im suốt 14 tiếng, mà nó là thứ duy nhất
+// kích hoạt chế độ ĐỐI SOÁT ⇒ cả buổi sáng không ai quét lại ⇒ 7/9 khách có
+// tin nhắn trong ngày không được cập nhật. cron-job.org (7 phút) thì chỉ gọi
+// chế độ NHANH. Nay bridge tự xem đồng hồ: lần chạy nào rơi vào 8 phút đầu của
+// giờ thì tự nâng thành ĐỐI SOÁT ⇒ chỉ cần MỘT trigger 7 phút là có đủ cả hai.
+const nowMin = new Date().getUTCMinutes();
+const FULL = process.env.BRIDGE_FULL === "1" || nowMin < 8;
+// Cửa sổ nhìn lại. Rộng gấp nhiều lần nhịp cron để lỡ vài lần chạy hỏng vẫn
+// không sót; phần vượt cửa sổ do lần đối soát đầu giờ quét lại.
+const LOOKBACK_MIN = Number(process.env.BRIDGE_LOOKBACK_MIN || 180);
 // BRIDGE_DRYRUN=1 — xem sẽ tạo dòng nào mà KHÔNG ghi (dùng trước mỗi lần đổi
 // luật tạo lead, vì tạo nhầm ra dòng trùng là đếm đôi Hot lead).
 const DRYRUN = process.env.BRIDGE_DRYRUN === "1";
@@ -195,22 +204,32 @@ export async function runSmaxLarkBridge() {
     // INCREMENTAL: chỉ đụng khách vừa có thay đổi trong LOOKBACK_MIN phút, rồi
     // tra ĐÚNG những dòng đó trên Lark (search lọc theo "ID", tối đa 50 điều
     // kiện/lần — thử 100 là Lark trả 99992402 field validation failed).
-    // Cửa sổ rộng hơn nhịp cron nhiều lần để lỡ vài lần chạy hỏng vẫn không sót;
-    // phần sót hiếm (khớp bằng SĐT/email chứ không bằng pid) do lần ĐỐI SOÁT
-    // theo giờ quét lại.
+    // Cửa sổ rộng hơn nhịp cron nhiều lần để lỡ vài lần chạy hỏng vẫn không sót.
     const cutoff = Date.now() - LOOKBACK_MIN * 60_000;
     targets = (customers as any[]).filter(c => touchedMs(c) >= cutoff);
+    const searchBy = async (field: string, values: string[]) => {
+      for (let i = 0; i < values.length; i += 50) {
+        const batch = values.slice(i, i + 50);
+        const d = await fetch(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/records/search?page_size=500`, {
+          method: "POST", headers: { Authorization: `Bearer ${tk}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ field_names: readCols, filter: { conjunction: "or", conditions: batch.map(v => ({ field_name: field, operator: "is", value: [v] })) } }),
+        }).then(r => r.json());
+        if (d.code !== 0) throw new Error(`search Lark (${field}) lỗi: ${d.code} ${d.msg}`);
+        collect(d.data?.items || []);
+      }
+    };
     const pids = [...new Set(targets.map(c => stripSmaxId(c.pid)).filter(Boolean))];
-    for (let i = 0; i < pids.length; i += 50) {
-      const batch = pids.slice(i, i + 50);
-      const d = await fetch(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/records/search?page_size=500`, {
-        method: "POST", headers: { Authorization: `Bearer ${tk}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ field_names: readCols, filter: { conjunction: "or", conditions: batch.map(v => ({ field_name: "ID", operator: "is", value: [v] })) } }),
-      }).then(r => r.json());
-      if (d.code !== 0) throw new Error(`search Lark lỗi: ${d.code} ${d.msg}`);
-      collect(d.data?.items || []);
-    }
-    console.log(`[bridge] [NHANH] khách đổi trong ${LOOKBACK_MIN}': ${targets.length}/${customers.length} → tra ${pids.length} pid (${Math.ceil(pids.length / 50)} lượt) → ${rows.length} dòng Lark`);
+    await searchBy("ID", pids);
+    // VÒNG 2 — tra thêm theo SĐT/email cho khách KHÔNG khớp pid.
+    // Bắt buộc phải có nếu muốn chế độ NHANH được phép TẠO dòng mới: chỉ tra
+    // pid thì không thấy dòng khớp bằng SĐT ⇒ tưởng là người mới ⇒ đẻ trùng.
+    // Chỉ tra cho phần chưa khớp (thường vài chục) nên vẫn rất nhẹ.
+    const miss = targets.filter(c => !byPid.has(stripSmaxId(c.pid)) && !byPid.has(String(c.id ?? "")));
+    const phones = [...new Set(miss.map(c => String(c.phone ?? "").trim()).filter(Boolean))];
+    const emails = [...new Set(miss.map(c => String(c.email ?? "").trim()).filter(Boolean))];
+    if (phones.length) await searchBy("Phone", phones);
+    if (emails.length) await searchBy("Email", emails);
+    console.log(`[bridge] [NHANH] khách đổi trong ${LOOKBACK_MIN}': ${targets.length}/${customers.length} → tra ${pids.length} pid + ${phones.length} sđt + ${emails.length} email → ${rows.length} dòng Lark`);
   }
   if (!rows.length) { console.log("[bridge] không có dòng Lark nào cần đụng — xong."); return; }
 
@@ -260,9 +279,12 @@ export async function runSmaxLarkBridge() {
   console.log(`[bridge] khớp: ${matched}/${targets.length} khách → dòng Lark | chưa khớp: ${targets.length - matched}`);
 
   // ── 3b) TẠO DÒNG MỚI cho khách chưa từng có trên Lark.
-  // CHỈ chạy ở chế độ ĐỐI SOÁT: lúc đó mới có ĐỦ bản đồ SĐT/email của cả bảng
-  // để biết chắc người này chưa có dòng nào. Chế độ NHANH chỉ tra theo pid nên
-  // không thấy dòng khớp bằng SĐT ⇒ tạo là đẻ trùng.
+  // Chạy ở CẢ HAI chế độ. Ban đầu chỉ cho chạy ở ĐỐI SOÁT, nhưng thực tế
+  // 2026-08-18 cho thấy sai lầm: lịch GitHub (thứ kích hoạt ĐỐI SOÁT) im suốt
+  // 14 tiếng, trong khi cron-job.org chỉ gọi chế độ NHANH ⇒ lead mới cả buổi
+  // sáng KHÔNG ai tạo. Nay chế độ NHANH cũng tra thêm SĐT/email cho phần không
+  // khớp pid (xem "VÒNG 2" bên trên) nên đã đủ căn cứ để biết người này thật
+  // sự chưa có dòng — tạo được mà không đẻ trùng.
   //
   // Luật loại trừ (bám đúng quy tắc sales đang dùng ở /api/radar):
   //   - comment chưa inbox  → không tính lead
@@ -271,12 +293,14 @@ export async function runSmaxLarkBridge() {
   // Và gộp trong chính lô mới: 2 customer cùng SĐT/gmail = 1 người → 1 dòng
   // (đo 2026-08-17: 29 nhóm trùng SĐT, nếu tạo rời là đếm đôi Hot lead).
   const created: any[] = [];
-  if (FULL && existing.has("Lead ID")) {
+  if (existing.has("Lead ID")) {
+    // Chế độ NHANH chỉ xét tập `targets` (khách vừa đổi); ĐỐI SOÁT xét tất cả.
+    const pool: any[] = FULL ? (customers as any[]) : targets;
     const nphOf = (c: any) => normPh(c.phone) || phoneFromName(c.name);
     const gmailOf = (c: any) => { const e = String(c.email ?? "").toLowerCase().trim(); return e.endsWith("@gmail.com") ? e : ""; };
     const seenPh = new Map<string, number>(), seenEm = new Map<string, number>();
     let skipComment = 0, skipSpam = 0, skipNoChat = 0, skipOld = 0, mergedInBatch = 0;
-    for (const c of (customers as any[])) {
+    for (const c of pool) {
       const namePh = phoneFromName(c.name);
       const hit = byPid.get(stripSmaxId(c.pid)) || byPid.get(String(c.id ?? ""))
         || (c.phone && byPhone.get(normPh(c.phone))) || (namePh && byPhone.get(namePh))
