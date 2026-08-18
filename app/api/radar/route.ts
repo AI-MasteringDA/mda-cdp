@@ -124,6 +124,9 @@ export async function GET(req: Request) {
   const leads: Lead[] = [];
   // key → nhãn khoá cũ ("K45 - 2024"). Đọc từ cột "Lead cũ (SF)" = RelevantLeads__c.
   const remkt = new Map<string, string>();
+  // key (SĐT/email) → mốc lead vào WEB sớm nhất bên SF. Dùng để quy ngày Hot
+  // cho lead web (xem khối "LEAD ĐẾN TỪ WEB" bên dưới).
+  const webLead = new Map<string, number>();
   // key → mã khoá bên SF ("K61"), để bù cho lead mà SMAX ghi khoá khác.
   const sfCourse = new Map<string, Set<string>>();
 
@@ -188,7 +191,7 @@ export async function GET(req: Request) {
       const d = await fetch(url.toString(), {
         method: "POST", headers: H, cache: "no-store",
         body: JSON.stringify({
-          field_names: ["Time", "Event", "Lead Name", "Tên SF", "Tag SMAX", "Phone", "Email", "Lead cũ (SF)", "Khoá (SF)", "Rating (SF)", "Đã chốt (SF)"],
+          field_names: ["Time", "Event", "Lead Name", "Tên SF", "Tag SMAX", "Phone", "Email", "Lead cũ (SF)", "Khoá (SF)", "Rating (SF)", "Đã chốt (SF)", "Kênh (SF)"],
           filter: { conjunction: "and", conditions: [
             { field_name: "Event", operator: "is", value: ["lead_created"] },
             { field_name: "Time", operator: "isGreater", value: ["ExactDate", String(cutoffMs)] },
@@ -205,6 +208,17 @@ export async function GET(req: Request) {
         // bên nhánh SMAX (ca chị Hà: SF bị skip do đã có Tag SMAX).
         const prior = gs(f["Lead cũ (SF)"]).trim();
         if (prior) for (const k of keys) if (!remkt.has(k)) remkt.set(k, prior);
+        // LEAD ĐẾN TỪ WEB — ghi nhận mốc vào web để quy ngày Hot cho đúng.
+        // Luồng thật (user mô tả 2026-08-18, ca "chị Nhâm"): khách điền form
+        // web ⇒ SF tạo lead ngay hôm đó với kênh "Web -> Email + Call"; sau đó
+        // khách mới nhắn SMAX và sales gắn tag Hot — có thể LỆCH SANG NGÀY KHÁC.
+        // Đếm theo giờ gắn tag SMAX là đẩy công sang ngày sales thao tác chứ
+        // không phải ngày lead thật sự vào. Ghi ở ĐÂY (không phải trong nhánh
+        // đếm bên dưới) vì phần lớn ca này bị nhánh SF bỏ qua do SMAX đã có tag.
+        if (/web\s*->/i.test(gs(f["Kênh (SF)"]))) {
+          const wMs = typeof f["Time"] === "number" ? f["Time"] as number : 0;
+          if (wMs) for (const k of keys) { const cur = webLead.get(k); if (cur == null || wMs < cur) webLead.set(k, wMs); }
+        }
         // KHOÁ BÊN SF: SMAX và SF hay ghi khác khoá cho cùng một người (ca
         // "H Xuan": SMAX ghi K60, SF ghi K61). Gom lại để lead nào cũng lọc
         // được theo khoá của CẢ HAI hệ, không bị hụt khi lọc K61.
@@ -269,11 +283,23 @@ export async function GET(req: Request) {
   // Dán nhãn reMKT cho MỌI lead (cả SMAX lẫn SF) khớp người đã học khoá trước.
   // Dashboard hiện nhãn để sales biết đây là re-marketing, KHÔNG đếm vào lead
   // mới trong ngày. Lark không có nhãn này (theo yêu cầu 2026-08-10).
-  let reCount = 0;
+  let reCount = 0, webFix = 0;
   for (const l of leads) {
     for (const k of l.ky) { const lab = remkt.get(k); if (lab) { l.re = lab; reCount++; break; } }
     // Bổ sung khoá bên SF vào lead SMAX (và ngược lại) → lọc theo khoá không hụt
     for (const k of l.ky) { const s = sfCourse.get(k); if (s) for (const c of s) if (!l.co.includes(c)) l.co.push(c); }
+    // QUY NGÀY HOT CHO LEAD WEB (user chốt 2026-08-18).
+    // Khách điền form web ⇒ SF tạo lead ngay hôm đó. Sau đó khách mới nhắn SMAX
+    // và sales gắn tag Hot — thường LỆCH SANG NGÀY KHÁC. Đếm theo giờ gắn tag là
+    // ghi công vào ngày sales thao tác, không phải ngày lead thật sự vào.
+    // Ca "chị Nhâm": vào web 17/08 09:46, chat SMAX 18/08 14:09, tag Hot 18/08
+    // 14:15 ⇒ trước đây bị đếm 18/08, đúng ra phải là 17/08.
+    // Chỉ LÙI về trước, không bao giờ đẩy tới: mốc web muộn hơn tag thì giữ tag.
+    if (!l.sf && l.haMs != null) {
+      let w: number | null = null;
+      for (const k of l.ky) { const t = webLead.get(k); if (t != null && (w == null || t < w)) w = t; }
+      if (w != null && w < l.haMs) { l.haMs = w; l.ha = vnDate(w); l.cd = { ...l.cd, H: l.ha ?? l.cd.H }; webFix++; }
+    }
   }
 
   // `ky` chỉ dùng để ghép reMKT ở trên, client không cần → bỏ đi cho nhẹ
@@ -281,5 +307,5 @@ export async function GET(req: Request) {
   const out = leads.map(({ ky, ...rest }) => { void ky; return rest; });
 
   const asOf = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 16).replace("T", " ");
-  return NextResponse.json({ asOf, days, leads: out, reCount }, { headers: { "Cache-Control": "private, max-age=120" } });
+  return NextResponse.json({ asOf, days, leads: out, reCount, webFix }, { headers: { "Cache-Control": "private, max-age=120" } });
 }
