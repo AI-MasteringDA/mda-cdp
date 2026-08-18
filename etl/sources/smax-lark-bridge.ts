@@ -449,19 +449,16 @@ export async function runSmaxLarkBridge() {
     }
     const tt = tagTimes.get(rid) || {};
     for (const col of lucCols) {
-      const w = tt[col];
-      if (w != null) { if (w !== (typeof f[col] === "number" ? f[col] : null)) patch[col] = w; continue; }
-      // XOÁ mốc của tag PHÂN LOẠI đã bị gỡ khỏi SMAX. Bắt buộc: "Cold Lead lúc"
-      // cũ còn sót khiến lead lên Hot bị tính là NÂNG HẠNG thay vì Hot mới
-      // (ca "Mận Bùi"). Chỉ xoá khi (a) biết chắc tập tag hiện tại của dòng này
-      // — tức có customer khớp trong lần quét — và (b) là cột phân loại; cột
-      // khoá (K61 lúc…) giữ nguyên vì là dữ liệu lịch sử, gỡ tag không có nghĩa
-      // là chưa từng học khoá đó.
-      if (!ts) continue;
-      const cls = col.replace(/ lúc$/, "");
-      if (!CLASS_KEYS.has(norm2(cls))) continue;
-      if ([...ts].some(t => norm2(t) === norm2(cls))) continue;
-      if (f[col] != null) patch[col] = null;
+      // CHỈ ĐIỀN/SỬA, TUYỆT ĐỐI KHÔNG XOÁ mốc cũ.
+      // Đã thử xoá mốc của tag bị gỡ (2026-08-18) và SAI — user chốt lại:
+      // "<class> lúc" là LỊCH SỬ, phải giữ. Lead từng Cold rồi lên Hot thì
+      // dashboard PHẢI tính là NÂNG HẠNG, không phải "Hot mới trong ngày";
+      // xoá "Cold Lead lúc" là mất căn cứ đó ⇒ thổi phồng số Hot mới.
+      // Việc cập nhật trạng thái hiện tại đã do cột "Tag SMAX" lo (mirror ở
+      // trên) — Lark vẫn hiện đúng Hot Lead, chỉ cách ĐẾM trên dashboard là
+      // khác. Hai chuyện tách bạch, đừng gộp.
+      const w = tt[col]; if (w == null) continue;
+      if (w !== (typeof f[col] === "number" ? f[col] : null)) patch[col] = w;
     }
     if (!Object.keys(patch).length) continue;
     if (existing.has(CHK)) patch[CHK] = runMs;
