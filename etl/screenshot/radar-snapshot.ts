@@ -159,8 +159,13 @@ async function main() {
       const png = await shoot(page, win, grp);
       // Lấy đúng khoảng ngày/giờ mà TRANG đang hiện (không tự tính lại) — luôn
       // khớp 100% với những gì thấy trong ảnh, kể cả khi đổi quy tắc sau này.
-      const rangeTxt = await page.locator(".range").innerText().catch(() => "");
-      const fullLabel = `${label} (${rangeTxt.replace(/^🗓\s*/, "")})`;
+      // Nhãn lấy LIVE từ trang để luôn khớp thứ đang thấy trong ảnh.
+      // Dùng ID chứ KHÔNG dùng class ".range": từ khi có trang khoá, class đó
+      // khớp 2 phần tử ⇒ Playwright ném lỗi strict mode, hỏng cả lần bắn.
+      const sub = win.startsWith("cohort")
+        ? await page.locator("#coSub").innerText().catch(() => "")
+        : await page.locator("#rangeLbl").innerText().catch(() => "");
+      const fullLabel = sub ? `${label} (${sub.replace(/^🗓\s*/, "")})` : label;
       writeFileSync(`radar-snapshot-${grp}-${win}.png`, png); // giữ lại làm bằng chứng khi debug local
       console.log(`[snapshot] [${fullLabel}] chụp xong: ${(png.length / 1024).toFixed(0)} KB`);
 

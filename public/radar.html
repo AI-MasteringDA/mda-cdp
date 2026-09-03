@@ -272,26 +272,28 @@ td b{font-weight:550}
            Việc so sánh khoá nằm hết ở các biểu đồ bên dưới. -->
       <div class="kpis" id="coKpis"></div>
       <div class="charts" style="flex:none;grid-template-columns:repeat(2,1fr);grid-template-rows:none;grid-auto-rows:minmax(240px,auto)">
-        <div class="card" style="grid-column:1/-1">
-          <div class="hd"><h3>Tích luỹ Hot theo ngày kể từ khi mở tuyển sinh</h3>
+        <div class="card">
+          <div class="hd"><h3>Tích luỹ Hot theo ngày</h3>
             <span class="sub" id="coSub"></span>
             <div class="legend"><span><i style="background:var(--sH)"></i>khoá đang chạy</span><span><i style="background:var(--sW)"></i>TB khoá cũ</span><span><i style="background:var(--sU)"></i>từng khoá cũ</span></div>
           </div>
           <div class="plot"><svg id="cCohort"></svg></div>
         </div>
         <div class="card">
-          <div class="hd"><h3>Tích luỹ Lead theo ngày</h3><span class="sub">tổng lead gắn khoá — đo sức hút đầu phễu</span></div>
-          <div class="plot"><svg id="cCoLead"></svg></div>
+          <div class="hd"><h3 id="coSameTitle">So cùng kỳ</h3><span class="sub">mỗi khoá tính đúng bằng số ngày mà khoá đang chạy đã đi được</span>
+            <div class="legend"><span><i style="background:var(--pill)"></i>Lead</span><span><i style="background:var(--sH)"></i>Hot</span></div>
+          </div>
+          <div class="plot"><svg id="cCoSame"></svg></div>
         </div>
         <div class="card">
-          <div class="hd"><h3>Tỷ lệ Hot theo khoá</h3><span class="sub">Hot ÷ Lead tại cùng mốc ngày — đo chất lượng lead</span></div>
-          <div class="plot"><svg id="cCoRate"></svg></div>
-        </div>
-        <div class="card" style="grid-column:1/-1">
           <div class="hd"><h3>Cơ cấu phễu theo khoá</h3><span class="sub">phân loại hiện tại của toàn bộ lead từng khoá</span>
             <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sU)"></i>Chưa tag</span></div>
           </div>
           <div class="plot"><svg id="cCoMix"></svg></div>
+        </div>
+        <div class="card">
+          <div class="hd"><h3>Tỷ lệ Hot theo khoá</h3><span class="sub">Hot ÷ Lead tại cùng mốc ngày — đo chất lượng lead</span></div>
+          <div class="plot"><svg id="cCoRate"></svg></div>
         </div>
       </div>
       <div class="card" style="flex:none;min-height:320px">
@@ -816,7 +818,7 @@ function renderCohort(){
   $("coKpis").innerHTML=K.map(([k,v,col,sub])=>
     "<div class='kpi'><div class='k'>"+k+"</div><div class='v'"+(col?" style='color:var("+col+")'":"")+">"+(v||0)+"</div>"
     +"<div class='delta'>"+(sub||"tính tới hiện tại")+"</div></div>").join("");
-  chartCohort(cs,cur); chartCoLead(cs,cur); chartCoRate(cs,cur); chartCoMix(cs);
+  chartCohort(cs,cur); chartCoMix(cs); chartCoRate(cs,cur); chartCoSame(cs,cur);
 
   // Bảng đầy đủ — user chốt muốn thấy TOÀN BỘ khoá có dữ liệu.
   let t="<thead><tr><th>Khoá</th><th>Ngày mở</th><th class='num'>Lead cùng kỳ</th><th class='num'>Hot cùng kỳ</th><th class='num'>Tỷ lệ Hot</th><th class='num'>Cả khoá (lead/Hot)</th></tr></thead><tbody>";
@@ -866,33 +868,36 @@ function chartCohort(cs,cur){
   const step=Math.max(1,Math.ceil(n/8));
   for(let i=0;i<n;i+=step){const t=svgEl("text",{x:X(i),y:pad.t+plotH+14,class:"axis","text-anchor":"middle"});t.textContent="D"+i;g.appendChild(t)}
 }
-/* Tích luỹ LEAD theo ngày — cùng cách đọc với biểu đồ Hot, nhưng đo đầu phễu:
-   khoá nào hút được nhiều người quan tâm hơn ở cùng số ngày. */
-function chartCoLead(cs,cur){
-  const svg=$("cCoLead"),{W,H}=dims(svg,300,190),pad={t:12,b:22,l:34,r:52};
-  const n=(cur.curveLead||[]).length;
-  if(!n){frame(svg,W,H,pad,4,3);return}
-  const maxV=Math.max(4,...cs.flatMap(c=>c.curveLead||[]))*1.1;
+/* SO CÙNG KỲ — trả lời trực tiếp câu "cùng mở 18 ngày thì K62 hơn/kém khoá
+   nào". Mỗi khoá 1 cặp cột: Lead và Hot, đều CẮT tại đúng số ngày khoá đang
+   chạy đã đi được. Khoá đang chạy tô đậm, các khoá cũ để mờ. */
+function chartCoSame(cs,cur){
+  const svg=$("cCoSame"),{W,H}=dims(svg,300,190),pad={t:14,b:26,l:34,r:8};
+  const d=cs.filter(c=>c.leadsAt>0||c.hotAt>0).slice(0,10).reverse();
+  $("coSameTitle").textContent="So cùng kỳ — ngày thứ "+cur.days;
+  if(!d.length){frame(svg,W,H,pad,4,3);return}
+  const maxV=Math.max(4,...d.map(c=>c.leadsAt))*1.15;
   const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
-  const X=i=>pad.l+(n<=1?0:plotW*i/(n-1)),Y=v=>pad.t+plotH-v/maxV*plotH;
-  for(const c of cs){ if(c.running)continue;
-    const cv=(c.curveLead||[]).slice(0,n); if(cv.length<2)continue;
-    g.appendChild(svgEl("path",{d:cv.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" "),fill:"none",style:"stroke:var(--sU)","stroke-width":"1.2",opacity:".45"}));
-  }
-  const cv=cur.curveLead||[];
-  g.appendChild(svgEl("path",{d:cv.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" "),fill:"none",style:"stroke:var(--pill)","stroke-width":"2.6","stroke-linecap":"round"}));
-  const lb=svgEl("text",{x:X(n-1)+6,y:Y(cv[n-1])+4,class:"axis",style:"fill:var(--pill);font-weight:700"});lb.textContent=cur.code;g.appendChild(lb);
-  for(let i=0;i<n;i++){
-    const hw=plotW/Math.max(1,n-1);
-    const hit=svgEl("rect",{x:X(i)-hw/2,y:pad.t,width:hw,height:plotH,fill:"transparent"});
-    hit.addEventListener("mousemove",e=>{let h="<div class='t'>Ngày thứ "+i+"</div>";
-      for(const c of cs.slice(0,8)){const v=(c.curveLead||[])[i];if(v==null)continue;
-        h+="<div class='row'><span>"+c.code+(c.running?" ●":"")+"</span><b>"+v+"</b></div>"}
+  const band=plotW/d.length;
+  d.forEach((c,i)=>{
+    const bw=band*.30, x0=pad.l+band*i+band*.10;
+    [[c.leadsAt,"--pill",x0],[c.hotAt,"--sH",x0+bw+band*.06]].forEach(([v,col,x])=>{
+      const h=v/maxV*plotH,y=pad.t+plotH-h,pth=topRoundRect(x,y,bw,h,2);
+      if(pth)g.appendChild(svgEl("path",{d:pth,style:"fill:var("+col+")",opacity:c.running?"1":".42"}));
+      if(v){const t=svgEl("text",{x:x+bw/2,y:y-3,class:"axis","text-anchor":"middle",style:c.running?"font-weight:700":""});t.textContent=v;g.appendChild(t)}
+    });
+    const lb=svgEl("text",{x:pad.l+band*i+band/2,y:pad.t+plotH+14,class:"axis","text-anchor":"middle",style:c.running?"font-weight:700":""});
+    lb.textContent=c.code;g.appendChild(lb);
+    const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
+    hit.addEventListener("mousemove",e=>{
+      const dl=cur.leadsAt-c.leadsAt, dh=cur.hotAt-c.hotAt;
+      let h="<div class='t'>"+c.code+(c.running?" ● đang chạy":"")+" · ngày thứ "+cur.days+"</div>"
+        +"<div class='row'><span>Lead</span><b>"+c.leadsAt+"</b></div>"
+        +"<div class='row'><span>Hot</span><b>"+c.hotAt+"</b></div>";
+      if(!c.running)h+="<div class='row'><span>"+cur.code+" hơn/kém</span><b>"+(dl>=0?"+":"")+dl+" lead · "+(dh>=0?"+":"")+dh+" Hot</b></div>";
       showTip(h,e.clientX,e.clientY)});
     hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
-  }
-  const st=Math.max(1,Math.ceil(n/6));
-  for(let i=0;i<n;i+=st){const t=svgEl("text",{x:X(i),y:pad.t+plotH+14,class:"axis","text-anchor":"middle"});t.textContent="D"+i;g.appendChild(t)}
+  });
 }
 /* Tỷ lệ Hot = Hot ÷ Lead tại CÙNG mốc ngày. Cao = lead chất lượng hơn (hoặc
    sales chốt tag tốt hơn), không phụ thuộc quy mô khoá. */
