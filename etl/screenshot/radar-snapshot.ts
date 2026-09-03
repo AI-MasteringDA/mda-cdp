@@ -25,6 +25,7 @@ import { config } from "dotenv";
 import { resolve } from "path";
 config({ path: resolve(process.cwd(), ".env.local") });
 import { chromium } from "playwright";
+import { buildCard, type Kpi, type Course } from "./report-card";
 import { writeFileSync } from "fs";
 
 const KEY = process.env.RADAR_SNAPSHOT_KEY || "";
@@ -66,6 +67,11 @@ function pickRun(): "am" | "pm" {
   return vnHour < 14 ? "am" : "pm";
 }
 
+/** Tắt hẳn bảng chú giải trước khi chụp — di chuột ra chỗ khác vẫn có thể còn
+ *  sót nếu con trỏ dừng đúng vùng bắt sự kiện của biểu đồ. */
+async function hideTip(page: import("playwright").Page) {
+  await page.evaluate(() => { const t = document.getElementById("tip"); if (t) t.style.display = "none"; });
+}
 async function shoot(page: import("playwright").Page, win: string, grp: string): Promise<Buffer> {
   // "cohort:<hệ>" — trang So sánh khoá. Trang này có nguồn dữ liệu RIÊNG
   // (/api/cohort) nên không đụng tới bộ lọc kỳ/kênh; chỉ cần vào trang, chọn hệ
@@ -82,9 +88,13 @@ async function shoot(page: import("playwright").Page, win: string, grp: string):
     await page.waitForFunction(g => document.body.dataset.coGrp === g, ck, { timeout: 90_000 })
       .catch(() => console.log(`[snapshot] ⚠ chờ render hệ ${ck} quá hạn — ảnh có thể chưa đúng`));
     // Chuột đang nằm trên thanh bên sau cú click ⇒ thanh bên bung ra che mất
-    // cột đầu của bảng. Dời chuột ra giữa trang trước khi chụp.
-    await page.mouse.move(760, 700);
+    // cột đầu của bảng. Dời chuột ra chỗ trống (dải tiêu đề khoá, không phải
+    // biểu đồ): đứng giữa trang là trúng cột biểu đồ, bung tooltip và tooltip
+    // đó lọt luôn vào ảnh gửi group (gặp 2026-09-03: thẻ Khoá BI dính bảng
+    // "K61 · 692 lead" che mất biểu đồ cơ cấu phễu).
+    await page.mouse.move(1200, 120);
     await page.waitForTimeout(1200);
+    await hideTip(page);
     return await page.screenshot({ fullPage: false });
   }
   // Áp kỳ + bộ lọc bằng cách BẤM ĐÚNG NÚT trên trang (không tự lặp lại state
@@ -96,6 +106,7 @@ async function shoot(page: import("playwright").Page, win: string, grp: string):
   await page.waitForTimeout(win === "30" ? 1800 : 700);
   await page.click(`#segGrp button[data-v="${grp}"]`);
   await page.waitForTimeout(1200);
+  await hideTip(page);
   return await page.screenshot({ fullPage: false });
 }
 
@@ -140,7 +151,7 @@ async function readKpis(page: import("playwright").Page, win: string, grp: strin
   const range = await page.locator("#rangeLbl").innerText().catch(() => "");
   return { rows, range };
 }
-type Kpi = Awaited<ReturnType<typeof readKpis>>;
+
 /**
  * Phần "luỹ kế cả khoá" ĐỌC TỪ DOM trang Theo khoá, KHÔNG gọi /api/cohort nữa.
  * Bảng Cohort_Summary chỉ đếm tag SMAX — không gộp lead Salesforce, không trừ
@@ -167,37 +178,8 @@ async function runningCourse(page: import("playwright").Page, grp: string) {
              H: g("🔥 Hot"), W: g("Warm"), C: g("Cold"), P: g("Prospect"), Un: g("Khác / chưa tag") };
   } catch { return null }   // thiếu phần khoá thì vẫn bắn được phần còn lại
 }
-function buildText(bi: Kpi, fa: Kpi, cBI: any, cFA: any): string {
-  const today = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10).split("-").reverse().join("/");
-  const block = (nm: string, k: Kpi, c: any) => {
-    const g = (n: string) => k.rows.find(x => x.k === n)?.v ?? "0";
-    const src = (k.rows.find(x => x.k === "Hot mới")?.d || []).find(x => x.startsWith("SMAX")) || "";
-    let s = `\n━━ ${nm} ━━`;
-    if (c) s += `  (đang tuyển sinh: ${c.code} · ngày thứ ${c.days})`;
-    s += `\n• Lead mới: ${g("Lead mới")}`;
-    s += `\n• Hot mới: ${g("Hot mới")}${src ? `   (${src})` : ""}`;
-    s += `\n• Cold: ${g("Cold")}  ·  Warm: ${g("Warm")}  ·  Prospect: ${g("Prospect")}`;
-    s += `\n• Chưa phản hồi: ${g("Chưa phản hồi")}`;
-    if (c) {
-      const pc = (v: number) => c.leads ? Math.round(v / c.leads * 100) + "%" : "0%";
-      s += `\n• Luỹ kế cả khoá ${c.code}: ${c.leads} lead`;
-      s += `\n   ↳ Hot ${c.H} (${pc(c.H)}) · Warm ${c.W} (${pc(c.W)}) · Cold ${c.C} (${pc(c.C)}) · Prospect ${c.P} (${pc(c.P)}) · Khác ${c.Un} (${pc(c.Un)})`;
-    }
-    return s;
-  };
-  return `**Báo cáo ngày: ${today}**\nKỳ báo cáo: ${bi.range.replace(/^🗓\s*/, "")}\n`
-    + block("BI", bi, cBI) + "\n" + block("FA", fa, cFA)
-    + `\n\nNguồn: SMAX + Salesforce · Automation Bot — Mastering Data Analytics`;
-}
-async function sendText(md: string) {
-  const card = {
-    msg_type: "interactive",
-    card: {
-      config: { wide_screen_mode: true },
-      header: { title: { tag: "plain_text", content: "📋 CHECK LEADS / TAG / PROCESS" }, template: "green" },
-      elements: [{ tag: "div", text: { tag: "lark_md", content: md } }],
-    },
-  };
+async function sendText(bi: Kpi, fa: Kpi, cBI: Course, cFA: Course) {
+  const card = buildCard(bi, fa, cBI, cFA);
   const r = await fetch(WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(card) }).then(r => r.json());
   if (r.code !== 0 && r.StatusCode !== 0) throw new Error(`gửi thẻ chữ lỗi: ${JSON.stringify(r)}`);
 }
@@ -260,7 +242,7 @@ async function main() {
       // chạy song song sẽ giẫm chân nhau (đọc nhầm số của hệ kia).
       const cBI = await runningCourse(page, "bi");
       const cFA = await runningCourse(page, "fa");
-      await sendText(buildText(bi, fa, cBI, cFA));
+      await sendText(bi, fa, cBI, cFA);
       console.log("[snapshot] [thẻ chữ] đã gửi vào group ✅");
     } catch (e) {
       console.error(`[snapshot] ⚠ thẻ chữ lỗi (vẫn tiếp tục gửi ảnh): ${(e as Error).message}`);
@@ -277,7 +259,7 @@ async function main() {
         ? await page.locator("#coSub").innerText().catch(() => "")
         : await page.locator("#rangeLbl").innerText().catch(() => "");
       const fullLabel = sub ? `${label} (${sub.replace(/^🗓\s*/, "")})` : label;
-      writeFileSync(`radar-snapshot-${grp}-${win}.png`, png); // giữ lại làm bằng chứng khi debug local
+      writeFileSync(`radar-snapshot-${grp}-${win.replace(/:/g, "-")}.png`, png);  // ":" là ký tự cấm trong tên file Windows // giữ lại làm bằng chứng khi debug local
       console.log(`[snapshot] [${fullLabel}] chụp xong: ${(png.length / 1024).toFixed(0)} KB`);
 
       const imageKey = await uploadImage(tk, png);
