@@ -30,13 +30,28 @@ const WIN = (process.argv[2] || "pm").toLowerCase();
     const range = await p.locator("#rangeLbl").innerText().catch(() => "");
     return { rows, range };
   };
+  // Đọc TỪ DOM trang Theo khoá — giống hệt bot thật, nên preview không thể lệch
+  // với cái sẽ bắn (và không lệch với dashboard).
   const cohort = async (grp: string) => {
-    const r = await fetch(`${BASE}/api/cohort?grp=${grp.toUpperCase()}&key=${encodeURIComponent(KEY)}`).then(r => r.json());
-    return (r.courses || []).find((c: any) => c.running);
+    await p.evaluate(() => { delete document.body.dataset.coGrp });
+    await p.click('#navPg button[data-p="co"]');
+    await p.click(`#segGrp button[data-v="${grp}"]`);
+    await p.waitForFunction(g => document.body.dataset.coGrp === g, grp, { timeout: 25000 });
+    await p.waitForTimeout(600);
+    const head = (await p.locator("#coHead").textContent()) || "";
+    const rows = await p.$$eval("#coKpis .kpi", els => els.map(e => ({
+      k: (e.querySelector(".k") as HTMLElement)?.textContent?.trim() || "",
+      v: Number((e.querySelector(".v") as HTMLElement)?.textContent?.trim() || "0") || 0,
+    })));
+    if (!rows.length || head.trim() === "—") return null;
+    const g = (n: string) => rows.find(x => x.k === n)?.v ?? 0;
+    const m = head.match(/^(\S+)\s*·\s*ngày thứ\s*(\d+)/);
+    return { code: m?.[1] || "?", days: Number(m?.[2] ?? 0), leads: g("Lead của khoá"),
+             H: g("🔥 Hot"), W: g("Warm"), C: g("Cold"), P: g("Prospect"), Un: g("Khác / chưa tag") };
   };
 
   const bi = await readKpi("bi"), fa = await readKpi("fa");
-  const cBI = await cohort("BI"), cFA = await cohort("FA");
+  const cBI = await cohort("bi"), cFA = await cohort("fa");
   await b.close();
 
   const get = (k: any, name: string) => k.rows.find((x: any) => x.k === name);
@@ -54,7 +69,7 @@ const WIN = (process.argv[2] || "pm").toLowerCase();
     if (c) {
       const pc = (v: number) => c.leads ? Math.round(v / c.leads * 100) + "%" : "0%";
       s += `\n• Luỹ kế cả khoá ${c.code}: ${c.leads} lead`;
-      s += `\n   ↳ Hot ${c.H} (${pc(c.H)}) · Warm ${c.W} (${pc(c.W)}) · Cold ${c.C} (${pc(c.C)}) · Prospect ${c.P} (${pc(c.P)}) · Chưa tag ${c.Un} (${pc(c.Un)})`;
+      s += `\n   ↳ Hot ${c.H} (${pc(c.H)}) · Warm ${c.W} (${pc(c.W)}) · Cold ${c.C} (${pc(c.C)}) · Prospect ${c.P} (${pc(c.P)}) · Khác ${c.Un} (${pc(c.Un)})`;
     }
     return s;
   };

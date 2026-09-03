@@ -141,10 +141,30 @@ async function readKpis(page: import("playwright").Page, win: string, grp: strin
   return { rows, range };
 }
 type Kpi = Awaited<ReturnType<typeof readKpis>>;
-async function runningCourse(grp: string) {
+/**
+ * Phần "luỹ kế cả khoá" ĐỌC TỪ DOM trang Theo khoá, KHÔNG gọi /api/cohort nữa.
+ * Bảng Cohort_Summary chỉ đếm tag SMAX — không gộp lead Salesforce, không trừ
+ * reMKT/nâng hạng — nên nó cho 55 Hot trong khi dashboard cho 48 (user phát hiện
+ * 2026-09-03). Đọc từ chính trang đang chụp thì chữ, ảnh và dashboard luôn là
+ * MỘT con số.
+ */
+async function runningCourse(page: import("playwright").Page, grp: string) {
   try {
-    const r = await fetch(`${BASE}/api/cohort?grp=${grp.toUpperCase()}&key=${encodeURIComponent(KEY)}`).then(r => r.json());
-    return (r.courses || []).find((c: { running?: boolean }) => c.running) ?? null;
+    await page.evaluate(() => { delete document.body.dataset.coGrp });
+    await page.click('#navPg button[data-p="co"]');
+    await page.click(`#segGrp button[data-v="${grp}"]`);
+    await page.waitForFunction(g => document.body.dataset.coGrp === g, grp, { timeout: 25_000 });
+    await page.waitForTimeout(600);
+    const head = (await page.locator("#coHead").textContent()) || "";
+    const rows = await page.$$eval("#coKpis .kpi", els => els.map(e => ({
+      k: (e.querySelector(".k") as HTMLElement)?.textContent?.trim() || "",
+      v: Number((e.querySelector(".v") as HTMLElement)?.textContent?.trim() || "0") || 0,
+    })));
+    if (!rows.length || head.trim() === "—") return null;
+    const g = (n: string) => rows.find(x => x.k === n)?.v ?? 0;
+    const m = head.match(/^(\S+)\s*·\s*ngày thứ\s*(\d+)/);
+    return { code: m?.[1] || "?", days: Number(m?.[2] ?? 0), leads: g("Lead của khoá"),
+             H: g("🔥 Hot"), W: g("Warm"), C: g("Cold"), P: g("Prospect"), Un: g("Khác / chưa tag") };
   } catch { return null }   // thiếu phần khoá thì vẫn bắn được phần còn lại
 }
 function buildText(bi: Kpi, fa: Kpi, cBI: any, cFA: any): string {
@@ -161,7 +181,7 @@ function buildText(bi: Kpi, fa: Kpi, cBI: any, cFA: any): string {
     if (c) {
       const pc = (v: number) => c.leads ? Math.round(v / c.leads * 100) + "%" : "0%";
       s += `\n• Luỹ kế cả khoá ${c.code}: ${c.leads} lead`;
-      s += `\n   ↳ Hot ${c.H} (${pc(c.H)}) · Warm ${c.W} (${pc(c.W)}) · Cold ${c.C} (${pc(c.C)}) · Prospect ${c.P} (${pc(c.P)}) · Chưa tag ${c.Un} (${pc(c.Un)})`;
+      s += `\n   ↳ Hot ${c.H} (${pc(c.H)}) · Warm ${c.W} (${pc(c.W)}) · Cold ${c.C} (${pc(c.C)}) · Prospect ${c.P} (${pc(c.P)}) · Khác ${c.Un} (${pc(c.Un)})`;
     }
     return s;
   };
@@ -236,7 +256,10 @@ async function main() {
       const kWin = run === "am" ? "am" : "pm";
       const bi = await readKpis(page, kWin, "bi");
       const fa = await readKpis(page, kWin, "fa");
-      const [cBI, cFA] = await Promise.all([runningCourse("BI"), runningCourse("FA")]);
+      // Tuần tự, KHÔNG Promise.all: cả hai cùng lái một trang trình duyệt,
+      // chạy song song sẽ giẫm chân nhau (đọc nhầm số của hệ kia).
+      const cBI = await runningCourse(page, "bi");
+      const cFA = await runningCourse(page, "fa");
       await sendText(buildText(bi, fa, cBI, cFA));
       console.log("[snapshot] [thẻ chữ] đã gửi vào group ✅");
     } catch (e) {

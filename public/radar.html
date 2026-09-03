@@ -144,6 +144,7 @@ svg text{font-family:inherit}
 table{width:100%;border-collapse:collapse;font-size:11.5px}
 th{text-align:left;font-size:9.5px;text-transform:uppercase;color:var(--ink3);padding:6px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
 td{padding:5.5px 8px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
+th.num,td.num{text-align:right}
 tbody tr:hover td{background:#F5F9FD}
 .cls{display:inline-block;font-size:9.5px;padding:2.5px 9px;border-radius:999px;color:#fff}
 .badge{display:inline-block;font-size:9.5px;padding:2.5px 9px;border-radius:999px;background:#F2F3F5;color:var(--ink2)}
@@ -754,21 +755,25 @@ function tableCard(a){
   const ghi=[nRe?nRe+" reMKT":"", nUp?nUp+" nâng hạng":""].filter(Boolean).join(" · ");
   $("tblSub").textContent=rows.length+" người"+(ghi?" (gồm "+ghi+" — không tính vào KPI)":"");
   EXP.rows=rows;EXP.title=T[S.tbl];   // giữ lại đúng danh sách đang hiện để export
-  $("tbl").innerHTML="<tr><th>Tên</th><th>Nguồn</th><th>Chat đầu</th><th>Lên Hot</th><th>Phân loại</th><th>Mảng</th><th>Kênh</th><th>SĐT</th><th></th></tr>"+
-    (rows.length?rows.map(l=>{
+  $("tbl").innerHTML="<tr><th class='num' style='width:40px'>#</th><th>Tên</th><th>Nguồn</th><th>Chat đầu</th><th>Lên Hot</th><th>Phân loại</th><th>Mảng</th><th>Kênh</th><th>SĐT</th><th></th></tr>"+
+    (rows.length?rows.map((l,i)=>{
       const c=exCls(l)||(l.cls.includes("H")?"H":null);
       const mang=(l.bi?"BI":"")+(l.bi&&l.fa?" + ":"")+(l.fa?"FA":"")||"—";
-      return "<tr"+(l.re?" class='remkt'":"")+"><td><b>"+l.n+"</b>"+(l.re?" <span class='badge re' title='Đã là lead/học viên khoá trước — không tính lead mới'>⟲ reMKT</span><div style='font-size:10.5px;color:var(--sW)'>khoá cũ: "+l.re+"</div>":"")+(l.up?" <span class='badge up' title='Đã gắn Cold/Warm/Prospect trước đó — lên Hot là nâng hạng, không tính Hot mới'>↑ nâng hạng</span><div style='font-size:10.5px;color:var(--ink3)'>đã gắn tag từ "+fmtD(l.upFrom)+"</div>":"")+(l.n2?"<div style='font-size:10.5px;color:var(--ink3)'>SMAX: "+l.n2+"</div>":"")+"</td><td>"+(l.sf?"<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>":"<span class='badge'>SMAX</span>")+"</td><td>"+(l.d?fmtD(l.d):"—")+"</td><td>"+(l.ha?fmtD(l.ha):"—")+"</td><td>"
+      return "<tr"+(l.re?" class='remkt'":"")+"><td class='num' style='color:var(--ink3)'>"+(i+1)+"</td><td><b>"+l.n+"</b>"+(l.re?" <span class='badge re' title='Đã là lead/học viên khoá trước — không tính lead mới'>⟲ reMKT</span><div style='font-size:10.5px;color:var(--sW)'>khoá cũ: "+l.re+"</div>":"")+(l.up?" <span class='badge up' title='Đã gắn Cold/Warm/Prospect trước đó — lên Hot là nâng hạng, không tính Hot mới'>↑ nâng hạng</span><div style='font-size:10.5px;color:var(--ink3)'>đã gắn tag từ "+fmtD(l.upFrom)+"</div>":"")+(l.n2?"<div style='font-size:10.5px;color:var(--ink3)'>SMAX: "+l.n2+"</div>":"")+"</td><td>"+(l.sf?"<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>":"<span class='badge'>SMAX</span>")+"</td><td>"+(l.d?fmtD(l.d):"—")+"</td><td>"+(l.ha?fmtD(l.ha):"—")+"</td><td>"
         +(l.cls.includes("H")?clsChip("H")+" ":"")+(c&&c!=="H"?clsChip(c):(!l.cls.length?"<span class='badge'>chưa tag</span>":""))
         +"</td><td>"+mang+"</td><td>"+(l.ch.join(", ")||"—")+"</td><td>"+(l.ph||"—")+"</td><td>"
         +(l.cph?"<span class='badge alert'>chưa phản hồi</span>":"")+"</td></tr>"}).join("")
-    :"<tr><td colspan='8' style='color:var(--ink3)'>Không có lead nào với bộ lọc hiện tại</td></tr>");
+    :"<tr><td colspan='10' style='color:var(--ink3)'>Không có lead nào với bộ lọc hiện tại</td></tr>");
 }
 /* ---- wiring ---- */
 let A=null;
 function renderAll(){
   try{
     $("rangeLbl").textContent=rangeLbl();A=agg();kpis(A);chartStack(A);chartHot(A);chartLine(A);chartGrp(A);chartChan(A);tableCard(A);
+    // Trang "Theo khoá" vẽ lại luôn khi đang mở → nút KỲ / KÊNH / KHOÁ / BI-FA
+    // đều ăn sang trang đó (user yêu cầu 2026-09-03). Số của nó tính từ chính
+    // DATA.leads nên không cần gọi lại API.
+    if($("pgCo").style.display!=="none")renderCohort();
   }catch(e){showFatal("khi vẽ biểu đồ — "+e.message);throw e}
 }
 
@@ -791,46 +796,116 @@ let coReq=0;
 async function loadCohort(){
   const my=++coReq, want=S.grp;
   try{
+    // KHÔNG truyền grp: bảng này giờ chỉ dùng để lấy NGÀY MỞ của mọi khoá,
+    // việc lọc BI/FA do coCalc() làm trên DATA.leads. Nhờ vậy đổi hệ không phải
+    // gọi lại API ⇒ hết hẳn cảnh "bấm BI mà hiện số của FA".
     const u=new URL(location.origin+"/api/cohort");
-    // "all" thì không truyền grp — API trả về mọi khoá (BI + FA).
-    if(want==="bi")u.searchParams.set("grp","BI");
-    else if(want==="fa")u.searchParams.set("grp","FA");
     if(KEY)u.searchParams.set("key",KEY);
     const r=await fetch(u,{cache:"no-store"}); const j=await r.json();
     if(my!==coReq)return;              // đã có lệnh mới hơn → bỏ kết quả cũ
     if(j.error)throw new Error(j.error);
-    CO=j; coLoadedFor=want; renderCohort();
+    CO=j; coLoadedFor="all"; renderCohort();
   }catch(e){
     if(my===coReq)$("coSub").textContent="không tải được dữ liệu khoá — "+e.message;
   }
 }
+/* MỐC NGÀY ĐỂ SO SÁNH — lấy từ chính nút kỳ ở thanh lọc trên (user yêu cầu
+   2026-09-03 các filter phải ăn vào trang này; và cũng đúng ý ban đầu "so 10
+   ngày mở tuyển sinh K62 vs K61").
+     7 / 14 / 30 ngày  → cắt tại đúng D7 / D14 / D30
+     Tất cả và các kỳ theo lịch (hôm nay, hôm qua, Sáng, Chiều) → cắt tại ngày
+     mà khoá đang chạy đã đi được (không có nghĩa "ngày thứ N" nên dùng tối đa).
+   Luôn CHẶN TRÊN bằng số ngày khoá đang chạy: khoá mới mở 18 ngày thì không thể
+   so ở D30 — chưa có dữ liệu. */
+function coDayN(maxDays){
+  const max=Math.max(0,maxDays);
+  const v=S.customWin?null:S.days;
+  if(v===7||v===14||v===30)return Math.min(v,max);
+  return max;
+}
+const dDiff=(a,b)=>Math.round((new Date(b+"T00:00:00Z")-new Date(a+"T00:00:00Z"))/86400000);
+/* "KH62" và "K62" là CÙNG một khoá (user chốt 2026-09-03) → quy về một mã. */
+const coKey=c=>String(c||"").toUpperCase().replace(/^KH(\d)/,"K$1");
+/* ─────────────────────────────────────────────────────────────────────────────
+   SỐ CỦA TRANG NÀY TÍNH THẲNG TỪ DATA.leads — CÙNG bộ lọc và CÙNG quy tắc đếm
+   với trang Tổng quan, nên hai trang không thể lệch nhau nữa.
+
+   BUG đã sửa 2026-09-03: trang Tổng quan lọc K62 hiện 44 Hot, trang này hiện 55.
+   Vì trang này đọc bảng dựng sẵn Cohort_Summary — chỉ đếm tag SMAX, KHÔNG gộp
+   lead bên Salesforce, KHÔNG trừ reMKT (khách quay lại) và nâng hạng.
+   Nay Cohort_Summary chỉ còn dùng cho NGÀY MỞ mỗi khoá (mốc gắn tag khoá sớm
+   nhất) — thứ duy nhất DATA.leads không có.
+
+   ĐỊNH NGHĨA HOT dùng thống nhất toàn dashboard: lead CÓ mốc "Hot Lead lúc",
+   TRỪ reMKT và TRỪ nâng hạng — đúng bằng thẻ "Hot mới" ở trang Tổng quan.
+   ───────────────────────────────────────────────────────────────────────────── */
+function coCalc(){
+  const open={};
+  for(const c of (CO&&CO.courses)||[]) if(c.openDay) open[coKey(c.code)]=c.openDay;
+  const byC=new Map();
+  for(const l of DATA.leads){
+    if(S.grp==="bi"&&!l.bi)continue;
+    if(S.grp==="fa"&&!l.fa)continue;
+    if(S.ch.size&&!l.ch.some(c=>S.ch.has(c)))continue;
+    for(const code of new Set((l.co||[]).map(coKey))){
+      if(!open[code])continue;                        // khoá chưa có ngày mở → bỏ
+      if(S.grp==="bi"&&/^F\d/.test(code))continue;    // lọc BI thì không kê khoá FA
+      if(S.grp==="fa"&&!/^F\d/.test(code))continue;
+      if(S.co.size&&![...S.co].some(x=>coKey(x)===code))continue;
+      let o=byC.get(code);
+      if(!o){o={code,openDay:open[code],leads:0,P:0,C:0,W:0,Un:0,H:0,hotD:[],leadD:[]};byC.set(code,o)}
+      if(l.re)continue;                               // reMKT: không đếm (giống Tổng quan)
+      if(l.d){
+        o.leads++;o.leadD.push(l.d);
+        const h=c=>l.cls.includes(c);
+        if(h("P"))o.P++;else if(h("W"))o.W++;else if(h("C"))o.C++;
+      }
+      if(l.ha&&!l.up){o.H++;o.hotD.push(l.ha)}
+    }
+  }
+  const list=[...byC.values()].filter(o=>o.leads>=5);
+  if(!list.length)return null;
+  const newest=list.reduce((a,b)=>b.openDay>a.openDay?b:a);
+  const dayN=coDayN(dDiff(newest.openDay,asofDate));
+  for(const o of list){
+    // "Khác": phần còn lại của phễu — lead chưa gắn tag phân loại, cộng thêm
+    // lead nâng hạng (đang là Hot nhưng không tính vào Hot mới). Để cột chồng
+    // luôn cộng đúng bằng tổng lead, không đẻ ra con số Hot thứ hai.
+    o.Un=Math.max(0,o.leads-o.P-o.C-o.W-o.H);
+    o.days=Math.max(0,dDiff(o.openDay,asofDate));
+    o.running=o===newest;
+    o.curve=[];o.curveLead=[];
+    for(let i=0;i<=dayN;i++){
+      const lim=addDays(o.openDay,i);
+      o.curve.push(o.hotD.filter(x=>x<=lim).length);
+      o.curveLead.push(o.leadD.filter(x=>x<=lim).length);
+    }
+    o.hotAt=o.curve[dayN]||0; o.leadsAt=o.curveLead[dayN]||0; o.hot=o.H;
+  }
+  list.sort((a,b)=>b.openDay.localeCompare(a.openDay));
+  return {list,cur:newest,dayN};
+}
 function renderCohort(){
   if(!CO)return;
-  const cs=CO.courses||[];
-  const cur=cs.find(c=>c.running)||cs[0];
-  $("coSub").textContent=cs.length?("cập nhật "+(CO.asOf||"—")+" · so "+cs.length+" khoá tại cùng mốc ngày"):"chưa có dữ liệu";
-  if(!cur){$("coKpis").innerHTML="";$("coTbl").innerHTML="";return}
-
-  // KPI = PHỄU của riêng khoá đang chạy, tính tới hiện tại. KHÔNG so sánh ở đây
-  // (user chốt 2026-09-03: "KPI chỉ khoá hiện tại thôi… so sánh để ở visuals").
+  const R=coCalc();
+  document.body.dataset.coGrp=S.grp;
+  if(!R){$("coKpis").innerHTML="";$("coTbl").innerHTML="";$("coHead").textContent="—";
+    $("coSub").textContent="không có khoá nào khớp bộ lọc hiện tại";return}
+  const cs=R.list, cur=R.cur, dayN=R.dayN;
+  $("coSub").textContent="cùng nguồn & cùng cách đếm với trang Tổng quan · so "+cs.length+" khoá tại mốc ngày thứ "+dayN;
   $("coHead").textContent=cur.code+" · ngày thứ "+cur.days+" · mở "+(cur.openDay||"—");
   const tot=cur.leads||0, pc=v=>tot?Math.round(v/tot*100)+"% tổng":"";
-  const K=[["Lead của khoá",tot,"","",""],
-           ["🔥 Hot",cur.H,"--sH",pc(cur.H),""],
-           ["Warm",cur.W,"--sW",pc(cur.W),""],
-           ["Cold",cur.C,"--sC",pc(cur.C),""],
-           ["Prospect",cur.P,"--sP",pc(cur.P),""],
-           ["Chưa gắn tag",cur.Un,"--sU",pc(cur.Un),""]];
+  const K=[["Lead của khoá",tot,"",""],
+           ["🔥 Hot",cur.H,"--sH",pc(cur.H)],
+           ["Warm",cur.W,"--sW",pc(cur.W)],
+           ["Cold",cur.C,"--sC",pc(cur.C)],
+           ["Prospect",cur.P,"--sP",pc(cur.P)],
+           ["Khác / chưa tag",cur.Un,"--sU",pc(cur.Un)]];
   $("coKpis").innerHTML=K.map(([k,v,col,sub])=>
     "<div class='kpi'><div class='k'>"+k+"</div><div class='v'"+(col?" style='color:var("+col+")'":"")+">"+(v||0)+"</div>"
     +"<div class='delta'>"+(sub||"tính tới hiện tại")+"</div></div>").join("");
   chartCohort(cs,cur); chartCoMix(cs); chartCoRate(cs,cur); chartCoSame(cs,cur);
-  // Cờ cho bot chụp ảnh biết ĐÃ render xong hệ khoá nào. Không có cờ này thì bot
-  // chỉ chờ "bảng có dòng" — mà dòng cũ vẫn còn từ lần render trước nên nó chụp
-  // nhầm dữ liệu hệ cũ (gặp 2026-09-03: thẻ Khoá BI hiện số của FA).
-  document.body.dataset.coGrp=coLoadedFor;
 
-  // Bảng đầy đủ — user chốt muốn thấy TOÀN BỘ khoá có dữ liệu.
   let t="<thead><tr><th>Khoá</th><th>Ngày mở</th><th class='num'>Lead cùng kỳ</th><th class='num'>Hot cùng kỳ</th><th class='num'>Tỷ lệ Hot</th><th class='num'>Cả khoá (lead/Hot)</th></tr></thead><tbody>";
   for(const c of cs){
     const rate=c.leadsAt?Math.round(c.hotAt/c.leadsAt*100):0;
@@ -884,7 +959,9 @@ function chartCohort(cs,cur){
 function chartCoSame(cs,cur){
   const svg=$("cCoSame"),{W,H}=dims(svg,300,190),pad={t:14,b:26,l:34,r:8};
   const d=cs.filter(c=>c.leadsAt>0||c.hotAt>0).slice(0,10).reverse();
-  $("coSameTitle").textContent="So cùng kỳ — ngày thứ "+cur.days;
+  // mốc so lấy từ độ dài đường đã cắt, KHÔNG dùng cur.days (đó là tổng số ngày
+  // khoá đã chạy, khác với mốc người dùng chọn ở thanh lọc).
+  $("coSameTitle").textContent="So cùng kỳ — ngày thứ "+Math.max(0,(cur.curve||[]).length-1);
   if(!d.length){frame(svg,W,H,pad,4,3);return}
   const maxV=Math.max(4,...d.map(c=>c.leadsAt))*1.15;
   const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
@@ -939,7 +1016,7 @@ function chartCoMix(cs){
   const maxV=Math.max(4,...d.map(c=>c.leads))*1.1;
   const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
   const band=plotW/d.length;
-  const SEG=[["P","--sP","Prospect"],["C","--sC","Cold"],["W","--sW","Warm"],["H","--sH","Hot"],["Un","--sU","Chưa tag"]];
+  const SEG=[["P","--sP","Prospect"],["C","--sC","Cold"],["W","--sW","Warm"],["H","--sH","Hot"],["Un","--sU","Khác / chưa tag"]];
   d.forEach((c,i)=>{
     const x=pad.l+band*i+band*.18,w=band*.64; let acc=0;
     for(const [k,col] of SEG){
@@ -1063,7 +1140,6 @@ document.addEventListener("click",e=>{
 });
 $("segGrp").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
   [...$("segGrp").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.grp=b.dataset.v;
-  if($("pgCo").style.display!=="none"){CO=null;loadCohort();return}
   renderAll()});
 $("navPg").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
   [...$("navPg").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");
@@ -1073,7 +1149,8 @@ $("navPg").addEventListener("click",e=>{const b=e.target.closest("button");if(!b
   $("pgCo").style.display=p==="co"?"flex":"none";
   // Trang khoá dùng nguồn dữ liệu RIÊNG (/api/cohort) nên tải lần đầu vào trang;
   // các bộ lọc kỳ/kênh ở thanh trên không áp vào đây.
-  if(p==="co"){ if(CO&&coLoadedFor===S.grp)renderCohort(); else loadCohort(); return }
+  // CO không còn phụ thuộc BI/FA nên tải đúng MỘT lần cho cả phiên.
+  if(p==="co"){ if(CO)renderCohort(); else loadCohort(); return }
   renderAll()});
 $("tblTabs").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
   [...$("tblTabs").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.tbl=b.dataset.v;if(A)tableCard(A)});

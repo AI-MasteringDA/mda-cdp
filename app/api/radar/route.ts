@@ -288,6 +288,12 @@ export async function GET(req: Request) {
     for (const k of l.ky) { const lab = remkt.get(k); if (lab) { l.re = lab; reCount++; break; } }
     // Bổ sung khoá bên SF vào lead SMAX (và ngược lại) → lọc theo khoá không hụt
     for (const k of l.ky) { const s = sfCourse.get(k); if (s) for (const c of s) if (!l.co.includes(c)) l.co.push(c); }
+    // MẢNG (BI/FA) phải suy lại TỪ danh sách khoá SAU KHI đã gộp khoá bên SF.
+    // Trước đây bi/fa chỉ đọc tag SMAX, nên lead có khoá K62 lấy từ SF (Đỗ Trung
+    // Đức, Linh Nhâm, Anh Auto, Nguyễn Đức Trọng) mang co=["K62"] nhưng bi=false
+    // ⇒ lọc "KHOÁ K62 + mảng BI" bị hụt 4 người (44 thay vì 48). 2026-09-03.
+    if (l.co.some(c => /^KH?\d/i.test(c))) l.bi = true;
+    if (l.co.some(c => /^F\d/i.test(c))) l.fa = true;
     // QUY NGÀY HOT CHO LEAD WEB (user chốt 2026-08-18).
     // Khách điền form web ⇒ SF tạo lead ngay hôm đó. Sau đó khách mới nhắn SMAX
     // và sales gắn tag Hot — thường LỆCH SANG NGÀY KHÁC. Đếm theo giờ gắn tag là
