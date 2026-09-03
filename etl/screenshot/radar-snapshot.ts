@@ -72,7 +72,7 @@ async function shoot(page: import("playwright").Page, win: string, grp: string):
   if (win.startsWith("cohort")) {
     const ck = win.split(":")[1] || "BI";
     await page.click('#navPg button[data-p="co"]');
-    await page.click(`#coGrp button[data-v="${ck}"]`);
+    await page.click(`#segGrp button[data-v="${ck.toLowerCase()}"]`);
     // Chờ bảng có dòng — chắc ăn hơn đợi cứng theo thời gian, vì phải gọi API.
     await page.waitForFunction(() => (document.querySelectorAll("#coTbl tbody tr").length > 0), { timeout: 25_000 }).catch(() => { });
     // Chuột đang nằm trên thanh bên sau cú click ⇒ thanh bên bung ra che mất
@@ -117,7 +117,7 @@ async function sendCard(imageKey: string, label: string, color: string, win: str
   // public/radar.html. Dùng /radar (đăng nhập/mật khẩu chung) chứ KHÔNG dùng
   // /radar.html?key= để khỏi lộ khoá bí mật của bot vào group chat.
   const deepLink = win.startsWith("cohort")
-    ? `${BASE}/radar?pg=co&ck=${win.split(":")[1] || "BI"}`
+    ? `${BASE}/radar?pg=co&grp=${(win.split(":")[1] || "BI").toLowerCase()}`
     : `${BASE}/radar?days=${win}&grp=${grp}`;
   const card = {
     msg_type: "interactive",

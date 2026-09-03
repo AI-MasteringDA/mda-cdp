@@ -74,7 +74,10 @@ export async function runCohortBuild() {
   // ── quét dữ liệu nguồn
   // cls = tag phân loại ĐANG có trên lead (P/C/W/H/U) — SMAX chỉ giữ 1 tag phân
   // loại một lúc nên không lo trùng. Dùng cho phễu KPI của khoá đang chạy.
-  type Row = { course: string; tagMs: number; hotMs: number | null; cls: string };
+  // lead = record_id trên Lark. CẦN vì "KH62" và "K62" là CÙNG MỘT KHOÁ (user
+  // xác nhận 2026-09-03) — gộp lại thì một lead mang cả hai tag sẽ sinh 2 dòng
+  // cho cùng khoá, phải khử trùng theo lead.
+  type Row = { lead: string; course: string; tagMs: number; hotMs: number | null; cls: string };
   const rows: Row[] = [];
   const CLS: Record<string, string> = { prospect: "P", coldlead: "C", warmlead: "W", hotlead: "H" };
   const nz = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
@@ -97,7 +100,10 @@ export async function runCohortBuild() {
       for (const t of tags) { const c = CLS[nz(t)]; if (c) { cls = c; break } }
       for (const c of courseCols) {
         const t = f[c];
-        if (typeof t === "number") rows.push({ course: c.replace(/ lúc$/, ""), tagMs: t, hotMs: hot, cls });
+        if (typeof t !== "number") continue;
+        // "KH62" ⇒ "K62": cùng một khoá, chỉ khác cách gõ tag.
+        const course = c.replace(/ lúc$/, "").replace(/^KH(\d)/i, "K$1").toUpperCase();
+        rows.push({ lead: r.record_id, course, tagMs: t, hotMs: hot, cls });
       }
     }
     pages++;
@@ -107,11 +113,22 @@ export async function runCohortBuild() {
   if (!rows.length) { console.log("[cohort] 0 dòng — DỪNG, không ghi (tránh xoá trắng)."); return; }
 
   // ── tính
+  // KHỬ TRÙNG (lead × khoá): sau khi gộp KH##→K##, một lead mang cả 2 tag sẽ có
+  // 2 dòng cho cùng khoá. Giữ dòng có mốc gắn tag SỚM NHẤT — đó mới là lúc lead
+  // thực sự vào khoá này.
+  const seen = new Map<string, Row>();
+  for (const r of rows) {
+    const k = r.course + "|" + r.lead;
+    const old = seen.get(k);
+    if (!old || r.tagMs < old.tagMs) seen.set(k, r);
+  }
+  const dedup = [...seen.values()];
+  if (dedup.length !== rows.length) console.log(`[cohort] khử trùng KH##/K##: ${rows.length} → ${dedup.length} dòng`);
   const byCourse = new Map<string, Row[]>();
-  for (const r of rows) { const a = byCourse.get(r.course) ?? []; a.push(r); byCourse.set(r.course, a); }
+  for (const r of dedup) { const a = byCourse.get(r.course) ?? []; a.push(r); byCourse.set(r.course, a); }
   // Mốc "hiện tại" lấy từ chính dữ liệu (tag mới nhất) chứ không dùng Date.now()
   // — số không nhảy lung tung khi máy chủ lệch giờ.
-  const nowMs = Math.max(...rows.map(r => r.tagMs));
+  const nowMs = Math.max(...dedup.map(r => r.tagMs));
 
   type C = { code: string; grp: string; openMs: number; days: number; leads: number; hot: number; leadsAt: number; hotAt: number; curve: number[]; curveLead: number[]; P: number; C: number; W: number; H: number; U: number };
   const list: C[] = [];
@@ -119,11 +136,10 @@ export async function runCohortBuild() {
     if (rs.length < 5) continue;   // khoá quá ít dữ liệu = nhiễu (tag gõ nhầm)
     const openMs = Math.min(...rs.map(r => r.tagMs));
     const cnt = (k: string) => rs.filter(r => r.cls === k).length;
-    // BA hệ khoá riêng biệt, KHÔNG gộp: K## (BI chính), KH## (hệ khác, quy mô
-    // nhỏ hơn hẳn), F# (FA). Gộp K với KH là sai: KH62 mở 18/08 (9 lead) sẽ
-    // giành mất vai "khoá đang chạy" của K62 mở 15/08 (200 lead), rồi mọi khoá
-    // K bị cắt theo mốc của KH — số vô nghĩa. (Bắt được lúc chạy thử 2026-09-03.)
-    const grp = /^F\d/i.test(code) ? "FA" : (/^KH/i.test(code) ? "KH" : "BI");
+    // Chỉ còn HAI hệ: BI và FA. "KH62" đã được quy về "K62" ngay lúc đọc (user
+    // xác nhận 2026-09-03 hai mã đó là cùng một khoá), nên tới đây không còn mã
+    // KH nào nữa.
+    const grp = /^F\d/i.test(code) ? "FA" : "BI";
     list.push({ code, grp, openMs, days: Math.floor((nowMs - openMs) / DAY), leads: rs.length, hot: rs.filter(r => r.hotMs != null).length, leadsAt: 0, hotAt: 0, curve: [], curveLead: [],
       P: cnt("P"), C: cnt("C"), W: cnt("W"), H: cnt("H"), U: cnt("U") });
   }

@@ -265,10 +265,9 @@ td b{font-weight:550}
          tối thiểu cố định. Không dùng lưới 2-hàng "fr" như trang Tổng quan:
          ở đây có 3 hàng biểu đồ, để "fr" thì hàng thứ 3 bị sập còn trơ tiêu đề. -->
     <div id="pgCo" style="display:none;flex-direction:column;gap:10px;flex:1;min-height:0;overflow-y:auto">
-      <div class="bar" style="justify-content:space-between">
-        <div class="range">📚 <b id="coHead"></b></div>
-        <div class="mini" id="coGrp"><button data-v="BI" class="on">BI (K##)</button><button data-v="FA">FA (F#)</button><button data-v="KH">KH##</button></div>
-      </div>
+      <!-- KHÔNG có hàng nút lọc riêng: trang này dùng luôn bộ lọc BI/FA ở thanh
+           trên (#segGrp), theo yêu cầu user 2026-09-03. -->
+      <div class="bar"><div class="range">📚 <b id="coHead"></b></div></div>
       <!-- KPI = PHỄU CỦA KHOÁ ĐANG CHẠY (tới thời điểm hiện tại), KHÔNG so sánh.
            Việc so sánh khoá nằm hết ở các biểu đồ bên dưới. -->
       <div class="kpis" id="coKpis"></div>
@@ -781,16 +780,18 @@ function renderAll(){
    60s của Vercel). Bộ lọc kỳ/kênh ở thanh trên KHÔNG áp vào trang này. */
 // Khoá bot dùng để qua middleware (giống khối tải /api/radar ở trên).
 const KEY=new URLSearchParams(location.search).get("key")||"";
-let CO=null, COGRP="BI", coBusy=false;
+let CO=null, coBusy=false, coLoadedFor="";
 async function loadCohort(){
   if(coBusy)return; coBusy=true;
   try{
     const u=new URL(location.origin+"/api/cohort");
-    u.searchParams.set("grp",COGRP);
+    // "all" thì không truyền grp — API trả về mọi khoá (BI + FA).
+    if(S.grp==="bi")u.searchParams.set("grp","BI");
+    else if(S.grp==="fa")u.searchParams.set("grp","FA");
     if(KEY)u.searchParams.set("key",KEY);
     const r=await fetch(u,{cache:"no-store"}); const j=await r.json();
     if(j.error)throw new Error(j.error);
-    CO=j; renderCohort();
+    CO=j; coLoadedFor=S.grp; renderCohort();
   }catch(e){
     $("coSub").textContent="không tải được dữ liệu khoá — "+e.message;
   }finally{coBusy=false}
@@ -1046,7 +1047,9 @@ document.addEventListener("click",e=>{
   for(const id of ["cal","coPop"]){const p=$(id);if(p&&(!w||!w.contains(p)))p.classList.remove("open")}
 });
 $("segGrp").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
-  [...$("segGrp").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.grp=b.dataset.v;renderAll()});
+  [...$("segGrp").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.grp=b.dataset.v;
+  if($("pgCo").style.display!=="none"){CO=null;loadCohort();return}
+  renderAll()});
 $("navPg").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
   [...$("navPg").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");
   const p=b.dataset.p;
@@ -1055,11 +1058,8 @@ $("navPg").addEventListener("click",e=>{const b=e.target.closest("button");if(!b
   $("pgCo").style.display=p==="co"?"flex":"none";
   // Trang khoá dùng nguồn dữ liệu RIÊNG (/api/cohort) nên tải lần đầu vào trang;
   // các bộ lọc kỳ/kênh ở thanh trên không áp vào đây.
-  if(p==="co"){ if(CO)renderCohort(); else loadCohort(); return }
+  if(p==="co"){ if(CO&&coLoadedFor===S.grp)renderCohort(); else loadCohort(); return }
   renderAll()});
-$("coGrp").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
-  [...$("coGrp").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");
-  COGRP=b.dataset.v; CO=null; loadCohort()});
 $("tblTabs").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
   [...$("tblTabs").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.tbl=b.dataset.v;if(A)tableCard(A)});
 for(const [id,fn] of [["expXlsx",expXlsx],["expCsv",expCsv]])
@@ -1126,11 +1126,6 @@ $("pinBtn").addEventListener("click",()=>$("side").classList.toggle("pinned"));
   // nút "Mở Dashboard chi tiết" trong thẻ báo cáo Lark và cho bot chụp ảnh.
   const qPg=qs.get("pg");
   if(qPg==="co"||qPg==="ls"){
-    const ck=(qs.get("ck")||"").toUpperCase();
-    if(qPg==="co"&&["BI","FA","KH"].includes(ck)){
-      COGRP=ck;
-      [...$("coGrp").children].forEach(x=>x.classList.toggle("on",x.dataset.v===ck));
-    }
     const nb=[...$("navPg").children].find(x=>x.dataset.p===qPg);
     if(nb)nb.click();
   }
