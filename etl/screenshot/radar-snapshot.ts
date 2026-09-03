@@ -50,6 +50,11 @@ const PM_REPORTS = [
   { win: "pm", grp: "bi", label: "BI — Chiều", color: "blue" },
   { win: "pm", grp: "fa", label: "FA — Chiều", color: "turquoise" },
   { win: "30", grp: "all", label: "Tổng quan — 30 ngày qua", color: "purple" },
+  // SO SÁNH KHOÁ (sếp yêu cầu 2026-09-03): khoá đang chạy so với các khoá trước
+  // ở CÙNG số ngày kể từ lúc mở tuyển sinh. Chỉ bắn đợt Chiều — số này nhích
+  // chậm theo ngày, không cần nhắc 2 lần/ngày.
+  { win: "cohort:BI", grp: "all", label: "Khoá BI — so với các khoá trước", color: "carmine" },
+  { win: "cohort:FA", grp: "all", label: "Khoá FA — so với các khoá trước", color: "orange" },
 ];
 // RADAR_RUN=am|pm ép chạy đúng đợt (cron truyền vào theo giờ trigger). Không
 // truyền thì tự đoán theo giờ VN thực tế lúc chạy — tiện chạy tay giữa chừng.
@@ -61,10 +66,26 @@ function pickRun(): "am" | "pm" {
 }
 
 async function shoot(page: import("playwright").Page, win: string, grp: string): Promise<Buffer> {
+  // "cohort:<hệ>" — trang So sánh khoá. Trang này có nguồn dữ liệu RIÊNG
+  // (/api/cohort) nên không đụng tới bộ lọc kỳ/kênh; chỉ cần vào trang, chọn hệ
+  // khoá rồi chờ tải xong.
+  if (win.startsWith("cohort")) {
+    const ck = win.split(":")[1] || "BI";
+    await page.click('#navPg button[data-p="co"]');
+    await page.click(`#coGrp button[data-v="${ck}"]`);
+    // Chờ bảng có dòng — chắc ăn hơn đợi cứng theo thời gian, vì phải gọi API.
+    await page.waitForFunction(() => (document.querySelectorAll("#coTbl tbody tr").length > 0), { timeout: 25_000 }).catch(() => { });
+    // Chuột đang nằm trên thanh bên sau cú click ⇒ thanh bên bung ra che mất
+    // cột đầu của bảng. Dời chuột ra giữa trang trước khi chụp.
+    await page.mouse.move(760, 700);
+    await page.waitForTimeout(1200);
+    return await page.screenshot({ fullPage: false });
+  }
   // Áp kỳ + bộ lọc bằng cách BẤM ĐÚNG NÚT trên trang (không tự lặp lại state
   // logic) — dashboard tự lo phần ensureWindow/render, xem "DEEP LINK" trong
-  // dash-template.html. Kỳ dài (30 ngày) cần chờ ensureWindow tải thêm dữ liệu
+  // public/radar.html. Kỳ dài (30 ngày) cần chờ ensureWindow tải thêm dữ liệu
   // + biểu đồ gom lại theo tuần, nên đợi lâu hơn kỳ ngắn.
+  await page.click('#navPg button[data-p="ov"]');
   await page.click(`#segDays button[data-v="${win}"]`);
   await page.waitForTimeout(win === "30" ? 1800 : 700);
   await page.click(`#segGrp button[data-v="${grp}"]`);
@@ -92,7 +113,12 @@ async function uploadImage(tk: string, png: Buffer): Promise<string> {
 /** Thẻ = ảnh chụp + nút bấm dẫn thẳng tới /radar (đăng nhập Google, KHÔNG lộ
  * key bí mật của bot) đã set sẵn ?days=&grp= để vào đúng đúng kỳ + bộ lọc. */
 async function sendCard(imageKey: string, label: string, color: string, win: string, grp: string) {
-  const deepLink = `${BASE}/radar?days=${win}&grp=${grp}`;
+  // Trang khoá có đường dẫn riêng (?pg=co&ck=…) — xem khối "DEEP LINK" trong
+  // public/radar.html. Dùng /radar (đăng nhập/mật khẩu chung) chứ KHÔNG dùng
+  // /radar.html?key= để khỏi lộ khoá bí mật của bot vào group chat.
+  const deepLink = win.startsWith("cohort")
+    ? `${BASE}/radar?pg=co&ck=${win.split(":")[1] || "BI"}`
+    : `${BASE}/radar?days=${win}&grp=${grp}`;
   const card = {
     msg_type: "interactive",
     card: {

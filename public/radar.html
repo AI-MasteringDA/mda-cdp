@@ -1022,6 +1022,18 @@ $("pinBtn").addEventListener("click",()=>$("side").classList.toggle("pinned"));
     const btn=[...$("segGrp").children].find(x=>x.dataset.v===qGrp);
     if(btn)btn.click();
   }
+  // ?pg=co (+ tuỳ chọn ?ck=BI|FA|KH) — mở thẳng trang So sánh khoá. Dùng cho
+  // nút "Mở Dashboard chi tiết" trong thẻ báo cáo Lark và cho bot chụp ảnh.
+  const qPg=qs.get("pg");
+  if(qPg==="co"||qPg==="ls"){
+    const ck=(qs.get("ck")||"").toUpperCase();
+    if(qPg==="co"&&["BI","FA","KH"].includes(ck)){
+      COGRP=ck;
+      [...$("coGrp").children].forEach(x=>x.classList.toggle("on",x.dataset.v===ck));
+    }
+    const nb=[...$("navPg").children].find(x=>x.dataset.p===qPg);
+    if(nb)nb.click();
+  }
 })();
 
 renderAll();
