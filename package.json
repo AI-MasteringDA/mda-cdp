@@ -22,6 +22,7 @@
     "etl:dedup:shadow": "tsx etl/sources/dedup-shadow.ts",
     "etl:smax:lark:bridge": "tsx etl/sources/smax-lark-bridge.ts",
     "etl:sf:lark:bridge": "tsx etl/sources/sf-lark-bridge.ts",
+    "etl:cohort:build": "tsx etl/sources/cohort-build.ts",
     "etl:daily:report": "tsx etl/sources/daily-report.ts",
     "etl:lark:daily": "tsx etl/sources/lark-daily-message.ts",
     "etl:radar:snapshot": "tsx etl/screenshot/radar-snapshot.ts",
