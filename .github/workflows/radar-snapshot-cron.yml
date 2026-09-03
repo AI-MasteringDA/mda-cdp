@@ -21,7 +21,8 @@ concurrency:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 15' vì có thêm bước tính bảng so sánh khoá (~2,5 phút) trước khi chụp.
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -42,6 +43,18 @@ jobs:
             "0 10 * * *") echo "run=pm" >> "$GITHUB_OUTPUT" ;;
             *) echo "run=${{ github.event.inputs.run }}" >> "$GITHUB_OUTPUT" ;;
           esac
+      # Tính bảng so sánh khoá NGAY TRƯỚC khi chụp, để thẻ "Khoá … so với các
+      # khoá trước" luôn phản ánh số mới nhất. Quét mất ~2,5 phút nên không thể
+      # tính lúc mở trang (Vercel cắt hàm ở 60s) — xem etl/sources/cohort-build.ts.
+      # Lỗi ở bước này KHÔNG được chặn việc gửi báo cáo: thẻ khoá sẽ hiện số của
+      # lần tính trước, còn hơn mất cả 5 thẻ.
+      - name: Tính bảng so sánh khoá (Cohort_Summary)
+        continue-on-error: true
+        env:
+          LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+          LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+          LARK_BASE_APP_TOKEN: ${{ secrets.LARK_BASE_APP_TOKEN }}
+        run: npm run etl:cohort:build
       - name: Chụp dashboard + gửi vào group Lark
         env:
           LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
