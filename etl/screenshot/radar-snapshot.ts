@@ -71,11 +71,16 @@ async function shoot(page: import("playwright").Page, win: string, grp: string):
   // (/api/cohort) nên không đụng tới bộ lọc kỳ/kênh; chỉ cần vào trang, chọn hệ
   // khoá rồi chờ tải xong.
   if (win.startsWith("cohort")) {
-    const ck = win.split(":")[1] || "BI";
+    const ck = (win.split(":")[1] || "BI").toLowerCase();
+    // Xoá cờ trước khi bấm, rồi chờ trang tự đặt lại — như vậy mới biết chắc
+    // ĐÚNG hệ khoá này đã render xong. Chờ kiểu "bảng có dòng chưa" là SAI:
+    // dòng của hệ trước vẫn còn nên chờ xong ngay, chụp nhầm dữ liệu cũ
+    // (gặp 2026-09-03: thẻ "Khoá BI" hiện số của FA).
+    await page.evaluate(() => { delete document.body.dataset.coGrp });
     await page.click('#navPg button[data-p="co"]');
-    await page.click(`#segGrp button[data-v="${ck.toLowerCase()}"]`);
-    // Chờ bảng có dòng — chắc ăn hơn đợi cứng theo thời gian, vì phải gọi API.
-    await page.waitForFunction(() => (document.querySelectorAll("#coTbl tbody tr").length > 0), { timeout: 25_000 }).catch(() => { });
+    await page.click(`#segGrp button[data-v="${ck}"]`);
+    await page.waitForFunction(g => document.body.dataset.coGrp === g, ck, { timeout: 25_000 })
+      .catch(() => console.log(`[snapshot] ⚠ chờ render hệ ${ck} quá hạn — ảnh có thể chưa đúng`));
     // Chuột đang nằm trên thanh bên sau cú click ⇒ thanh bên bung ra che mất
     // cột đầu của bảng. Dời chuột ra giữa trang trước khi chụp.
     await page.mouse.move(760, 700);
@@ -109,6 +114,72 @@ async function uploadImage(tk: string, png: Buffer): Promise<string> {
   const r = await fetch(`${U}/im/v1/images`, { method: "POST", headers: { Authorization: `Bearer ${tk}` }, body: form }).then(r => r.json());
   if (r.code !== 0) throw new Error(`upload ảnh lỗi (thiếu scope im:resource:upload?): ${r.code} ${r.msg}`);
   return r.data.image_key;
+}
+
+/**
+ * THẺ TÓM TẮT DẠNG CHỮ — bắn TRƯỚC các thẻ ảnh (user yêu cầu 2026-09-03).
+ * Số đọc THẲNG TỪ DOM của trang sau khi bấm đúng bộ lọc, không tự tính lại ⇒
+ * chữ và ảnh chắc chắn khớp nhau.
+ *
+ * Mẫu user đưa có thêm mục B2B, "Training inhouse", checklist vận hành và tên
+ * người phụ trách — KHÔNG đưa vào vì: 2 mục đầu không có dữ liệu (đo 2026-09-03:
+ * 0/734 lead mang dấu hiệu B2B), 2 mục sau là xác nhận/thông tin của người chứ
+ * máy không tự sinh được. User đã chốt "dữ liệu nào có thì bắn".
+ */
+async function readKpis(page: import("playwright").Page, win: string, grp: string) {
+  await page.click('#navPg button[data-p="ov"]');
+  await page.click(`#segDays button[data-v="${win}"]`); await page.waitForTimeout(700);
+  await page.click(`#segGrp button[data-v="${grp}"]`); await page.waitForTimeout(1200);
+  // textContent chứ KHÔNG innerText: CSS có text-transform:uppercase nên
+  // innerText trả "LEAD MỚI", không khớp tên mục khi tra cứu.
+  const rows = await page.$$eval("#kpis .kpi", els => els.map(e => ({
+    k: (e.querySelector(".lbl") as HTMLElement)?.textContent?.trim() || "",
+    v: (e.querySelector(".v") as HTMLElement)?.textContent?.trim() || "",
+    d: [...e.querySelectorAll(".delta")].map(x => (x as HTMLElement).textContent?.trim() || ""),
+  })));
+  const range = await page.locator("#rangeLbl").innerText().catch(() => "");
+  return { rows, range };
+}
+type Kpi = Awaited<ReturnType<typeof readKpis>>;
+async function runningCourse(grp: string) {
+  try {
+    const r = await fetch(`${BASE}/api/cohort?grp=${grp.toUpperCase()}&key=${encodeURIComponent(KEY)}`).then(r => r.json());
+    return (r.courses || []).find((c: { running?: boolean }) => c.running) ?? null;
+  } catch { return null }   // thiếu phần khoá thì vẫn bắn được phần còn lại
+}
+function buildText(bi: Kpi, fa: Kpi, cBI: any, cFA: any): string {
+  const today = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10).split("-").reverse().join("/");
+  const block = (nm: string, k: Kpi, c: any) => {
+    const g = (n: string) => k.rows.find(x => x.k === n)?.v ?? "0";
+    const src = (k.rows.find(x => x.k === "Hot mới")?.d || []).find(x => x.startsWith("SMAX")) || "";
+    let s = `\n━━ ${nm} ━━`;
+    if (c) s += `  (đang tuyển sinh: ${c.code} · ngày thứ ${c.days})`;
+    s += `\n• Lead mới: ${g("Lead mới")}`;
+    s += `\n• Hot mới: ${g("Hot mới")}${src ? `   (${src})` : ""}`;
+    s += `\n• Cold: ${g("Cold")}  ·  Warm: ${g("Warm")}  ·  Prospect: ${g("Prospect")}`;
+    s += `\n• Chưa phản hồi: ${g("Chưa phản hồi")}`;
+    if (c) {
+      const pc = (v: number) => c.leads ? Math.round(v / c.leads * 100) + "%" : "0%";
+      s += `\n• Luỹ kế cả khoá ${c.code}: ${c.leads} lead`;
+      s += `\n   ↳ Hot ${c.H} (${pc(c.H)}) · Warm ${c.W} (${pc(c.W)}) · Cold ${c.C} (${pc(c.C)}) · Prospect ${c.P} (${pc(c.P)}) · Chưa tag ${c.Un} (${pc(c.Un)})`;
+    }
+    return s;
+  };
+  return `**Báo cáo ngày: ${today}**\nKỳ báo cáo: ${bi.range.replace(/^🗓\s*/, "")}\n`
+    + block("BI", bi, cBI) + "\n" + block("FA", fa, cFA)
+    + `\n\nNguồn: SMAX + Salesforce · Automation Bot — Mastering Data Analytics`;
+}
+async function sendText(md: string) {
+  const card = {
+    msg_type: "interactive",
+    card: {
+      config: { wide_screen_mode: true },
+      header: { title: { tag: "plain_text", content: "📋 CHECK LEADS / TAG / PROCESS" }, template: "green" },
+      elements: [{ tag: "div", text: { tag: "lark_md", content: md } }],
+    },
+  };
+  const r = await fetch(WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(card) }).then(r => r.json());
+  if (r.code !== 0 && r.StatusCode !== 0) throw new Error(`gửi thẻ chữ lỗi: ${JSON.stringify(r)}`);
 }
 
 /** Thẻ = ảnh chụp + nút bấm dẫn thẳng tới /radar (đăng nhập Google, KHÔNG lộ
@@ -154,6 +225,19 @@ async function main() {
     await page.waitForTimeout(2000);
     const errBox = await page.locator("text=Không tải được dữ liệu").count();
     if (errBox > 0) throw new Error("trang báo lỗi tải dữ liệu — key sai hoặc API lỗi");
+
+    // THẺ CHỮ đi TRƯỚC: đọc số trước, xem biểu đồ sau. Lỗi ở đây không được
+    // chặn phần ảnh — thà thiếu thẻ chữ còn hơn mất cả loạt báo cáo.
+    try {
+      const kWin = run === "am" ? "am" : "pm";
+      const bi = await readKpis(page, kWin, "bi");
+      const fa = await readKpis(page, kWin, "fa");
+      const [cBI, cFA] = await Promise.all([runningCourse("BI"), runningCourse("FA")]);
+      await sendText(buildText(bi, fa, cBI, cFA));
+      console.log("[snapshot] [thẻ chữ] đã gửi vào group ✅");
+    } catch (e) {
+      console.error(`[snapshot] ⚠ thẻ chữ lỗi (vẫn tiếp tục gửi ảnh): ${(e as Error).message}`);
+    }
 
     for (const { win, grp, label, color } of REPORTS) {
       const png = await shoot(page, win, grp);

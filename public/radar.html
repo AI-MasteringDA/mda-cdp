@@ -819,6 +819,10 @@ function renderCohort(){
     "<div class='kpi'><div class='k'>"+k+"</div><div class='v'"+(col?" style='color:var("+col+")'":"")+">"+(v||0)+"</div>"
     +"<div class='delta'>"+(sub||"tính tới hiện tại")+"</div></div>").join("");
   chartCohort(cs,cur); chartCoMix(cs); chartCoRate(cs,cur); chartCoSame(cs,cur);
+  // Cờ cho bot chụp ảnh biết ĐÃ render xong hệ khoá nào. Không có cờ này thì bot
+  // chỉ chờ "bảng có dòng" — mà dòng cũ vẫn còn từ lần render trước nên nó chụp
+  // nhầm dữ liệu hệ cũ (gặp 2026-09-03: thẻ Khoá BI hiện số của FA).
+  document.body.dataset.coGrp=coLoadedFor;
 
   // Bảng đầy đủ — user chốt muốn thấy TOÀN BỘ khoá có dữ liệu.
   let t="<thead><tr><th>Khoá</th><th>Ngày mở</th><th class='num'>Lead cùng kỳ</th><th class='num'>Hot cùng kỳ</th><th class='num'>Tỷ lệ Hot</th><th class='num'>Cả khoá (lead/Hot)</th></tr></thead><tbody>";
