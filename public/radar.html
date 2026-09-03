@@ -782,21 +782,27 @@ function renderAll(){
    60s của Vercel). Bộ lọc kỳ/kênh ở thanh trên KHÔNG áp vào trang này. */
 // Khoá bot dùng để qua middleware (giống khối tải /api/radar ở trên).
 const KEY=new URLSearchParams(location.search).get("key")||"";
-let CO=null, coBusy=false, coLoadedFor="";
+let CO=null, coLoadedFor="";
+// KHÔNG chặn bằng cờ "đang bận": đổi bộ lọc lúc lần tải trước chưa xong thì
+// lệnh mới bị NUỐT và không bao giờ thử lại — trang kẹt ở dữ liệu hệ cũ dù nút
+// đã sáng hệ mới (bug 2026-09-03: bấm BI nhưng hiện F4, thẻ báo cáo cũng sai).
+// Thay bằng số thứ tự yêu cầu: cứ gọi, nhưng chỉ nhận kết quả của lệnh MỚI NHẤT.
+let coReq=0;
 async function loadCohort(){
-  if(coBusy)return; coBusy=true;
+  const my=++coReq, want=S.grp;
   try{
     const u=new URL(location.origin+"/api/cohort");
     // "all" thì không truyền grp — API trả về mọi khoá (BI + FA).
-    if(S.grp==="bi")u.searchParams.set("grp","BI");
-    else if(S.grp==="fa")u.searchParams.set("grp","FA");
+    if(want==="bi")u.searchParams.set("grp","BI");
+    else if(want==="fa")u.searchParams.set("grp","FA");
     if(KEY)u.searchParams.set("key",KEY);
     const r=await fetch(u,{cache:"no-store"}); const j=await r.json();
+    if(my!==coReq)return;              // đã có lệnh mới hơn → bỏ kết quả cũ
     if(j.error)throw new Error(j.error);
-    CO=j; coLoadedFor=S.grp; renderCohort();
+    CO=j; coLoadedFor=want; renderCohort();
   }catch(e){
-    $("coSub").textContent="không tải được dữ liệu khoá — "+e.message;
-  }finally{coBusy=false}
+    if(my===coReq)$("coSub").textContent="không tải được dữ liệu khoá — "+e.message;
+  }
 }
 function renderCohort(){
   if(!CO)return;
