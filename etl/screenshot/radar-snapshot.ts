@@ -49,7 +49,8 @@ const AM_REPORTS = [
 const PM_REPORTS = [
   { win: "pm", grp: "bi", label: "BI — Chiều", color: "blue" },
   { win: "pm", grp: "fa", label: "FA — Chiều", color: "turquoise" },
-  { win: "30", grp: "all", label: "Tổng quan — 30 ngày qua", color: "purple" },
+  // Thẻ "Tổng quan — 30 ngày qua" đã BỎ (user chốt 2026-09-03): 2 thẻ so sánh
+  // khoá bên dưới đã cho thấy xu hướng dài hạn rõ hơn, để thêm 30 ngày là loãng.
   // SO SÁNH KHOÁ (sếp yêu cầu 2026-09-03): khoá đang chạy so với các khoá trước
   // ở CÙNG số ngày kể từ lúc mở tuyển sinh. Chỉ bắn đợt Chiều — số này nhích
   // chậm theo ngày, không cần nhắc 2 lần/ngày.
