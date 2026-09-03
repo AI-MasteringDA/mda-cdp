@@ -56,8 +56,8 @@ export async function GET(req: Request) {
   }
 
   let courses = items.map(f => {
-    let curve: number[] = [];
-    try { const p = JSON.parse(gs(f["Đường Hot"]) || "[]"); if (Array.isArray(p)) curve = p.map(Number); } catch { /* dữ liệu hỏng thì để rỗng */ }
+    const arr = (k: string): number[] => { try { const p = JSON.parse(gs(f[k]) || "[]"); return Array.isArray(p) ? p.map(Number) : [] } catch { return [] } };
+    const curve = arr("Đường Hot"), curveLead = arr("Đường Lead");
     return {
       code: gs(f["Khoá"]).trim(),
       grp: gs(f["Nhóm"]).trim().toUpperCase(),
@@ -66,7 +66,9 @@ export async function GET(req: Request) {
       leadsAt: num(f["Lead cùng kỳ"]), hotAt: num(f["Hot cùng kỳ"]),
       leads: num(f["Lead tổng"]), hot: num(f["Hot tổng"]),
       running: f["Đang chạy"] === true,
-      curve,
+      // Phễu hiện tại (theo tag đang có) — dùng cho hàng KPI của khoá đang chạy.
+      P: num(f["Prospect"]), C: num(f["Cold"]), W: num(f["Warm"]), H: num(f["Hot"]), Un: num(f["Chưa tag"]),
+      curve, curveLead,
     };
   }).filter(c => c.code);
 

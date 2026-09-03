@@ -37,7 +37,16 @@ const COLS: [string, number, Record<string, unknown>?][] = [
   ["Hot cùng kỳ", 2, { formatter: "0" }],
   ["Lead tổng", 2, { formatter: "0" }],           // cả khoá, chỉ để tham khảo
   ["Hot tổng", 2, { formatter: "0" }],
+  // PHỄU hiện tại của khoá — đếm theo tag phân loại ĐANG có trên lead. SMAX chỉ
+  // giữ 1 tag phân loại tại một thời điểm (tag mới thay tag cũ) nên cộng lại
+  // không bị trùng. Dùng cho hàng KPI của khoá đang chạy.
+  ["Prospect", 2, { formatter: "0" }],
+  ["Cold", 2, { formatter: "0" }],
+  ["Warm", 2, { formatter: "0" }],
+  ["Hot", 2, { formatter: "0" }],
+  ["Chưa tag", 2, { formatter: "0" }],
   ["Đường Hot", 1],                               // JSON mảng tích luỹ theo ngày, cho biểu đồ
+  ["Đường Lead", 1],                              // tích luỹ số lead gắn khoá theo ngày
   ["Đang chạy", 7],
   ["Cập nhật lúc", 5, { date_formatter: "yyyy-MM-dd HH:mm", auto_fill: false }],
 ];
@@ -63,22 +72,32 @@ export async function runCohortBuild() {
   if (!courseCols.length) { console.log("[cohort] không có cột khoá nào"); return; }
 
   // ── quét dữ liệu nguồn
-  type Row = { course: string; tagMs: number; hotMs: number | null };
+  // cls = tag phân loại ĐANG có trên lead (P/C/W/H/U) — SMAX chỉ giữ 1 tag phân
+  // loại một lúc nên không lo trùng. Dùng cho phễu KPI của khoá đang chạy.
+  type Row = { course: string; tagMs: number; hotMs: number | null; cls: string };
   const rows: Row[] = [];
+  const CLS: Record<string, string> = { prospect: "P", coldlead: "C", warmlead: "W", hotlead: "H" };
+  const nz = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
+  const gl = (v: unknown): string[] => Array.isArray(v) ? (v as any[]).map(x => typeof x === "object" && x ? (x.text ?? x.name ?? "") : String(x)).filter(Boolean) : [];
   let pt: string | undefined, pages = 0;
   while (true) {
     const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${srcId}/records`);
     url.searchParams.set("page_size", "500");
-    url.searchParams.set("field_names", JSON.stringify(["Hot Lead lúc", ...courseCols]));
+    url.searchParams.set("field_names", JSON.stringify(["Hot Lead lúc", "Tag SMAX", ...courseCols]));
     if (pt) url.searchParams.set("page_token", pt);
     const d = await fetch(url.toString(), { headers: H }).then(r => r.json());
     if (d.code !== 0) throw new Error(`đọc records lỗi: ${d.code} ${d.msg}`);
     for (const r of (d.data?.items ?? [])) {
       const f = r.fields ?? {};
       const hot = typeof f["Hot Lead lúc"] === "number" ? f["Hot Lead lúc"] as number : null;
+      const tags = gl(f["Tag SMAX"]);
+      // Rác thì bỏ hẳn, giống luật ở /api/radar (Spam/Block không phải lead).
+      if (tags.some(t => nz(t) === "spam" || nz(t).includes("block"))) continue;
+      let cls = "U";
+      for (const t of tags) { const c = CLS[nz(t)]; if (c) { cls = c; break } }
       for (const c of courseCols) {
         const t = f[c];
-        if (typeof t === "number") rows.push({ course: c.replace(/ lúc$/, ""), tagMs: t, hotMs: hot });
+        if (typeof t === "number") rows.push({ course: c.replace(/ lúc$/, ""), tagMs: t, hotMs: hot, cls });
       }
     }
     pages++;
@@ -94,17 +113,19 @@ export async function runCohortBuild() {
   // — số không nhảy lung tung khi máy chủ lệch giờ.
   const nowMs = Math.max(...rows.map(r => r.tagMs));
 
-  type C = { code: string; grp: string; openMs: number; days: number; leads: number; hot: number; leadsAt: number; hotAt: number; curve: number[] };
+  type C = { code: string; grp: string; openMs: number; days: number; leads: number; hot: number; leadsAt: number; hotAt: number; curve: number[]; curveLead: number[]; P: number; C: number; W: number; H: number; U: number };
   const list: C[] = [];
   for (const [code, rs] of byCourse) {
     if (rs.length < 5) continue;   // khoá quá ít dữ liệu = nhiễu (tag gõ nhầm)
     const openMs = Math.min(...rs.map(r => r.tagMs));
+    const cnt = (k: string) => rs.filter(r => r.cls === k).length;
     // BA hệ khoá riêng biệt, KHÔNG gộp: K## (BI chính), KH## (hệ khác, quy mô
     // nhỏ hơn hẳn), F# (FA). Gộp K với KH là sai: KH62 mở 18/08 (9 lead) sẽ
     // giành mất vai "khoá đang chạy" của K62 mở 15/08 (200 lead), rồi mọi khoá
     // K bị cắt theo mốc của KH — số vô nghĩa. (Bắt được lúc chạy thử 2026-09-03.)
     const grp = /^F\d/i.test(code) ? "FA" : (/^KH/i.test(code) ? "KH" : "BI");
-    list.push({ code, grp, openMs, days: Math.floor((nowMs - openMs) / DAY), leads: rs.length, hot: rs.filter(r => r.hotMs != null).length, leadsAt: 0, hotAt: 0, curve: [] });
+    list.push({ code, grp, openMs, days: Math.floor((nowMs - openMs) / DAY), leads: rs.length, hot: rs.filter(r => r.hotMs != null).length, leadsAt: 0, hotAt: 0, curve: [], curveLead: [],
+      P: cnt("P"), C: cnt("C"), W: cnt("W"), H: cnt("H"), U: cnt("U") });
   }
   if (!list.length) { console.log("[cohort] không khoá nào đủ dữ liệu"); return; }
 
@@ -119,9 +140,13 @@ export async function runCohortBuild() {
     const inWin = rs.filter(r => r.tagMs <= cut);
     c.leadsAt = inWin.length;
     c.hotAt = inWin.filter(r => r.hotMs != null && r.hotMs <= cut).length;
-    const curve: number[] = [];
-    for (let d = 0; d <= dayN; d++) { const lim = c.openMs + d * DAY; curve.push(rs.filter(r => r.hotMs != null && r.hotMs <= lim).length); }
-    c.curve = curve;
+    const curve: number[] = [], curveLead: number[] = [];
+    for (let d = 0; d <= dayN; d++) {
+      const lim = c.openMs + d * DAY;
+      curve.push(rs.filter(r => r.hotMs != null && r.hotMs <= lim).length);
+      curveLead.push(rs.filter(r => r.tagMs <= lim).length);
+    }
+    c.curve = curve; c.curveLead = curveLead;
   }
   list.sort((a, b) => b.openMs - a.openMs);
   for (const [g, c] of running) console.log(`[cohort] ${g}: khoá đang chạy ${c.code} (mở ${vnDay(c.openMs)}, ngày thứ ${c.days}) · ${c.hotAt} Hot cùng kỳ`);
@@ -161,7 +186,9 @@ export async function runCohortBuild() {
   const recs = list.map(c => ({ fields: {
     "Khoá": c.code, "Nhóm": c.grp, "Ngày mở": c.openMs, "Ngày thứ": c.days,
     "Lead cùng kỳ": c.leadsAt, "Hot cùng kỳ": c.hotAt, "Lead tổng": c.leads, "Hot tổng": c.hot,
-    "Đường Hot": JSON.stringify(c.curve), "Đang chạy": running.get(c.grp)!.code === c.code,
+    "Prospect": c.P, "Cold": c.C, "Warm": c.W, "Hot": c.H, "Chưa tag": c.U,
+    "Đường Hot": JSON.stringify(c.curve), "Đường Lead": JSON.stringify(c.curveLead),
+    "Đang chạy": running.get(c.grp)!.code === c.code,
     "Cập nhật lúc": stamp,
   } }));
   let wrote = 0;
