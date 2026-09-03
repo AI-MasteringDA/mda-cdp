@@ -261,7 +261,10 @@ td b{font-weight:550}
     <!-- TRANG SO SÁNH KHOÁ (sếp hỏi 2026-09-03: "K62 mở tới giờ được bao nhiêu,
          so khoá trước ở CÙNG mốc thì hơn hay kém"). Dữ liệu từ /api/cohort —
          bảng Cohort_Summary do job nền tính sẵn, KHÔNG dùng DATA của trang này. -->
-    <div id="pgCo" style="display:none;flex-direction:column;gap:10px;flex:1;min-height:0">
+    <!-- Trang này CUỘN được (overflow-y:auto) và các thẻ biểu đồ có chiều cao
+         tối thiểu cố định. Không dùng lưới 2-hàng "fr" như trang Tổng quan:
+         ở đây có 3 hàng biểu đồ, để "fr" thì hàng thứ 3 bị sập còn trơ tiêu đề. -->
+    <div id="pgCo" style="display:none;flex-direction:column;gap:10px;flex:1;min-height:0;overflow-y:auto">
       <div class="bar" style="justify-content:space-between">
         <div class="range">📚 <b id="coHead"></b></div>
         <div class="mini" id="coGrp"><button data-v="BI" class="on">BI (K##)</button><button data-v="FA">FA (F#)</button><button data-v="KH">KH##</button></div>
@@ -269,8 +272,8 @@ td b{font-weight:550}
       <!-- KPI = PHỄU CỦA KHOÁ ĐANG CHẠY (tới thời điểm hiện tại), KHÔNG so sánh.
            Việc so sánh khoá nằm hết ở các biểu đồ bên dưới. -->
       <div class="kpis" id="coKpis"></div>
-      <div class="charts">
-        <div class="card" style="grid-column:1/-1;min-height:250px">
+      <div class="charts" style="flex:none;grid-template-columns:repeat(2,1fr);grid-template-rows:none;grid-auto-rows:minmax(240px,auto)">
+        <div class="card" style="grid-column:1/-1">
           <div class="hd"><h3>Tích luỹ Hot theo ngày kể từ khi mở tuyển sinh</h3>
             <span class="sub" id="coSub"></span>
             <div class="legend"><span><i style="background:var(--sH)"></i>khoá đang chạy</span><span><i style="background:var(--sW)"></i>TB khoá cũ</span><span><i style="background:var(--sU)"></i>từng khoá cũ</span></div>
@@ -292,7 +295,7 @@ td b{font-weight:550}
           <div class="plot"><svg id="cCoMix"></svg></div>
         </div>
       </div>
-      <div class="card" style="flex:1;min-height:0">
+      <div class="card" style="flex:none;min-height:320px">
         <div class="hd"><h3>Bảng so sánh</h3><span class="sub">cắt tại cùng số ngày mà khoá đang chạy đã đi được</span></div>
         <div class="tblwrap"><table id="coTbl"></table></div>
       </div>
