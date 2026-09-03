@@ -17,7 +17,9 @@ const PUBLIC_ROUTES = [
 // Bot không đăng nhập Google được nên KHÔNG thể qua middleware bằng session
 // thường — thay vào đó, ?key=<RADAR_SNAPSHOT_KEY> mở đúng 2 đường dẫn cần
 // thiết (trang tĩnh + API dữ liệu) mà không mở toàn bộ app ra công khai.
-const SNAPSHOT_PATHS = ["/radar.html", "/api/radar"];
+// /api/cohort thêm 2026-09-03 — trang dashboard gọi nó để vẽ phần so sánh khoá,
+// nên bot chụp ảnh và người vào bằng mật khẩu chung đều phải qua được cửa này.
+const SNAPSHOT_PATHS = ["/radar.html", "/api/radar", "/api/cohort"];
 function isSnapshotBypass(request: NextRequest): boolean {
   const secret = process.env.RADAR_SNAPSHOT_KEY;
   if (!secret) return false;
