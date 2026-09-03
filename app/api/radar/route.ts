@@ -22,6 +22,11 @@ const g = (v: Cell): string[] => Array.isArray(v) ? v.map((x) => (typeof x === "
 const gs = (v: Cell): string => Array.isArray(v) ? (v as { text?: string }[]).map((x) => x?.text ?? "").join("") : (v == null ? "" : String(v));
 const vnDate = (ms: Cell): string | null => typeof ms === "number" ? new Date(ms + 7 * 3600 * 1000).toISOString().slice(0, 10) : null;
 const norm = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
+// MÃ KHOÁ CHUẨN. "KH62" và "K62" là CÙNG MỘT KHOÁ, chỉ khác cách sales gõ tag
+// (user chốt 2026-09-03: "KH và K như nhau, K62 và KH62 là 1"). Quy hết về K##
+// ngay tại nguồn ⇒ bộ lọc KHOÁ chỉ hiện một mục, số cộng đủ, không phải nhớ
+// chọn kèm mục KH.
+const coCode = (s: string) => s.trim().toUpperCase().replace(/^KH(\d)/, "K$1");
 // Khoá nhận diện người xuyên hệ thống: tên bên SMAX và SF thường khác nhau
 // ("K40-Bảo Lee" ↔ "Lý Hồng Bảo") nên chỉ khớp bằng 9 số cuối của điện thoại
 // và email viết thường.
@@ -91,7 +96,7 @@ function toLead(f: Record<string, Cell>, cutoff: string) {
     fa: tags.some(t => /^f\d(\.\d)?$/i.test(t.trim())),
     // Tag KHOÁ để lọc trên dashboard (K61, KH61, F3…). Viết hoa cho đồng nhất
     // vì Sales gõ lẫn lộn "k61"/"K61". 1 lead có thể mang nhiều khoá.
-    co: [...new Set(tags.filter(t => /^(kh?\d{2,3}|f\d(\.\d)?)$/i.test(t.trim())).map(t => t.trim().toUpperCase()))],
+    co: [...new Set(tags.filter(t => /^(kh?\d{2,3}|f\d(\.\d)?)$/i.test(t.trim())).map(t => coCode(t)))],
     ch: g(f["Communication Channels"]), ph: gs(f["Phone"]),
     cph: f["Chưa phản hồi"] === true,
     ky: keysOf(gs(f["Phone"]), gs(f["Email"])), re: "",
@@ -224,7 +229,7 @@ export async function GET(req: Request) {
         // được theo khoá của CẢ HAI hệ, không bị hụt khi lọc K61.
         const prodRaw = gs(f["Khoá (SF)"]).trim();
         const pm = prodRaw.match(/^(KH?\d{2,3}|F\d(?:\.\d)?)\b/i);
-        if (pm) for (const k of keys) { const s = sfCourse.get(k) ?? new Set<string>(); s.add(pm[1].toUpperCase()); sfCourse.set(k, s); }
+        if (pm) for (const k of keys) { const s = sfCourse.get(k) ?? new Set<string>(); s.add(coCode(pm[1])); sfCourse.set(k, s); }
         // CHỐNG ĐẾM ĐÔI — chỉ bỏ khi SMAX THẬT SỰ đếm người này là Hot. Trước
         // đây bỏ khi có BẤT KỲ tag SMAX nào, nên ai có tag "SF_Done"/"BI Student"
         // mà không có "Hot Lead" thì lọt khe: SF bỏ vì "SMAX đếm rồi", còn SMAX
@@ -270,7 +275,7 @@ export async function GET(req: Request) {
           n: sfName || smaxName || "(?)", n2: sfName && smaxName && sfName !== smaxName ? smaxName : "",
           d: null, ha, dMs: null, haMs: haMs2, cd: ha ? { H: ha } : {}, up: false, upFrom: "", cls: ["H"],
           bi: /^KH?\d/i.test(prod), fa: /^F\d/i.test(prod),
-          co: m ? [m[1].toUpperCase()] : [],
+          co: m ? [coCode(m[1])] : [],
           ch: ["Salesforce"], ph: gs(f["Phone"]), cph: false, sf: true,
           ky: keys, re: "",
         });

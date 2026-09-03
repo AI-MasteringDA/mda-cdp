@@ -207,7 +207,7 @@ td b{font-weight:550}
       </div>
       <span class="lbl" style="padding-left:8px">Khoá</span>
       <div class="calwrap">
-        <button class="calbtn" id="coBtn" title="Lọc theo tag khoá trên SMAX (K61, F3…)">🎓 Tất cả khoá</button>
+        <button class="calbtn" id="coBtn" title="Lọc theo khoá (K62, F4… — KH62 đã gộp vào K62)">🎓 Tất cả khoá</button>
         <div class="cal" id="coPop"><div id="coList" class="colist"></div>
           <div class="calfoot"><button class="calbtn" id="coClear">Bỏ chọn</button><button class="calbtn" id="coClose">Xong</button></div>
         </div>
@@ -804,7 +804,7 @@ async function loadCohort(){
     const r=await fetch(u,{cache:"no-store"}); const j=await r.json();
     if(my!==coReq)return;              // đã có lệnh mới hơn → bỏ kết quả cũ
     if(j.error)throw new Error(j.error);
-    CO=j; coLoadedFor="all"; renderCohort();
+    CO=j; coLoadedFor="all";
   }catch(e){
     if(my===coReq)$("coSub").textContent="không tải được dữ liệu khoá — "+e.message;
   }
@@ -885,10 +885,17 @@ function coCalc(){
   list.sort((a,b)=>b.openDay.localeCompare(a.openDay));
   return {list,cur:newest,dayN};
 }
+/* Trang khoá dùng ĐÚNG cửa sổ của nút "Tất cả" — không được cắt ngắn.
+   Đã thử cắt còn ~490 ngày (tính từ khoá mở sớm nhất) cho nhanh: SAI, hụt 5
+   lead K62. Lý do: một lead chat từ 2 năm trước, hôm nay mới được gắn tag K62 —
+   ngày chat đầu của họ nằm ngoài cửa sổ ngắn nên bị rơi, trong khi trang Tổng
+   quan (luôn xin ALL_DAYS) vẫn đếm. Hai trang lệch nhau ngay. */
 function renderCohort(){
   if(!CO)return;
   const R=coCalc();
-  document.body.dataset.coGrp=S.grp;
+  // Chỉ báo "đã render xong" khi KHÔNG còn tải thêm dữ liệu — nếu không, bot
+  // chụp ngay lúc mới có nửa số khoá.
+  if(!loading)document.body.dataset.coGrp=S.grp;
   if(!R){$("coKpis").innerHTML="";$("coTbl").innerHTML="";$("coHead").textContent="—";
     $("coSub").textContent="không có khoá nào khớp bộ lọc hiện tại";return}
   const cs=R.list, cur=R.cur, dayN=R.dayN;
@@ -1038,6 +1045,9 @@ function chartCoMix(cs){
    API mặc định chỉ trả 40 ngày cho nhanh. Khoá như K61 chạy suốt 3 tháng nên
    40 ngày là không đủ — khi người dùng chọn kỳ dài hơn phần đang có thì gọi lại
    API với cửa sổ lớn hơn rồi vẽ lại. Chỉ tải thêm, không bao giờ thu hẹp. */
+// Cửa sổ của kỳ "Tất cả". Dùng CHUNG cho nút kỳ và trang Theo khoá — hai nơi
+// xin hai cửa sổ khác nhau là số sẽ lệch nhau.
+const ALL_DAYS=3000;
 let LOADED=DATA.days||40;
 let loading=false;
 async function ensureWindow(n){
@@ -1046,7 +1056,10 @@ async function ensureWindow(n){
   const lbl=$("rangeLbl"),old=lbl.textContent;
   lbl.textContent="đang tải dữ liệu…";
   try{
-    const r=await fetch("/api/radar?days="+n,{cache:"no-store"});
+    // PHẢI kèm key như lần tải đầu: mở trang bằng ?key= (bot chụp ảnh, link báo
+    // cáo) thì thiếu key sẽ bị middleware đá về trang đăng nhập, fetch nhận HTML
+    // và chết ở r.json() ⇒ "Tất cả"/"30 ngày" im lặng không tải thêm được gì.
+    const r=await fetch("/api/radar?days="+n+(KEY?"&key="+encodeURIComponent(KEY):""),{cache:"no-store"});
     if(!r.ok)throw new Error("API "+r.status);
     const j=await r.json();
     if(j.error)throw new Error(j.error);
@@ -1060,7 +1073,14 @@ async function ensureWindow(n){
     throw err;
   }finally{loading=false}
 }
+// Trang "Theo khoá" mặc định KỲ = "Tất cả" (user chốt 2026-09-03: "default khi
+// chụp cũng như khi mở thì tất cả"). Cửa sổ mặc định chỉ tải ~40 ngày nên các
+// khoá cũ (K51…K59) chưa có dữ liệu ⇒ biểu đồ so sánh trống một nửa.
+// Cờ này để: user tự bấm 7/14/30 khi ĐANG ở trang khoá thì tôn trọng lựa chọn
+// đó, không tự đá về "Tất cả" nữa.
+let coDaysTouched=false;
 $("segDays").addEventListener("click",async e=>{const b=e.target.closest("button");if(!b)return;
+  if($("pgCo").style.display!=="none")coDaysTouched=true;
   [...$("segDays").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");
   const raw=b.dataset.v;
   // "am"/"pm" = khung giờ cố định (không phải số ngày) → không qua ensureWindow,
@@ -1072,7 +1092,7 @@ $("segDays").addEventListener("click",async e=>{const b=e.target.closest("button
   S.customWin=null;
   const v=+raw;
   S.days=v;S.from=S.to=null;S.pick=[];syncCalBtn();
-  await ensureWindow(v>=9999?3000:v);
+  await ensureWindow(v>=9999?ALL_DAYS:v);
   renderAll()});
 /* ---- calendar picker (chọn 1 ngày hoặc khoảng) ---- */
 let MIN_D=addDays(asofDate,-((DATA.days||40)-1));const MAX_D=asofDate;
@@ -1147,10 +1167,23 @@ $("navPg").addEventListener("click",e=>{const b=e.target.closest("button");if(!b
   $("pgOv").style.display=p==="ov"?"flex":"none";
   $("pgLs").style.display=p==="ls"?"block":"none";
   $("pgCo").style.display=p==="co"?"flex":"none";
-  // Trang khoá dùng nguồn dữ liệu RIÊNG (/api/cohort) nên tải lần đầu vào trang;
-  // các bộ lọc kỳ/kênh ở thanh trên không áp vào đây.
-  // CO không còn phụ thuộc BI/FA nên tải đúng MỘT lần cho cả phiên.
-  if(p==="co"){ if(CO)renderCohort(); else loadCohort(); return }
+  // CO (bảng ngày mở khoá) không phụ thuộc BI/FA nên tải đúng MỘT lần cả phiên.
+  if(p==="co"){
+    (async()=>{
+      if(!CO)await loadCohort();          // biết ngày mở của khoá cũ nhất trước
+      // Mặc định "Tất cả" + tải đủ lịch sử, nếu user chưa tự chọn kỳ khác.
+      if(!coDaysTouched&&(S.customWin||S.days<9999)){
+        S.customWin=null;S.days=9999;S.from=S.to=null;S.pick=[];
+        [...$("segDays").children].forEach(x=>x.classList.toggle("on",x.dataset.v==="9999"));
+        syncCalBtn();
+        $("coSub").textContent="đang tải lịch sử các khoá cũ…";
+        await ensureWindow(ALL_DAYS);
+        $("rangeLbl").textContent=rangeLbl();buildCourses();
+      }
+      renderCohort();
+    })();
+    return;
+  }
   renderAll()});
 $("tblTabs").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
   [...$("tblTabs").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.tbl=b.dataset.v;if(A)tableCard(A)});
@@ -1162,7 +1195,10 @@ for(const [id,fn] of [["expXlsx",expXlsx],["expCsv",expCsv]])
     try{fn()}catch(err){showFatal("khi xuất file — "+err.message)}
     finally{setTimeout(()=>{b.disabled=false},600)}
   });
-/* ---- lọc theo KHOÁ (tag SMAX: K61, KH61, F3…) ---- */
+/* ---- lọc theo KHOÁ (tag SMAX: K62, F3…) ----
+   "KH62" đã được /api/radar quy về "K62" ngay tại nguồn (user chốt 2026-09-03:
+   "KH và K như nhau"), nên danh sách dưới đây chỉ còn MỘT mục cho mỗi khoá và
+   số đã cộng đủ — không phải nhớ chọn kèm mục KH nữa. */
 // Danh sách khoá sinh từ chính dữ liệu, không hardcode — khoá mới mở là tự có.
 // Xếp theo số lead giảm dần để khoá đang chạy nằm trên đầu.
 function syncCoBtn(){
@@ -1208,7 +1244,7 @@ $("pinBtn").addEventListener("click",()=>$("side").classList.toggle("pinned"));
   const qDays=qs.get("days"),qGrp=qs.get("grp");
   if(qDays!=null){
     const btn=[...$("segDays").children].find(x=>x.dataset.v===qDays);
-    if(btn)btn.click();
+    if(btn){btn.click();coDaysTouched=true}   // link nói rõ kỳ ⇒ tôn trọng
   }
   if(qGrp==="bi"||qGrp==="fa"||qGrp==="all"){
     const btn=[...$("segGrp").children].find(x=>x.dataset.v===qGrp);

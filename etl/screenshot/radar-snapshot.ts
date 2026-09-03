@@ -79,7 +79,7 @@ async function shoot(page: import("playwright").Page, win: string, grp: string):
     await page.evaluate(() => { delete document.body.dataset.coGrp });
     await page.click('#navPg button[data-p="co"]');
     await page.click(`#segGrp button[data-v="${ck}"]`);
-    await page.waitForFunction(g => document.body.dataset.coGrp === g, ck, { timeout: 25_000 })
+    await page.waitForFunction(g => document.body.dataset.coGrp === g, ck, { timeout: 90_000 })
       .catch(() => console.log(`[snapshot] ⚠ chờ render hệ ${ck} quá hạn — ảnh có thể chưa đúng`));
     // Chuột đang nằm trên thanh bên sau cú click ⇒ thanh bên bung ra che mất
     // cột đầu của bảng. Dời chuột ra giữa trang trước khi chụp.
@@ -153,7 +153,7 @@ async function runningCourse(page: import("playwright").Page, grp: string) {
     await page.evaluate(() => { delete document.body.dataset.coGrp });
     await page.click('#navPg button[data-p="co"]');
     await page.click(`#segGrp button[data-v="${grp}"]`);
-    await page.waitForFunction(g => document.body.dataset.coGrp === g, grp, { timeout: 25_000 });
+    await page.waitForFunction(g => document.body.dataset.coGrp === g, grp, { timeout: 90_000 });
     await page.waitForTimeout(600);
     const head = (await page.locator("#coHead").textContent()) || "";
     const rows = await page.$$eval("#coKpis .kpi", els => els.map(e => ({

@@ -36,7 +36,7 @@ const WIN = (process.argv[2] || "pm").toLowerCase();
     await p.evaluate(() => { delete document.body.dataset.coGrp });
     await p.click('#navPg button[data-p="co"]');
     await p.click(`#segGrp button[data-v="${grp}"]`);
-    await p.waitForFunction(g => document.body.dataset.coGrp === g, grp, { timeout: 25000 });
+    await p.waitForFunction(g => document.body.dataset.coGrp === g, grp, { timeout: 90000 });
     await p.waitForTimeout(600);
     const head = (await p.locator("#coHead").textContent()) || "";
     const rows = await p.$$eval("#coKpis .kpi", els => els.map(e => ({
