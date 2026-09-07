@@ -49,6 +49,9 @@ const FULL = process.env.BRIDGE_FULL === "1" || nowMin < 8;
 // Cửa sổ nhìn lại. Rộng gấp nhiều lần nhịp cron để lỡ vài lần chạy hỏng vẫn
 // không sót; phần vượt cửa sổ do lần đối soát đầu giờ quét lại.
 const LOOKBACK_MIN = Number(process.env.BRIDGE_LOOKBACK_MIN || 180);
+// Ô GIỜ ĐƯỢC PHÉP KÊU vào group: 9h sáng VN, và chỉ ở nhịp đối soát (phút < 8)
+// nên mỗi ngày đúng 1 lần dù bridge chạy 7 phút/lần.
+const ALERT_SLOT = FULL && new Date(Date.now() + 7 * 3600_000).getUTCHours() === 9;
 // BRIDGE_DRYRUN=1 — xem sẽ tạo dòng nào mà KHÔNG ghi (dùng trước mỗi lần đổi
 // luật tạo lead, vì tạo nhầm ra dòng trùng là đếm đôi Hot lead).
 const DRYRUN = process.env.BRIDGE_DRYRUN === "1";
@@ -167,10 +170,10 @@ export async function runSmaxLarkBridge() {
     if (tk0.daysLeft < 0) console.error(`[bridge] ⛔ TOKEN SMAX ĐÃ HẾT HẠN ${d} UTC — phải cấp lại, mọi lời gọi sẽ 401`);
     else if (tk0.daysLeft <= 7) console.warn(`[bridge] ⚠ TOKEN SMAX chỉ còn ${tk0.daysLeft} ngày (hết hạn ${d} UTC) — cấp lại sớm`);
     else console.log(`[bridge] token SMAX còn ${tk0.daysLeft} ngày (hết hạn ${d} UTC)`);
-    // NHẮC TRƯỚC KHI CHẾT: còn <= 7 ngày thì mỗi ngày kêu 1 lần lúc 9h sáng VN.
-    // Nhắc trước mới kịp xoay; đợi hết hạn rồi mới báo là đã mất dữ liệu.
-    const vnHour = new Date(Date.now() + 7 * 3600_000).getUTCHours();
-    if (tk0.daysLeft >= 0 && tk0.daysLeft <= 7 && FULL && vnHour === 9) {
+    // NHỊP KÊU (user chốt 2026-09-07): còn > 7 ngày thì IM HOÀN TOÀN — chuyện
+    // này chưa đủ quan trọng để nhắc hằng ngày. Vào 7 ngày cuối mới kêu, mỗi
+    // ngày ĐÚNG 1 LẦN lúc 9h sáng VN. Xoay token xong là tự tắt.
+    if (tk0.daysLeft >= 0 && tk0.daysLeft <= 7 && ALERT_SLOT) {
       await alertLark("⚠️ TOKEN SMAX SẮP HẾT HẠN", "orange",
         `Token SMAX còn **${tk0.daysLeft} ngày** — hết hạn **${dVN} (giờ VN)**.
 
@@ -200,7 +203,11 @@ Hết hạn là bridge ngừng đẩy dữ liệu và dashboard đứng số nga
       ? `Token SMAX đã hết hạn ${tk0.exp.toISOString().slice(0, 16).replace("T", " ")} UTC.`
       : "SMAX trả 0 khách (401/403 hoặc SMAX đang lỗi).";
     console.error(`[bridge] ⛔ ${why} DỪNG, không ghi gì (tránh xoá trắng).`);
-    if (FULL) await alertLark("🚨 DỮ LIỆU SMAX ĐANG ĐỨNG", "red",
+    // Cũng 1 lần/ngày, KHÔNG phải mỗi giờ (user chốt 2026-09-07 "k cần bắn mỗi
+    // ngày đâu"). Đến nước này thì đã có 7 ngày nhắc trước rồi, kêu dày thêm
+    // cũng không giúp gì mà chỉ làm loãng group. Job GitHub vẫn đỏ MỌI lần
+    // chạy — chỗ đó không tốn tin nhắn của ai.
+    if (ALERT_SLOT) await alertLark("🚨 DỮ LIỆU SMAX ĐANG ĐỨNG", "red",
       `${why}
 
 Bridge SMAX → Lark **đã ngừng đẩy dữ liệu**. Dashboard và báo cáo hằng ngày sẽ giữ nguyên số cũ cho tới khi có token mới.
