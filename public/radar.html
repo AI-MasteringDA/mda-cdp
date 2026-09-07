@@ -215,7 +215,12 @@ td b{font-weight:550}
       <span class="lbl" style="padding-left:8px">Kênh</span>
       <span id="chipCh" style="display:flex;gap:5px;flex-wrap:wrap"></span>
       <button class="chip" id="chipClear">✕</button>
-      <div class="range">🗓 <b id="rangeLbl"></b></div>
+      <!-- MỘT chỗ duy nhất báo "đang xem kỳ nào". Trước 2026-09-07 trang khoá
+           có thêm một dòng riêng ngay dưới thanh lọc ⇒ hai dòng chồng nhau, mỗi
+           dòng nói một chuyện khác (một cái "toàn bộ 2253 ngày", một cái "ngày
+           thứ 23") — user phản ánh rối. Nay đổi nội dung tại chỗ. -->
+      <div class="range" id="rangeBox">🗓 <b id="rangeLbl"></b></div>
+      <div class="range" id="coBox" style="display:none">📚 <b id="coHead"></b></div>
     </div>
 
     <div id="pgOv" style="display:flex;flex-direction:column;gap:10px;flex:1;min-height:0">
@@ -268,7 +273,6 @@ td b{font-weight:550}
     <div id="pgCo" style="display:none;flex-direction:column;gap:10px;flex:1;min-height:0;overflow-y:auto">
       <!-- KHÔNG có hàng nút lọc riêng: trang này dùng luôn bộ lọc BI/FA ở thanh
            trên (#segGrp), theo yêu cầu user 2026-09-03. -->
-      <div class="bar"><div class="range">📚 <b id="coHead"></b></div></div>
       <!-- KPI = PHỄU CỦA KHOÁ ĐANG CHẠY (tới thời điểm hiện tại), KHÔNG so sánh.
            Việc so sánh khoá nằm hết ở các biểu đồ bên dưới. -->
       <div class="kpis" id="coKpis"></div>
@@ -941,6 +945,8 @@ function syncBar(){
     b.style.display = (co && CO_HIDE_DAYS.includes(b.dataset.v)) ? "none" : "";
   for(const el of [$("coBtn").parentElement, $("coBtn").parentElement.previousElementSibling])
     if(el) el.style.display = co ? "none" : "";
+  $("rangeBox").style.display = co ? "none" : "";
+  $("coBox").style.display    = co ? "" : "none";
 }
 function renderCohort(){
   if(!CO)return;
@@ -951,12 +957,12 @@ function renderCohort(){
   if(!R){$("coKpis").innerHTML="";$("coTbl").innerHTML="";$("coHead").textContent="—";
     $("coSub").textContent="không có khoá nào khớp bộ lọc hiện tại";return}
   const cs=R.list, cur=R.cur, dayN=R.dayN;
-  const pick=S.to||S.from;
-  const cut=pick?" · cắt tại "+pick.slice(8)+"/"+pick.slice(5,7):"";
-  $("coSub").textContent="so "+cs.length+" khoá tại mốc ngày thứ "+dayN+cut
+  $("coSub").textContent="so "+cs.length+" khoá tại cùng mốc ngày thứ "+dayN
     +" · cùng nguồn & cùng cách đếm với trang Tổng quan";
   const cutting=dayN<cur.days;
-  $("coHead").textContent=cur.code+" · "+(cutting?"tính tới ngày thứ "+dayN+" ("+fmtD(addDays(cur.openDay,dayN))+")":"ngày thứ "+cur.days)+" · mở "+(cur.openDay||"—");
+  const hetNgay=cutting?addDays(cur.openDay,dayN):asofDate;
+  $("coHead").textContent=cur.code+" · ngày thứ "+(cutting?dayN:cur.days)
+    +" · "+fmtD(cur.openDay)+" → "+fmtD(hetNgay);
   const tot=cur.leads||0, pc=v=>tot?Math.round(v/tot*100)+"% tổng":"";
   const K=[["Lead của khoá",tot,"",""],
            ["🔥 Hot",cur.H,"--sH",pc(cur.H)],

@@ -252,7 +252,7 @@ async function main() {
       // Dùng ID chứ KHÔNG dùng class ".range": từ khi có trang khoá, class đó
       // khớp 2 phần tử ⇒ Playwright ném lỗi strict mode, hỏng cả lần bắn.
       const sub = win.startsWith("cohort")
-        ? await page.locator("#coSub").innerText().catch(() => "")
+        ? await page.locator("#coHead").innerText().catch(() => "")   // "K62 · ngày thứ 23 · 15/08 → 07/09" — gọn và đủ
         : await page.locator("#rangeLbl").innerText().catch(() => "");
       const fullLabel = sub ? `${label} (${sub.replace(/^🗓\s*/, "")})` : label;
       writeFileSync(`radar-snapshot-${grp}-${win.replace(/:/g, "-")}.png`, png);  // ":" là ký tự cấm trong tên file Windows // giữ lại làm bằng chứng khi debug local
