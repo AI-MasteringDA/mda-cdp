@@ -228,24 +228,24 @@ td b{font-weight:550}
 
     <div class="charts">
       <div class="card" id="cardStack">
-        <div class="hd"><h3>Lead mới theo ngày</h3><span class="sub">theo ngày chat đầu · đã loại khách quay lại (reMKT) · số trên cột = tổng</span>
+        <div class="hd"><h3>Lead mới theo ngày</h3><span class="sub" id="subStack">theo ngày chat đầu · đã loại khách quay lại (reMKT) · số trên cột = tổng</span>
           <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sU)"></i>Chưa gắn tag</span></div></div>
         <div class="plot"><svg id="cStack"></svg></div>
       </div>
       <div class="card">
-        <div class="hd"><h3>Lên Hot theo ngày</h3><span class="sub">SMAX (giờ gắn tag) + Salesforce (lead chưa có trên SMAX)</span></div>
+        <div class="hd"><h3>Lên Hot theo ngày</h3><span class="sub" id="subHot">SMAX (giờ gắn tag) + Salesforce (lead chưa có trên SMAX)</span></div>
         <div class="plot"><svg id="cHot"></svg></div>
       </div>
       <div class="card">
-        <div class="hd"><h3>Nhịp lead vào</h3><span class="sub">đậm = TB trượt 7 ngày</span></div>
+        <div class="hd"><h3>Nhịp lead vào</h3><span class="sub" id="subLine">đậm = TB trượt 7 ngày</span></div>
         <div class="plot"><svg id="cLine"></svg></div>
       </div>
       <div class="card">
-        <div class="hd"><h3>Kênh</h3><span class="sub">lead mới trong kỳ</span></div>
+        <div class="hd"><h3>Kênh</h3><span class="sub" id="subChan">lead mới trong kỳ</span></div>
         <div class="plot"><svg id="cChan"></svg></div>
       </div>
       <div class="card">
-        <div class="hd"><h3>BI vs FA</h3>
+        <div class="hd"><h3>BI vs FA</h3><span class="sub" id="subGrp"></span>
           <div class="legend"><span><i style="background:var(--pill)"></i>BI</span><span><i style="background:var(--sU)"></i>FA</span></div></div>
         <div class="plot"><svg id="cGrp"></svg></div>
       </div>
@@ -442,9 +442,9 @@ function aggCustom(cw){
   r.newWin.sort((a,b)=>(b.d||"").localeCompare(a.d||""));
   return r;
 }
-function agg(){
-  if(S.customWin)return aggCustom(S.customWin);
-  const span=spanDays();
+function agg(spanArg){
+  if(!spanArg&&S.customWin)return aggCustom(S.customWin);
+  const span=spanArg||spanDays();
   const {gran,keys,lab,dIdx}=bucketize(span);
   const days=keys,idx=dIdx;
   const prevSet=new Set(span.map(d=>addDays(d,-span.length)));
@@ -771,9 +771,59 @@ function tableCard(a){
 }
 /* ---- wiring ---- */
 let A=null;
+/* ─────────────────────────────────────────────────────────────────────────
+   CỬA SỔ CỐ ĐỊNH CHO CÁC BIỂU ĐỒ (user chốt 2026-09-07).
+
+   Hàng thẻ số ở trên đi theo bộ lọc kỳ — đúng, vì đó là con số của kỳ đó.
+   Nhưng 5 biểu đồ bên dưới mà cũng đi theo thì thẻ "Hôm qua" chỉ còn ĐÚNG MỘT
+   CỘT: không thấy nhịp, không thấy xu hướng, ô Kênh trống trơn. Nhìn vào không
+   đọc được gì.
+
+   Nên các biểu đồ luôn vẽ TỪ NGÀY MỞ KHOÁ ĐANG TUYỂN SINH tới hôm nay (BI theo
+   K62, FA theo F4). Vẫn tôn trọng bộ lọc mảng / kênh / khoá — chỉ CỐ ĐỊNH
+   khoảng ngày.
+   ───────────────────────────────────────────────────────────────────────── */
+function fixedDays(){
+  const o=coRunningOpen();
+  if(!o)return null;                    // chưa có bảng khoá → tạm dùng kỳ đang chọn
+  const from=o<MIN_D?MIN_D:o;           // không đòi xa hơn phần dữ liệu đang có
+  return from<=asofDate?rangeDays(from,asofDate):null;
+}
+/** Câu mô tả khoảng cố định, gắn vào phụ đề từng biểu đồ. */
+function fixedNote(ngan){
+  const d=fixedDays(); if(!d)return "";
+  const ky=fmtD(d[0])+" → "+fmtD(d[d.length-1]), ma=coRunningCode()||"khoá";
+  return ngan?(ma+" · "+ky):("từ ngày mở "+ma+" · "+ky);
+}
+function coRunningCode(){
+  let best=null;
+  for(const c of (CO&&CO.courses)||[]){
+    if(!c.openDay)continue;
+    if(S.grp==="bi"&&/^F\d/i.test(c.code))continue;
+    if(S.grp==="fa"&&!/^F\d/i.test(c.code))continue;
+    if(!best||c.openDay>best.openDay)best=c;
+  }
+  return best&&best.code;
+}
 function renderAll(){
   try{
-    $("rangeLbl").textContent=rangeLbl();A=agg();kpis(A);chartStack(A);chartHot(A);chartLine(A);chartGrp(A);chartChan(A);tableCard(A);
+    $("rangeLbl").textContent=rangeLbl();
+    A=agg();                       // theo bộ lọc kỳ → hàng thẻ số + bảng chi tiết
+    const fd=fixedDays();
+    const F=fd?agg(fd):A;          // cố định từ ngày mở khoá → 5 biểu đồ
+    kpis(A);tableCard(A);
+    chartStack(F);chartHot(F);chartLine(F);chartGrp(F);chartChan(F);
+    // Phụ đề: card rộng nhất ghi đủ chữ "từ ngày mở"; mấy card hẹp chỉ ghi
+    // "K62 · 15/08 → 07/09" cho khỏi xuống dòng đè lên biểu đồ.
+    const dai=fd?fixedNote():"", ngan=fd?fixedNote(true):"";
+    for(const [id,txt,full] of [["subStack","theo ngày chat đầu · đã loại khách quay lại (reMKT) · số trên cột = tổng",1],
+                                ["subHot","SMAX giờ gắn tag + Salesforce",0],
+                                ["subLine","đậm = TB trượt 7 ngày",0],
+                                ["subChan","lead mới",0],["subGrp","",0]]){
+      const el=$(id); if(!el)continue;
+      const note=full?dai:ngan;
+      el.textContent=note?(txt?txt+" · "+note:note):txt;
+    }
     // Trang "Theo khoá" vẽ lại luôn khi đang mở → nút KỲ / KÊNH / KHOÁ / BI-FA
     // đều ăn sang trang đó (user yêu cầu 2026-09-03). Số của nó tính từ chính
     // DATA.leads nên không cần gọi lại API.
@@ -1329,6 +1379,29 @@ $("pinBtn").addEventListener("click",()=>$("side").classList.toggle("pinned"));
 })();
 
 renderAll();
+
+/* NẠP BẢNG KHOÁ NGAY KHI MỞ TRANG.
+   Các biểu đồ ở trang Tổng quan cần biết NGÀY MỞ khoá đang tuyển sinh để cố
+   định cửa sổ (xem fixedDays). Bảng chỉ ~17 dòng nên rất nhẹ. Tải xong thì nới
+   cửa sổ dữ liệu cho đủ tuổi khoá — F4 đã chạy 47 ngày, quá cửa sổ mặc định 40
+   — rồi vẽ lại. Hỏng bước này thì biểu đồ chạy theo kỳ như cũ, không vỡ trang. */
+(async()=>{
+  try{
+    if(!CO)await loadCohort();
+    if(!CO)return;
+    const run={};
+    for(const c of (CO.courses||[])){
+      if(!c.openDay)continue;
+      const g=/^F\d/i.test(c.code)?"fa":"bi";
+      if(!run[g]||c.openDay>run[g])run[g]=c.openDay;
+    }
+    let need=40;
+    for(const d of Object.values(run))need=Math.max(need,dDiff(d,asofDate)+2);
+    await ensureWindow(need);
+    renderAll();
+  }catch(e){ console.warn("[radar] không nạp được bảng khoá:",e.message) }
+})();
+
 requestAnimationFrame(()=>renderAll()); /* render lần 2 sau khi layout ổn định để chart đo đúng kích thước */
 addEventListener("resize",()=>{clearTimeout(window.__rz);window.__rz=setTimeout(renderAll,120)});
 </script>
