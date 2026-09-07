@@ -49,6 +49,29 @@ const REPORTS = [
   { win: "cohort:FA", grp: "all", label: "Khoá FA — so với các khoá trước", color: "orange" },
 ];
 
+/** Tắt hẳn bảng chú giải trước khi chụp — di chuột ra chỗ khác vẫn có thể còn
+ *  sót nếu con trỏ dừng đúng vùng bắt sự kiện của biểu đồ. */
+async function hideTip(page: import("playwright").Page) {
+  await page.evaluate(() => { const t = document.getElementById("tip"); if (t) t.style.display = "none"; });
+}
+
+/**
+ * BẤM NÚT BẰNG DOM, KHÔNG DÙNG page.click() CỦA PLAYWRIGHT.
+ *
+ * page.click() kiểm tra "điểm cần bấm có bị phần tử khác che không" rồi mới
+ * bấm. Thanh lọc của dashboard tự xuống hàng khi hẹp, và hai popover (lịch,
+ * chọn khoá) nằm chồng lên vùng nút — đủ để Playwright coi là bị che, chờ hết
+ * 30 giây rồi ném lỗi. Đo trên GitHub Actions: hỏng 4/8 lần chạy gần nhất
+ * (03, 04, 05, 06/09) — mất trắng cả loạt báo cáo hôm đó.
+ *
+ * Gọi thẳng el.click() thì bỏ qua bước kiểm tra ấy. Vẫn là cú bấm thật, vẫn
+ * chạy đúng handler của trang, chỉ khác là không quan tâm ai đang nằm đè lên.
+ */
+async function tap(page: import("playwright").Page, sel: string) {
+  await page.waitForSelector(sel, { state: "attached", timeout: 20_000 });
+  await page.$eval(sel, (el) => (el as HTMLElement).click());
+}
+
 async function shoot(page: import("playwright").Page, win: string, grp: string): Promise<Buffer> {
   // "cohort:<hệ>" — trang So sánh khoá. Trang này có nguồn dữ liệu RIÊNG
   // (/api/cohort) nên không đụng tới bộ lọc kỳ/kênh; chỉ cần vào trang, chọn hệ
@@ -60,8 +83,8 @@ async function shoot(page: import("playwright").Page, win: string, grp: string):
     // dòng của hệ trước vẫn còn nên chờ xong ngay, chụp nhầm dữ liệu cũ
     // (gặp 2026-09-03: thẻ "Khoá BI" hiện số của FA).
     await page.evaluate(() => { delete document.body.dataset.coGrp });
-    await page.click('#navPg button[data-p="co"]');
-    await page.click(`#segGrp button[data-v="${ck}"]`);
+    await tap(page, '#navPg button[data-p="co"]');
+    await tap(page, `#segGrp button[data-v="${ck}"]`);
     await page.waitForFunction(g => document.body.dataset.coGrp === g, ck, { timeout: 90_000 })
       .catch(() => console.log(`[snapshot] ⚠ chờ render hệ ${ck} quá hạn — ảnh có thể chưa đúng`));
     // Chuột đang nằm trên thanh bên sau cú click ⇒ thanh bên bung ra che mất
@@ -78,10 +101,10 @@ async function shoot(page: import("playwright").Page, win: string, grp: string):
   // logic) — dashboard tự lo phần ensureWindow/render, xem "DEEP LINK" trong
   // public/radar.html. Kỳ dài (30 ngày) cần chờ ensureWindow tải thêm dữ liệu
   // + biểu đồ gom lại theo tuần, nên đợi lâu hơn kỳ ngắn.
-  await page.click('#navPg button[data-p="ov"]');
-  await page.click(`#segDays button[data-v="${win}"]`);
+  await tap(page, '#navPg button[data-p="ov"]');
+  await tap(page, `#segDays button[data-v="${win}"]`);
   await page.waitForTimeout(win === "30" ? 1800 : 700);
-  await page.click(`#segGrp button[data-v="${grp}"]`);
+  await tap(page, `#segGrp button[data-v="${grp}"]`);
   await page.waitForTimeout(1200);
   await hideTip(page);
   return await page.screenshot({ fullPage: false });
@@ -115,9 +138,9 @@ async function uploadImage(tk: string, png: Buffer): Promise<string> {
  * máy không tự sinh được. User đã chốt "dữ liệu nào có thì bắn".
  */
 async function readKpis(page: import("playwright").Page, win: string, grp: string) {
-  await page.click('#navPg button[data-p="ov"]');
-  await page.click(`#segDays button[data-v="${win}"]`); await page.waitForTimeout(700);
-  await page.click(`#segGrp button[data-v="${grp}"]`); await page.waitForTimeout(1200);
+  await tap(page, '#navPg button[data-p="ov"]');
+  await tap(page, `#segDays button[data-v="${win}"]`); await page.waitForTimeout(700);
+  await tap(page, `#segGrp button[data-v="${grp}"]`); await page.waitForTimeout(1200);
   // textContent chứ KHÔNG innerText: CSS có text-transform:uppercase nên
   // innerText trả "LEAD MỚI", không khớp tên mục khi tra cứu.
   const rows = await page.$$eval("#kpis .kpi", els => els.map(e => ({
@@ -139,8 +162,8 @@ async function readKpis(page: import("playwright").Page, win: string, grp: strin
 async function runningCourse(page: import("playwright").Page, grp: string) {
   try {
     await page.evaluate(() => { delete document.body.dataset.coGrp });
-    await page.click('#navPg button[data-p="co"]');
-    await page.click(`#segGrp button[data-v="${grp}"]`);
+    await tap(page, '#navPg button[data-p="co"]');
+    await tap(page, `#segGrp button[data-v="${grp}"]`);
     await page.waitForFunction(g => document.body.dataset.coGrp === g, grp, { timeout: 90_000 });
     await page.waitForTimeout(600);
     const head = (await page.locator("#coHead").textContent()) || "";
@@ -155,8 +178,15 @@ async function runningCourse(page: import("playwright").Page, grp: string) {
              H: g("🔥 Hot"), W: g("Warm"), C: g("Cold"), P: g("Prospect"), Un: g("Khác / chưa tag") };
   } catch { return null }   // thiếu phần khoá thì vẫn bắn được phần còn lại
 }
+// RADAR_DRY_RUN=1 — chạy trọn luồng (mở trang, bấm lọc, chụp, upload ảnh)
+// nhưng KHÔNG gửi vào group. Dùng để kiểm sau khi sửa code mà không làm phiền
+// 7 người trong nhóm. Thêm 2026-09-07 sau khi một lần sửa làm hỏng file mà
+// không ai phát hiện tới lúc lịch chạy.
+const DRY = process.env.RADAR_DRY_RUN === "1";
+
 async function sendText(bi: Kpi, fa: Kpi, cBI: Course, cFA: Course) {
   const card = buildCard(bi, fa, cBI, cFA);
+  if (DRY) { console.log("[snapshot] [CHẠY THỬ] bỏ qua gửi thẻ chữ"); return; }
   const r = await fetch(WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(card) }).then(r => r.json());
   if (r.code !== 0 && r.StatusCode !== 0) throw new Error(`gửi thẻ chữ lỗi: ${JSON.stringify(r)}`);
 }
@@ -170,6 +200,7 @@ async function sendCard(imageKey: string, label: string, color: string, win: str
   const deepLink = win.startsWith("cohort")
     ? `${BASE}/radar.html?pg=co&grp=${(win.split(":")[1] || "BI").toLowerCase()}`
     : `${BASE}/radar.html?days=${win}&grp=${grp}`;
+  if (DRY) { console.log(`[snapshot] [CHẠY THỬ] bỏ qua gửi thẻ ảnh "${label}"`); return; }
   const card = {
     msg_type: "interactive",
     card: {
@@ -213,7 +244,7 @@ async function main() {
       const cBI = await runningCourse(page, "bi");
       const cFA = await runningCourse(page, "fa");
       await sendText(bi, fa, cBI, cFA);
-      console.log("[snapshot] [thẻ chữ] đã gửi vào group ✅");
+      if (!DRY) console.log("[snapshot] [thẻ chữ] đã gửi vào group ✅");
     } catch (e) {
       console.error(`[snapshot] ⚠ thẻ chữ lỗi (vẫn tiếp tục gửi ảnh): ${(e as Error).message}`);
     }
@@ -236,7 +267,7 @@ async function main() {
       console.log(`[snapshot] [${fullLabel}] upload xong: image_key=${imageKey}`);
 
       await sendCard(imageKey, fullLabel, color, win, grp);
-      console.log(`[snapshot] [${fullLabel}] đã gửi vào group ✅`);
+      if (!DRY) console.log(`[snapshot] [${fullLabel}] đã gửi vào group ✅`);
     }
   } finally {
     await browser.close();
