@@ -2,16 +2,35 @@ import { Sparkles } from "lucide-react";
 import { signInWithGoogle } from "./actions";
 
 /**
- * Đăng nhập CHỈ bằng Google. Bỏ magic link vì SMTP mặc định của Supabase chỉ
- * gửi được cho chủ dự án (~4 mail/giờ) → cả team không đăng nhập nổi.
+ * HAI ĐƯỜNG VÀO, mật khẩu nhóm đứng TRƯỚC.
+ *
+ * Đăng nhập Google đi qua Supabase Auth, mà dự án Supabase đang bị KHOÁ
+ * (`exceed_db_size_quota`, gặp 2026-09-07) — bấm vào chỉ ra một trang JSON báo
+ * lỗi, không ai vào được dashboard. Trước đó cũng đã khoá một lần vì
+ * `exceed_egress_quota`.
+ *
+ * Pipeline giờ chạy thẳng SMAX/Salesforce → Lark, KHÔNG cần Supabase; nên
+ * dashboard không việc gì phải chết theo. Ô mật khẩu dưới đây gửi thẳng
+ * `?pw=` sang /radar.html — middleware đổi lấy cookie 30 ngày (xem
+ * lib/supabase/middleware.ts). Chỉ mở đúng trang dashboard, không mở phần còn
+ * lại của app.
+ *
+ * Nút Google vẫn giữ (để sẵn khi Supabase sống lại) nhưng đẩy xuống dưới và
+ * ghi rõ đang hỏng, để không ai bấm rồi tưởng mình sai mật khẩu.
+ *
+ * Bỏ magic link vì SMTP mặc định của Supabase chỉ gửi được cho chủ dự án
+ * (~4 mail/giờ) → cả team không đăng nhập nổi.
  * Tên miền được chặn ở /auth/callback (xem ALLOWED_EMAIL_DOMAINS).
  */
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; pw?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, pw } = await searchParams;
+  // Middleware đá ngược về đây kèm nguyên ?pw= khi mật khẩu sai. Không báo gì
+  // thì người dùng bấm mãi mà tưởng trang hỏng.
+  const msg = error ?? (pw ? "Mật khẩu nhóm không đúng. Thử lại nhé." : null);
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
@@ -28,16 +47,42 @@ export default async function LoginPage({
 
           <h1 className="text-[32px] font-semibold tracking-tight">Đăng nhập</h1>
           <p className="mt-2 text-[14px] text-muted">
-            Dùng tài khoản Google công ty (@mastering-da.com).
+            Nhập mật khẩu nhóm để mở dashboard.
           </p>
 
-          {error && (
+          {msg && (
             <div className="mt-6 rounded-lg bg-[#fff5f5] p-3 text-[12px] leading-relaxed text-[var(--hot)]">
-              {error}
+              {msg}
             </div>
           )}
 
-          <form action={signInWithGoogle} className="mt-8">
+          {/* Đường vào chính: mật khẩu nhóm → /radar.html?pw=… (không đụng
+              Supabase). Form GET nên trình duyệt tự ghép đúng query string. */}
+          <form method="GET" action="/radar.html" className="mt-8 space-y-3">
+            <input
+              type="password"
+              name="pw"
+              required
+              autoFocus
+              autoComplete="current-password"
+              placeholder="Mật khẩu nhóm"
+              className="h-11 w-full rounded-lg border border-[var(--border-subtle)] px-3.5 text-[14px] outline-none focus:border-foreground"
+            />
+            <button
+              type="submit"
+              className="h-11 w-full rounded-lg bg-foreground text-[14px] font-medium text-white transition-opacity hover:opacity-90"
+            >
+              Vào dashboard
+            </button>
+          </form>
+
+          <div className="mt-8 flex items-center gap-3 text-[11px] text-muted-2">
+            <span className="h-px flex-1 bg-[var(--border-subtle)]" />
+            HOẶC
+            <span className="h-px flex-1 bg-[var(--border-subtle)]" />
+          </div>
+
+          <form action={signInWithGoogle} className="mt-4">
             <button
               type="submit"
               className="flex h-11 w-full items-center justify-center gap-2.5 rounded-lg border border-[var(--border-subtle)] bg-white text-[14px] font-medium transition-colors hover:bg-[#f7f8fa]"
@@ -52,8 +97,10 @@ export default async function LoginPage({
             </button>
           </form>
 
-          <p className="mt-6 text-[12px] leading-relaxed text-muted-2">
-            Chưa vào được? Liên hệ quản trị để cấp quyền cho email công ty của bạn.
+          <p className="mt-3 text-[12px] leading-relaxed text-muted-2">
+            Đăng nhập Google <strong>đang tạm hỏng</strong> (nhà cung cấp khoá
+            dịch vụ xác thực). Dùng mật khẩu nhóm ở trên nhé — chưa có thì hỏi
+            quản trị.
           </p>
         </div>
       </main>
