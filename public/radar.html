@@ -287,7 +287,7 @@ td b{font-weight:550}
           <div class="plot"><svg id="cCoSame"></svg></div>
         </div>
         <div class="card">
-          <div class="hd"><h3>Cơ cấu phễu theo khoá</h3><span class="sub">phân loại hiện tại của toàn bộ lead từng khoá</span>
+          <div class="hd"><h3>Cơ cấu phễu theo khoá</h3><span class="sub">phân loại lead của từng khoá, cắt tại cùng mốc ngày</span>
             <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sU)"></i>Chưa tag</span></div>
           </div>
           <div class="plot"><svg id="cCoMix"></svg></div>
@@ -817,11 +817,35 @@ async function loadCohort(){
      mà khoá đang chạy đã đi được (không có nghĩa "ngày thứ N" nên dùng tối đa).
    Luôn CHẶN TRÊN bằng số ngày khoá đang chạy: khoá mới mở 18 ngày thì không thể
    so ở D30 — chưa có dữ liệu. */
-function coDayN(maxDays){
+function coDayN(maxDays,openDay){
   const max=Math.max(0,maxDays);
+  // CHỌN NGÀY = cắt khoá tại đúng ngày đó. Chọn 17/08 với khoá mở 15/08 ⇒ xem
+  // số luỹ kế từ 15→17/08 (ngày thứ 2). Trước 2026-09-07 trang này BỎ QUA hẳn
+  // lịch chọn ngày — bấm vào không thấy gì đổi, user phát hiện.
+  // Chọn cả khoảng thì lấy ngày CUỐI: khoá luôn tính luỹ kế từ lúc mở, không
+  // có khái niệm "bắt đầu từ giữa".
+  const pick=S.to||S.from;
+  if(pick&&openDay)return Math.max(0,Math.min(dDiff(openDay,pick),max));
   const v=S.customWin?null:S.days;
   if(v===7||v===14||v===30)return Math.min(v,max);
   return max;
+}
+/** Ngày mở của khoá đang chạy trong hệ đang chọn — dùng để chặn lịch. */
+function coRunningOpen(){
+  let best=null;
+  for(const c of (CO&&CO.courses)||[]){
+    if(!c.openDay)continue;
+    if(S.grp==="bi"&&/^F\d/i.test(c.code))continue;
+    if(S.grp==="fa"&&!/^F\d/i.test(c.code))continue;
+    if(!best||c.openDay>best)best=c.openDay;
+  }
+  return best;
+}
+/** Ngày sớm nhất được phép chọn trên lịch. Ở trang khoá là NGÀY MỞ KHOÁ —
+ *  chọn trước đó thì khoá chưa tồn tại, không có gì để xem. */
+function calMin(){
+  if($("pgCo").style.display!=="none"){ const o=coRunningOpen(); if(o)return o; }
+  return MIN_D;
 }
 const dDiff=(a,b)=>Math.round((new Date(b+"T00:00:00Z")-new Date(a+"T00:00:00Z"))/86400000);
 /* "KH62" và "K62" là CÙNG một khoá (user chốt 2026-09-03) → quy về một mã. */
@@ -851,27 +875,25 @@ function coCalc(){
       if(!open[code])continue;                        // khoá chưa có ngày mở → bỏ
       if(S.grp==="bi"&&/^F\d/.test(code))continue;    // lọc BI thì không kê khoá FA
       if(S.grp==="fa"&&!/^F\d/.test(code))continue;
-      if(S.co.size&&![...S.co].some(x=>coKey(x)===code))continue;
       let o=byC.get(code);
-      if(!o){o={code,openDay:open[code],leads:0,P:0,C:0,W:0,Un:0,H:0,hotD:[],leadD:[]};byC.set(code,o)}
+      // Giữ NGÀY của từng lead theo nhóm, không chỉ giữ số đếm — có vậy mới cắt
+      // được phễu tại một mốc bất kỳ. Trước 2026-09-07 chỉ đếm tổng nên chọn
+      // ngày xong biểu đồ đổi mà hàng KPI vẫn trơ ra số cả khoá.
+      if(!o){o={code,openDay:open[code],hotD:[],leadD:[],pD:[],cD:[],wD:[]};byC.set(code,o)}
       if(l.re)continue;                               // reMKT: không đếm (giống Tổng quan)
       if(l.d){
-        o.leads++;o.leadD.push(l.d);
+        o.leadD.push(l.d);
         const h=c=>l.cls.includes(c);
-        if(h("P"))o.P++;else if(h("W"))o.W++;else if(h("C"))o.C++;
+        if(h("P"))o.pD.push(l.d);else if(h("W"))o.wD.push(l.d);else if(h("C"))o.cD.push(l.d);
       }
-      if(l.ha&&!l.up){o.H++;o.hotD.push(l.ha)}
+      if(l.ha&&!l.up)o.hotD.push(l.ha);
     }
   }
-  const list=[...byC.values()].filter(o=>o.leads>=5);
+  const list=[...byC.values()].filter(o=>o.leadD.length>=5);
   if(!list.length)return null;
   const newest=list.reduce((a,b)=>b.openDay>a.openDay?b:a);
-  const dayN=coDayN(dDiff(newest.openDay,asofDate));
+  const dayN=coDayN(dDiff(newest.openDay,asofDate),newest.openDay);
   for(const o of list){
-    // "Khác": phần còn lại của phễu — lead chưa gắn tag phân loại, cộng thêm
-    // lead nâng hạng (đang là Hot nhưng không tính vào Hot mới). Để cột chồng
-    // luôn cộng đúng bằng tổng lead, không đẻ ra con số Hot thứ hai.
-    o.Un=Math.max(0,o.leads-o.P-o.C-o.W-o.H);
     o.days=Math.max(0,dDiff(o.openDay,asofDate));
     o.running=o===newest;
     o.curve=[];o.curveLead=[];
@@ -880,7 +902,19 @@ function coCalc(){
       o.curve.push(o.hotD.filter(x=>x<=lim).length);
       o.curveLead.push(o.leadD.filter(x=>x<=lim).length);
     }
-    o.hotAt=o.curve[dayN]||0; o.leadsAt=o.curveLead[dayN]||0; o.hot=o.H;
+    // CẮT TOÀN BỘ PHỄU tại mốc đang chọn — KPI, biểu đồ và bảng phải cùng nói
+    // về một thời điểm. Chọn 17/08 với khoá mở 15/08 ⇒ mọi con số là luỹ kế
+    // 15→17/08.
+    const lim=addDays(o.openDay,dayN), upto=arr=>arr.filter(x=>x<=lim).length;
+    o.leads=upto(o.leadD); o.H=upto(o.hotD);
+    o.P=upto(o.pD); o.C=upto(o.cD); o.W=upto(o.wD);
+    // "Khác": phần còn lại của phễu — lead chưa gắn tag phân loại, cộng thêm
+    // lead nâng hạng (đang là Hot nhưng không tính vào Hot mới). Để cột chồng
+    // luôn cộng đúng bằng tổng lead, không đẻ ra con số Hot thứ hai.
+    o.Un=Math.max(0,o.leads-o.P-o.C-o.W-o.H);
+    o.hotAt=o.H; o.leadsAt=o.leads;
+    // Số CẢ KHOÁ (không cắt) — chỉ dùng cho cột cuối của bảng so sánh.
+    o.leadsAll=o.leadD.length; o.hotAll=o.hotD.length;
   }
   list.sort((a,b)=>b.openDay.localeCompare(a.openDay));
   return {list,cur:newest,dayN};
@@ -890,6 +924,24 @@ function coCalc(){
    lead K62. Lý do: một lead chat từ 2 năm trước, hôm nay mới được gắn tag K62 —
    ngày chat đầu của họ nằm ngoài cửa sổ ngắn nên bị rơi, trong khi trang Tổng
    quan (luôn xin ALL_DAYS) vẫn đếm. Hai trang lệch nhau ngay. */
+/* BỘ LỌC NÀO HIỆN Ở TRANG NÀO (user rà lại 2026-09-07: "đảm bảo mọi thông tin
+   trên dashboard đều phải mang lại mục đích, đừng để tạo ra cho có").
+   Trang "Theo khoá" đo theo NGÀY THỨ N KỂ TỪ KHI MỞ KHOÁ, nên:
+     · Sáng / Chiều / Hôm nay / Hôm qua — mốc theo lịch, không dịch được sang
+       "ngày thứ mấy của khoá" ⇒ ẨN.
+     · Lọc theo KHOÁ — trang này lấy chính khoá làm đơn vị so sánh; lọc còn 1
+       khoá thì hết cái để so, mà bỏ khoá đang chạy ra thì hỏng luôn mốc cùng
+       kỳ ⇒ ẨN (và coCalc cũng bỏ qua S.co).
+   Giữ lại: 7/14/30 ngày + Tất cả (= mốc D7/D14/D30/cả khoá), Chọn ngày (cắt
+   tại ngày đó), BI/FA, và Kênh. */
+const CO_HIDE_DAYS = ["am", "pm", "0", "1"];
+function syncBar(){
+  const co = $("pgCo").style.display !== "none";
+  for(const b of $("segDays").children)
+    b.style.display = (co && CO_HIDE_DAYS.includes(b.dataset.v)) ? "none" : "";
+  for(const el of [$("coBtn").parentElement, $("coBtn").parentElement.previousElementSibling])
+    if(el) el.style.display = co ? "none" : "";
+}
 function renderCohort(){
   if(!CO)return;
   const R=coCalc();
@@ -899,8 +951,12 @@ function renderCohort(){
   if(!R){$("coKpis").innerHTML="";$("coTbl").innerHTML="";$("coHead").textContent="—";
     $("coSub").textContent="không có khoá nào khớp bộ lọc hiện tại";return}
   const cs=R.list, cur=R.cur, dayN=R.dayN;
-  $("coSub").textContent="cùng nguồn & cùng cách đếm với trang Tổng quan · so "+cs.length+" khoá tại mốc ngày thứ "+dayN;
-  $("coHead").textContent=cur.code+" · ngày thứ "+cur.days+" · mở "+(cur.openDay||"—");
+  const pick=S.to||S.from;
+  const cut=pick?" · cắt tại "+pick.slice(8)+"/"+pick.slice(5,7):"";
+  $("coSub").textContent="so "+cs.length+" khoá tại mốc ngày thứ "+dayN+cut
+    +" · cùng nguồn & cùng cách đếm với trang Tổng quan";
+  const cutting=dayN<cur.days;
+  $("coHead").textContent=cur.code+" · "+(cutting?"tính tới ngày thứ "+dayN+" ("+fmtD(addDays(cur.openDay,dayN))+")":"ngày thứ "+cur.days)+" · mở "+(cur.openDay||"—");
   const tot=cur.leads||0, pc=v=>tot?Math.round(v/tot*100)+"% tổng":"";
   const K=[["Lead của khoá",tot,"",""],
            ["🔥 Hot",cur.H,"--sH",pc(cur.H)],
@@ -910,7 +966,7 @@ function renderCohort(){
            ["Khác / chưa tag",cur.Un,"--sU",pc(cur.Un)]];
   $("coKpis").innerHTML=K.map(([k,v,col,sub])=>
     "<div class='kpi'><div class='k'>"+k+"</div><div class='v'"+(col?" style='color:var("+col+")'":"")+">"+(v||0)+"</div>"
-    +"<div class='delta'>"+(sub||"tính tới hiện tại")+"</div></div>").join("");
+    +"<div class='delta'>"+(sub||(cutting?"luỹ kế tới mốc trên":"tính tới hiện tại"))+"</div></div>").join("");
   chartCohort(cs,cur); chartCoMix(cs); chartCoRate(cs,cur); chartCoSame(cs,cur);
 
   let t="<thead><tr><th>Khoá</th><th>Ngày mở</th><th class='num'>Lead cùng kỳ</th><th class='num'>Hot cùng kỳ</th><th class='num'>Tỷ lệ Hot</th><th class='num'>Cả khoá (lead/Hot)</th></tr></thead><tbody>";
@@ -919,7 +975,7 @@ function renderCohort(){
     t+="<tr"+(c.running?" style='font-weight:700;background:rgba(37,99,235,.06)'":"")+">"
       +"<td>"+c.code+(c.running?" ●":"")+"</td><td>"+(c.openDay||"—")+"</td>"
       +"<td class='num'>"+c.leadsAt+"</td><td class='num'>"+c.hotAt+"</td><td class='num'>"+rate+"%</td>"
-      +"<td class='num'>"+c.leads+" / "+c.hot+"</td></tr>";
+      +"<td class='num'>"+c.leadsAll+" / "+c.hotAll+"</td></tr>";
   }
   $("coTbl").innerHTML=t+"</tbody>";
 }
@@ -1110,7 +1166,7 @@ function drawCal(){
     for(let i=0;i<firstDow;i++)cells+="<button disabled></button>";
     for(let d=1;d<=nDays;d++){
       const ds=`${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-      const dis=ds<MIN_D||ds>MAX_D;
+      const dis=ds<calMin()||ds>MAX_D;
       cells+=`<button data-d="${ds}" ${dis?"disabled":""}>${d}</button>`;
     }
     return `<div class="calm"><h4>Tháng ${m}/${y}</h4><div class="calg">`
@@ -1168,11 +1224,18 @@ $("navPg").addEventListener("click",e=>{const b=e.target.closest("button");if(!b
   $("pgLs").style.display=p==="ls"?"block":"none";
   $("pgCo").style.display=p==="co"?"flex":"none";
   // CO (bảng ngày mở khoá) không phụ thuộc BI/FA nên tải đúng MỘT lần cả phiên.
+  if(p!=="co")syncBar();
   if(p==="co"){
     (async()=>{
       if(!CO)await loadCohort();          // biết ngày mở của khoá cũ nhất trước
+      syncBar();
+      // Đang đứng ở mốc theo lịch (Sáng/Chiều/Hôm nay/Hôm qua) — mấy nút đó vừa
+      // bị ẩn nên phải đá về "Tất cả", không thì trang kẹt ở trạng thái không
+      // còn nút nào sáng.
+      const calendarish = S.customWin || S.days <= 1;
+      if(calendarish && !(S.from&&S.to)) coDaysTouched = false;
       // Mặc định "Tất cả" + tải đủ lịch sử, nếu user chưa tự chọn kỳ khác.
-      if(!coDaysTouched&&(S.customWin||S.days<9999)){
+      if(!coDaysTouched&&!(S.from&&S.to)&&(S.customWin||S.days<9999)){
         S.customWin=null;S.days=9999;S.from=S.to=null;S.pick=[];
         [...$("segDays").children].forEach(x=>x.classList.toggle("on",x.dataset.v==="9999"));
         syncCalBtn();
