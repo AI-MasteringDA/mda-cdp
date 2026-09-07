@@ -4,14 +4,14 @@
  * DOM ⇒ chữ và ảnh chắc chắn khớp nhau, và cũng khớp dashboard.
  * Thẻ dựng bằng CHÍNH module bot dùng (etl/screenshot/report-card.ts) nên xem
  * trước thế nào thì bắn ra đúng thế.
- * Chạy: npx tsx etl/debug/preview-text-card.ts [am|pm]
+ * Chạy: npx tsx etl/debug/preview-text-card.ts [data-v của nút kỳ, mặc định 1 = Hôm qua]
  */
 import { config } from "dotenv"; import { resolve } from "path";
 config({ path: resolve(process.cwd(), ".env.local") });
 import { chromium } from "playwright";
 import { buildCard, renderPreview, type Course } from "../screenshot/report-card";
 const KEY = process.env.RADAR_SNAPSHOT_KEY!, BASE = "https://mda-cdp.vercel.app";
-const WIN = (process.argv[2] || "pm").toLowerCase();
+const WIN = process.argv[2] || "1";   // "1" = Hôm qua, đúng kỳ bot đang bắn
 
 (async () => {
   const b = await chromium.launch();

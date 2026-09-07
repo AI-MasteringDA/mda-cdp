@@ -11,15 +11,11 @@
  *   RADAR_SNAPSHOT_KEY  — khoá bí mật, PHẢI khớp với giá trị đã đặt trên Vercel
  *   RADAR_DASHBOARD_URL — mặc định https://mda-cdp.vercel.app
  *   LARK_DAILY_WEBHOOK  — URL Custom Bot Webhook của group muốn nhận ảnh
- *   RADAR_RUN           — "am" (đợt Sáng) hoặc "pm" (đợt Chiều). Bỏ trống thì
- *                         tự đoán theo giờ VN thực tế lúc chạy (< 14h ⇒ am).
  *
  * Gửi ảnh cần app Lark (LARK_APP_ID/SECRET) có scope `im:resource:upload` —
  * kiểm bằng: npx tsx etl/debug/test-lark-image.ts
  *
  * Chạy: npm run etl:radar:snapshot
- *   ép đợt Sáng : RADAR_RUN=am npm run etl:radar:snapshot
- *   ép đợt Chiều: RADAR_RUN=pm npm run etl:radar:snapshot
  */
 import { config } from "dotenv";
 import { resolve } from "path";
@@ -34,44 +30,25 @@ const WEBHOOK = process.env.LARK_DAILY_WEBHOOK || "";
 const ID = process.env.LARK_APP_ID || "", SEC = process.env.LARK_APP_SECRET || "";
 const U = "https://open.larksuite.com/open-apis";
 
-// data-v của nút kỳ trong #segDays: am=17:00 hôm qua→10:30 hôm nay (Sáng),
-// pm=10:30→17:00 hôm nay (Chiều), 30=30 ngày. data-v của #segGrp: all/bi/fa.
+// MỘT ĐỢT MỖI NGÀY, SỐ CỦA NGUYÊN NGÀY HÔM QUA (user chốt 2026-09-07).
 //
-// LỊCH 2 ĐỢT/NGÀY (user chốt 2026-08-13):
-//   Đợt Sáng (chạy 10:30) — chốt sổ ca đêm: 17:00 hôm qua → 10:30 hôm nay.
-//   Đợt Chiều (chạy 17:00) — chốt sổ ca ngày: 10:30 → 17:00 hôm nay, kèm thêm
-//   1 báo cáo Tổng quan 30 ngày (không lọc khoá, đủ dài thấy xu hướng).
-// 2 đợt gộp lại đúng 1 vòng 24h liên tục (17:00 hôm qua → 17:00 hôm nay),
-// không trùng không hở.
-const AM_REPORTS = [
-  { win: "am", grp: "bi", label: "BI — Sáng", color: "blue" },
-  { win: "am", grp: "fa", label: "FA — Sáng", color: "turquoise" },
-];
-const PM_REPORTS = [
-  { win: "pm", grp: "bi", label: "BI — Chiều", color: "blue" },
-  { win: "pm", grp: "fa", label: "FA — Chiều", color: "turquoise" },
-  // Thẻ "Tổng quan — 30 ngày qua" đã BỎ (user chốt 2026-09-03): 2 thẻ so sánh
-  // khoá bên dưới đã cho thấy xu hướng dài hạn rõ hơn, để thêm 30 ngày là loãng.
+// Trước đây bắn 2 đợt Sáng/Chiều, mỗi đợt là một lát cắt theo giờ (17:00→10:30
+// và 10:30→17:00). Cắt theo giờ đẻ ra tình huống khó giải thích: người chat lúc
+// 09:43 rồi được gắn Hot lúc 10:38 thì rơi vào HAI đợt khác nhau, nhìn thẻ Sáng
+// thấy "1 lead mới, 0 Hot mới" mà không hiểu vì sao. Một ngày trọn vẹn là đơn
+// vị tự nhiên, ai cũng đọc được, và gần như mọi cặp "vào — lên Hot" nằm gọn
+// trong cùng một ngày.
+//
+// data-v="1" là nút "Hôm qua" trong #segDays. data-v của #segGrp: all/bi/fa.
+const REPORTS = [
+  { win: "1", grp: "bi", label: "BI", color: "blue" },
+  { win: "1", grp: "fa", label: "FA", color: "turquoise" },
   // SO SÁNH KHOÁ (sếp yêu cầu 2026-09-03): khoá đang chạy so với các khoá trước
-  // ở CÙNG số ngày kể từ lúc mở tuyển sinh. Chỉ bắn đợt Chiều — số này nhích
-  // chậm theo ngày, không cần nhắc 2 lần/ngày.
+  // ở CÙNG số ngày kể từ lúc mở tuyển sinh.
   { win: "cohort:BI", grp: "all", label: "Khoá BI — so với các khoá trước", color: "carmine" },
   { win: "cohort:FA", grp: "all", label: "Khoá FA — so với các khoá trước", color: "orange" },
 ];
-// RADAR_RUN=am|pm ép chạy đúng đợt (cron truyền vào theo giờ trigger). Không
-// truyền thì tự đoán theo giờ VN thực tế lúc chạy — tiện chạy tay giữa chừng.
-function pickRun(): "am" | "pm" {
-  const env = (process.env.RADAR_RUN || "").toLowerCase();
-  if (env === "am" || env === "pm") return env;
-  const vnHour = new Date(Date.now() + 7 * 3600_000).getUTCHours();
-  return vnHour < 14 ? "am" : "pm";
-}
 
-/** Tắt hẳn bảng chú giải trước khi chụp — di chuột ra chỗ khác vẫn có thể còn
- *  sót nếu con trỏ dừng đúng vùng bắt sự kiện của biểu đồ. */
-async function hideTip(page: import("playwright").Page) {
-  await page.evaluate(() => { const t = document.getElementById("tip"); if (t) t.style.display = "none"; });
-}
 async function shoot(page: import("playwright").Page, win: string, grp: string): Promise<Buffer> {
   // "cohort:<hệ>" — trang So sánh khoá. Trang này có nguồn dữ liệu RIÊNG
   // (/api/cohort) nên không đụng tới bộ lọc kỳ/kênh; chỉ cần vào trang, chọn hệ
@@ -212,9 +189,7 @@ async function main() {
   if (!KEY) { console.log("[snapshot] thiếu RADAR_SNAPSHOT_KEY, bỏ qua"); return; }
   if (!WEBHOOK) { console.log("[snapshot] thiếu LARK_DAILY_WEBHOOK, bỏ qua"); return; }
 
-  const run = pickRun();
-  const REPORTS = run === "am" ? AM_REPORTS : PM_REPORTS;
-  console.log(`[snapshot] đợt: ${run === "am" ? "SÁNG (10:30)" : "CHIỀU (17:00)"} · ${REPORTS.length} báo cáo`);
+  console.log(`[snapshot] báo cáo NGÀY HÔM QUA · ${REPORTS.length} thẻ ảnh + 1 thẻ chữ`);
 
   const tk = await larkToken();
 
@@ -231,9 +206,8 @@ async function main() {
     // THẺ CHỮ đi TRƯỚC: đọc số trước, xem biểu đồ sau. Lỗi ở đây không được
     // chặn phần ảnh — thà thiếu thẻ chữ còn hơn mất cả loạt báo cáo.
     try {
-      const kWin = run === "am" ? "am" : "pm";
-      const bi = await readKpis(page, kWin, "bi");
-      const fa = await readKpis(page, kWin, "fa");
+      const bi = await readKpis(page, "1", "bi");
+      const fa = await readKpis(page, "1", "fa");
       // Tuần tự, KHÔNG Promise.all: cả hai cùng lái một trang trình duyệt,
       // chạy song song sẽ giẫm chân nhau (đọc nhầm số của hệ kia).
       const cBI = await runningCourse(page, "bi");

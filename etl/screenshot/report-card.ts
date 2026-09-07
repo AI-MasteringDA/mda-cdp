@@ -46,10 +46,15 @@ function section(name: string, icon: string, k: Kpi, c: Course): El[] {
 }
 
 export function buildCard(bi: Kpi, fa: Kpi, cBI: Course, cFA: Course) {
-  const today = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10).split("-").reverse().join("/");
+  // Tiêu đề ghi NGÀY CỦA SỐ LIỆU (hôm qua), không phải ngày bấm gửi — báo cáo
+  // chạy 10h sáng nhưng nói về nguyên ngày hôm trước (user chốt 2026-09-07).
+  const vnNow = new Date(Date.now() + 7 * 3600_000);
+  const dm = (d: Date) => d.toISOString().slice(0, 10).split("-").reverse().join("/");
+  const soLieu = dm(new Date(vnNow.getTime() - 86400_000));
+  const gui = `${String(vnNow.getUTCHours()).padStart(2, "0")}:${String(vnNow.getUTCMinutes()).padStart(2, "0")} ${dm(vnNow)}`;
   const elements: El[] = [
-    { tag: "div", text: { tag: "lark_md", content: `**Báo cáo ngày ${today}**` } },
-    { tag: "note", elements: [{ tag: "lark_md", content: `Kỳ báo cáo: ${bi.range.replace(/^🗓\s*/, "")}` }] },
+    { tag: "div", text: { tag: "lark_md", content: `**Số liệu ngày ${soLieu}**` } },
+    { tag: "note", elements: [{ tag: "lark_md", content: `Cả ngày, từ 00:00 đến 23:59 · gửi lúc ${gui}` }] },
     { tag: "hr" },
     ...section("BI", "🎓", bi, cBI),
     { tag: "hr" },
