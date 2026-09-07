@@ -9,10 +9,44 @@ không phải theo tài liệu.
 |---|---|
 | Base URL | `https://api.smax.ai` (env `SMAX_BASE_URL`) |
 | Xác thực | Header `Authorization: Bearer <token>` |
-| Token | env `SMAX_USER_TOKEN` trong `.env.local` — **hết hạn khoảng 03/09/2026** |
+| Token | env `SMAX_USER_TOKEN` — JWT **chỉ sống 30 ngày**, phải xoay định kỳ |
 | Biz slug | `mastering-data-analytics` |
 
 > Token là bí mật. Không dán vào chat/công cụ ngoài, không commit lên git.
+
+## Xoay token (làm mỗi ~30 ngày)
+
+`SMAX_USER_TOKEN` là **token phiên của web app** (payload có `is_user` +
+`device_id`), không phải API key. Nó hết hạn sau 30 ngày và khi đó **mọi**
+endpoint trả `401` — bridge nhận 0 khách và ngừng đẩy dữ liệu.
+
+Lần gần nhất: token cấp 04/08/2026, chết 03/09/2026 12:37 (giờ VN). Mất 4 ngày
+dữ liệu mới phát hiện vì job vẫn báo xanh.
+
+**Các bước:**
+
+1. Mở SMAX trên trình duyệt, đăng nhập bằng tài khoản MDA.
+2. `F12` → tab **Network** → bấm qua vài màn hình cho nó gọi API.
+3. Chọn một request tới `api.smax.ai` → **Request Headers**.
+4. Copy phần sau `Authorization: Bearer ` (chuỗi bắt đầu bằng `eyJ...`).
+5. Dán vào **GitHub → Settings → Secrets and variables → Actions →
+   `SMAX_USER_TOKEN`**, và vào `.env.local` trên máy.
+6. Kiểm tra: `npx tsx etl/debug/check-smax-token.ts`
+7. Kéo bù phần thiếu: `BRIDGE_FULL=1 npm run etl:smax:lark:bridge`
+
+**Cảnh báo tự động** (`etl/sources/smax-lark-bridge.ts`):
+
+| Khi nào | Việc gì xảy ra |
+|---|---|
+| Còn ≤ 7 ngày | Thẻ cam vào group Lark, mỗi ngày 1 lần lúc 9h sáng VN |
+| Đã hết hạn / SMAX trả 0 khách | Thẻ đỏ vào group mỗi giờ + job GitHub Actions **đỏ** |
+
+Cả hai thẻ đính kèm sẵn 6 bước ở trên.
+
+**Cách bỏ hẳn việc xoay token:** có sẵn `SMAX_API_KEY` — API key cấp business,
+payload `object: "biz"`, **không hết hạn**. Server nhận diện được (trả `403`
+chứ không phải `401`, tức đúng định dạng header `Authorization: Bearer`) nhưng
+chưa được cấp quyền đọc. Nhờ SMAX cấp quyền cho key này là hết phải xoay.
 
 ## Các endpoint đang dùng
 
