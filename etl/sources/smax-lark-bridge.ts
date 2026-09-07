@@ -122,18 +122,40 @@ function tokenExpiry(t?: string): { exp: Date; daysLeft: number } | null {
     return { exp, daysLeft: Math.floor((exp.getTime() - Date.now()) / 86400_000) };
   } catch { return null }
 }
-/** Kêu vào group Lark. Chỉ gọi ở nhịp ĐỐI SOÁT (mỗi giờ) để không spam 7 phút/lần. */
-async function alertLark(text: string) {
+/** Các bước xoay token — nhét thẳng vào thẻ cảnh báo để không phải đi tìm. */
+const HD_LAY_TOKEN = [
+  "**Cách lấy token mới**",
+  "1. Mở SMAX trên trình duyệt và đăng nhập bằng tài khoản MDA (trang bạn vẫn dùng hằng ngày).",
+  "2. Bấm **F12** → tab **Network** → bấm qua lại vài màn hình cho nó gọi API.",
+  "3. Chọn một request bất kỳ tới `api.smax.ai` → mục **Request Headers**.",
+  "4. Tìm dòng `Authorization: Bearer eyJ...` → copy phần **sau chữ Bearer**.",
+  "5. Dán vào **GitHub → Settings → Secrets → Actions → `SMAX_USER_TOKEN`** (bấm *Update*).",
+  "6. Kiểm tra lại: `npx tsx etl/debug/check-smax-token.ts`",
+  "",
+  "_Token chỉ sống 30 ngày nên cứ khoảng đầu tháng là phải xoay lại. Muốn hết hẳn việc này thì nhờ SMAX cấp quyền cho API key cấp business (`SMAX_API_KEY` hiện đang bị 403) — loại đó không hết hạn._",
+].join("\n");
+
+/**
+ * Kêu vào group Lark bằng đúng con bot đang bắn báo cáo hằng ngày.
+ * CHỈ gọi ở nhịp ĐỐI SOÁT (mỗi giờ) để không spam theo nhịp 7 phút.
+ */
+async function alertLark(title: string, template: "red" | "orange", body: string) {
   const hook = process.env.LARK_DAILY_WEBHOOK;
-  if (!hook) return;
+  if (!hook) { console.log("[bridge] không có LARK_DAILY_WEBHOOK, bỏ qua cảnh báo"); return; }
   await fetch(hook, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ msg_type: "interactive", card: {
       config: { wide_screen_mode: true },
-      header: { title: { tag: "plain_text", content: "🚨 DỮ LIỆU SMAX ĐANG ĐỨNG" }, template: "red" },
-      elements: [{ tag: "div", text: { tag: "lark_md", content: text } }],
+      header: { title: { tag: "plain_text", content: title }, template },
+      elements: [
+        { tag: "div", text: { tag: "lark_md", content: body } },
+        { tag: "hr" },
+        { tag: "div", text: { tag: "lark_md", content: HD_LAY_TOKEN } },
+        { tag: "note", elements: [{ tag: "lark_md", content: "Automation Bot — Mastering Data Analytics" }] },
+      ],
     } }),
-  }).catch(() => { /* báo động lỗi thì thôi, không được làm chết job */ });
+  }).then(r => r.json()).then(r => console.log("[bridge] đã bắn cảnh báo vào group:", JSON.stringify(r)))
+    .catch(e => console.error("[bridge] bắn cảnh báo lỗi (bỏ qua):", e.message));
 }
 
 export async function runSmaxLarkBridge() {
@@ -141,9 +163,19 @@ export async function runSmaxLarkBridge() {
   const tk0 = tokenExpiry(T);
   if (tk0) {
     const d = tk0.exp.toISOString().slice(0, 16).replace("T", " ");
+    const dVN = new Date(tk0.exp.getTime() + 7 * 3600_000).toISOString().slice(0, 16).replace("T", " ");
     if (tk0.daysLeft < 0) console.error(`[bridge] ⛔ TOKEN SMAX ĐÃ HẾT HẠN ${d} UTC — phải cấp lại, mọi lời gọi sẽ 401`);
-    else if (tk0.daysLeft <= 5) console.warn(`[bridge] ⚠ TOKEN SMAX chỉ còn ${tk0.daysLeft} ngày (hết hạn ${d} UTC) — cấp lại sớm`);
+    else if (tk0.daysLeft <= 7) console.warn(`[bridge] ⚠ TOKEN SMAX chỉ còn ${tk0.daysLeft} ngày (hết hạn ${d} UTC) — cấp lại sớm`);
     else console.log(`[bridge] token SMAX còn ${tk0.daysLeft} ngày (hết hạn ${d} UTC)`);
+    // NHẮC TRƯỚC KHI CHẾT: còn <= 7 ngày thì mỗi ngày kêu 1 lần lúc 9h sáng VN.
+    // Nhắc trước mới kịp xoay; đợi hết hạn rồi mới báo là đã mất dữ liệu.
+    const vnHour = new Date(Date.now() + 7 * 3600_000).getUTCHours();
+    if (tk0.daysLeft >= 0 && tk0.daysLeft <= 7 && FULL && vnHour === 9) {
+      await alertLark("⚠️ TOKEN SMAX SẮP HẾT HẠN", "orange",
+        `Token SMAX còn **${tk0.daysLeft} ngày** — hết hạn **${dVN} (giờ VN)**.
+
+Hết hạn là bridge ngừng đẩy dữ liệu và dashboard đứng số ngay. Xoay token trước hạn giúp mình nhé.`);
+    }
   }
 
   // ── 1) SMAX: kéo customer theo từng page (kéo 1 phát bị chặn 10.000, làm hụt
@@ -168,11 +200,12 @@ export async function runSmaxLarkBridge() {
       ? `Token SMAX đã hết hạn ${tk0.exp.toISOString().slice(0, 16).replace("T", " ")} UTC.`
       : "SMAX trả 0 khách (401/403 hoặc SMAX đang lỗi).";
     console.error(`[bridge] ⛔ ${why} DỪNG, không ghi gì (tránh xoá trắng).`);
-    if (FULL) await alertLark(`${why}
+    if (FULL) await alertLark("🚨 DỮ LIỆU SMAX ĐANG ĐỨNG", "red",
+      `${why}
 
-Bridge SMAX → Lark đã dừng đẩy dữ liệu. Dashboard sẽ đứng số cho tới khi cấp lại token.
+Bridge SMAX → Lark **đã ngừng đẩy dữ liệu**. Dashboard và báo cáo hằng ngày sẽ giữ nguyên số cũ cho tới khi có token mới.
 
-**Cần làm:** lấy token mới trong SMAX rồi cập nhật \`SMAX_USER_TOKEN\` ở GitHub Secrets và \`.env.local\`.`);
+Dữ liệu cũ trên Lark vẫn an toàn — bridge tự dừng, không ghi đè gì.`);
     throw new Error(why);
   }
 
