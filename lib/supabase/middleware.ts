@@ -28,7 +28,19 @@ function isSnapshotBypass(request: NextRequest): boolean {
   return request.nextUrl.searchParams.get("key") === secret;
 }
 
-// CỔNG MẬT KHẨU CHUNG cho team xem dashboard (2026-08-17).
+// DASHBOARD MỞ CÔNG KHAI (user chốt 2026-09-07: "k cần mật khẩu gì, ấn vào là
+// mở — bất cứ ai cũng xem được").
+// Ba đường dẫn ở SNAPSHOT_PATHS đi thẳng, không hỏi gì. Kèm header
+// X-Robots-Tag: noindex để trang không lọt vào kết quả tìm kiếm — mở cho người
+// có link, chứ không phải mời cả internet vào.
+// LƯU Ý: trang này hiện tên/SĐT/email khách hàng thật. Muốn đóng lại thì xoá
+// đoạn isPublicDashboard() bên dưới, cổng mật khẩu ngay dưới nó vẫn còn nguyên.
+function isPublicDashboard(request: NextRequest): boolean {
+  return SNAPSHOT_PATHS.includes(request.nextUrl.pathname);
+}
+
+// CỔNG MẬT KHẨU CHUNG cho team xem dashboard (2026-08-17). GIỮ LẠI để bật lại
+// được ngay khi cần đóng dashboard: bỏ isPublicDashboard() ở updateSession().
 // Bối cảnh: Supabase bị khoá vì vượt egress quota làm CHẾT LUÔN Supabase Auth
 // (/auth/v1/settings trả 402) ⇒ không ai đăng nhập Google được. Trong khi dữ
 // liệu dashboard đọc thẳng Lark Base nên vẫn sống. Cổng này mở đúng 2 đường
@@ -52,6 +64,12 @@ function teamPasswordCheck(request: NextRequest): "no" | "cookie" | "query" {
 
 export async function updateSession(request: NextRequest) {
   if (isSnapshotBypass(request)) return NextResponse.next({ request });
+
+  if (isPublicDashboard(request)) {
+    const res = NextResponse.next({ request });
+    res.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+    return res;
+  }
 
   const team = teamPasswordCheck(request);
   if (team === "cookie") return NextResponse.next({ request });

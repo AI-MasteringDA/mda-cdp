@@ -187,16 +187,12 @@ async function sendText(bi: Kpi, fa: Kpi, cBI: Course, cFA: Course) {
 /** Thẻ = ảnh chụp + nút bấm dẫn thẳng tới /radar (đăng nhập Google, KHÔNG lộ
  * key bí mật của bot) đã set sẵn ?days=&grp= để vào đúng đúng kỳ + bộ lọc. */
 async function sendCard(imageKey: string, label: string, color: string, win: string, grp: string) {
-  // Nút bấm phải MỞ THẲNG dashboard, không được bắt đăng nhập Google (user chốt
-  // 2026-09-03). Nên trỏ vào /radar.html kèm ?pw= — cổng mật khẩu chung sẽ đổi
-  // lấy cookie 30 ngày rồi chuyển về URL sạch. KHÔNG dùng RADAR_SNAPSHOT_KEY:
-  // đó là khoá riêng của bot, lộ vào group chat là mất kiểm soát.
-  // Mật khẩu chung vốn đã chia cho cả team nên đưa vào link nội bộ là chấp nhận được.
-  const pw = process.env.RADAR_TEAM_PASSWORD || "";
-  const gate = pw ? `pw=${encodeURIComponent(pw)}&` : "";
+  // Link trần, không kèm khoá/mật khẩu nào: dashboard đã mở công khai (user chốt
+  // 2026-09-07). TUYỆT ĐỐI không nhét RADAR_SNAPSHOT_KEY vào đây — đó là khoá
+  // riêng của bot, lộ vào group chat là mất kiểm soát.
   const deepLink = win.startsWith("cohort")
-    ? `${BASE}/radar.html?${gate}pg=co&grp=${(win.split(":")[1] || "BI").toLowerCase()}`
-    : `${BASE}/radar.html?${gate}days=${win}&grp=${grp}`;
+    ? `${BASE}/radar.html?pg=co&grp=${(win.split(":")[1] || "BI").toLowerCase()}`
+    : `${BASE}/radar.html?days=${win}&grp=${grp}`;
   const card = {
     msg_type: "interactive",
     card: {

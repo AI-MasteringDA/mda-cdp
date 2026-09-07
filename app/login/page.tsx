@@ -47,8 +47,16 @@ export default async function LoginPage({
 
           <h1 className="text-[32px] font-semibold tracking-tight">Đăng nhập</h1>
           <p className="mt-2 text-[14px] text-muted">
-            Nhập mật khẩu nhóm để mở dashboard.
+            Dashboard xem không cần đăng nhập. Đăng nhập chỉ để dùng các phần
+            quản trị khác.
           </p>
+
+          <a
+            href="/radar.html"
+            className="mt-6 flex h-11 w-full items-center justify-center rounded-lg bg-foreground text-[14px] font-medium text-white transition-opacity hover:opacity-90"
+          >
+            Vào dashboard →
+          </a>
 
           {msg && (
             <div className="mt-6 rounded-lg bg-[#fff5f5] p-3 text-[12px] leading-relaxed text-[var(--hot)]">
@@ -56,29 +64,9 @@ export default async function LoginPage({
             </div>
           )}
 
-          {/* Đường vào chính: mật khẩu nhóm → /radar.html?pw=… (không đụng
-              Supabase). Form GET nên trình duyệt tự ghép đúng query string. */}
-          <form method="GET" action="/radar.html" className="mt-8 space-y-3">
-            <input
-              type="password"
-              name="pw"
-              required
-              autoFocus
-              autoComplete="current-password"
-              placeholder="Mật khẩu nhóm"
-              className="h-11 w-full rounded-lg border border-[var(--border-subtle)] px-3.5 text-[14px] outline-none focus:border-foreground"
-            />
-            <button
-              type="submit"
-              className="h-11 w-full rounded-lg bg-foreground text-[14px] font-medium text-white transition-opacity hover:opacity-90"
-            >
-              Vào dashboard
-            </button>
-          </form>
-
           <div className="mt-8 flex items-center gap-3 text-[11px] text-muted-2">
             <span className="h-px flex-1 bg-[var(--border-subtle)]" />
-            HOẶC
+            HOẶC ĐĂNG NHẬP
             <span className="h-px flex-1 bg-[var(--border-subtle)]" />
           </div>
 
