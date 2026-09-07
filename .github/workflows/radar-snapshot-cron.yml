@@ -56,4 +56,11 @@ jobs:
           RADAR_SNAPSHOT_KEY: ${{ secrets.RADAR_SNAPSHOT_KEY }}
           RADAR_DASHBOARD_URL: https://mda-cdp.vercel.app
           LARK_DAILY_WEBHOOK: ${{ secrets.LARK_DAILY_WEBHOOK }}
+          # ═══ TẠM DỪNG GỬI VÀO GROUP (2026-09-07) ═══
+          # User: "khoan hãy bắn, chúng ta cần xem kỹ lại trước khi bắn
+          # production, còn chỉnh nhiều visuals lắm".
+          # Vẫn chạy trọn luồng mỗi ngày (mở trang, bấm lọc, chụp, upload) để
+          # biết pipeline còn sống, chỉ KHÔNG gửi tin vào group.
+          # MỞ LẠI: xoá đúng dòng dưới đây.
+          RADAR_DRY_RUN: '1'
         run: npm run etl:radar:snapshot
