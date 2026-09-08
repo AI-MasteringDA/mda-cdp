@@ -247,6 +247,32 @@ Dữ liệu cũ trên Lark vẫn an toàn — bridge tự dừng, không ghi đ�
   // lead-first-chat.ts) — đưa cột chưa có vào field_names thì Lark trả 1254045
   // FieldNameNotFound và hỏng cả lần chạy (gặp 2026-08-17 với "K62 lúc").
   const lucCols = [...existing].filter(n => / lúc$/.test(n));
+
+  // ── TỰ TẠO CỘT "<khoá> lúc" KHI MỞ KHOÁ MỚI (K63, K64, F5…) ────────────────
+  // Trước đây việc này do lead-first-chat.ts lo. Nhưng job đó đọc dim_lead trên
+  // Supabase, mà Supabase bị khoá (exceed_db_size_quota) nên nó HỎNG MỌI LẦN
+  // CHẠY từ đầu 09/2026. Không ai tạo cột thì tag khoá mới rơi vào khoảng
+  // không: bridge bỏ qua (xem cảnh báo "chưa có cột trên Lark"),
+  // Cohort_Summary không thấy khoá, dashboard vẫn coi khoá CŨ là "đang tuyển
+  // sinh" — hỏng âm thầm, không ai biết cho tới khi có người để ý.
+  // Chỉ nhận đúng dạng mã khoá (K##/KH##/F#) để tag gõ nhầm không đẻ ra cột rác,
+  // và chặn 5 cột mỗi lần chạy phòng trường hợp tag lỗi hàng loạt.
+  const COURSE_TAG = /^(KH?\d{2,3}|F\d(?:\.\d)?)$/i;
+  const canCreate = new Set<string>();
+  for (const c of customers) for (const t of ((c as { tags?: { name?: string; alias?: string }[] }).tags || [])) {
+    const nm = String(t.name || t.alias || "").trim();
+    if (COURSE_TAG.test(nm)) canCreate.add(`${nm.toUpperCase()} lúc`);
+  }
+  let taoMoi = 0;
+  for (const col of canCreate) {
+    if (existing.has(col) || taoMoi >= 5) continue;
+    const cr = await fetch(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/fields`, {
+      method: "POST", headers: { Authorization: `Bearer ${tk}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ field_name: col, type: 5, property: { date_formatter: "yyyy-MM-dd HH:mm", auto_fill: false } }),
+    }).then(r => r.json());
+    if (cr.code === 0) { existing.add(col); lucCols.push(col); taoMoi++; console.log(`[bridge] ✨ KHOÁ MỚI — đã tạo cột "${col}"`); }
+    else console.log(`[bridge] ⚠ không tạo được cột "${col}": ${cr.code} ${cr.msg}`);
+  }
   const idCols = ["Lead ID", "ID", "Phone", "Email", "Lead Name"].filter(n => existing.has(n));
   // "Tag SMAX" BẮT BUỘC phải nằm đây. Thiếu nó thì f["Tag SMAX"] luôn undefined
   // ⇒ code tưởng ô đang rỗng ⇒ (a) lần nào cũng ghi lại 7.800 dòng vô ích, và
