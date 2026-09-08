@@ -56,7 +56,7 @@ export function buildCard(bi: Kpi, fa: Kpi, cBI: Course, cFA: Course) {
     { tag: "div", text: { tag: "lark_md", content: `**Số liệu ngày ${soLieu}**` } },
     { tag: "note", elements: [{ tag: "lark_md", content: `Cả ngày, từ 00:00 đến 23:59 · gửi lúc ${gui}` }] },
     { tag: "hr" },
-    ...section("BI", "🎓", bi, cBI),
+    ...section("AAA", "🎓", bi, cBI),   // trung tâm đổi tên BI → AAA (2026-09-08)
     { tag: "hr" },
     ...section("FA", "📈", fa, cFA),
     { tag: "hr" },

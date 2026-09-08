@@ -194,7 +194,11 @@ td b{font-weight:550}
         <button data-v="am" title="17:00 hôm qua – 10:30 hôm nay">🌙 Sáng</button><button data-v="pm" title="10:30 – 17:00 hôm nay">☀️ Chiều</button><button data-v="0">Hôm nay</button><button data-v="1">Hôm qua</button><button data-v="7">7 ngày</button><button data-v="14" class="on">14 ngày</button><button data-v="30">30 ngày</button><button data-v="9999">Tất cả</button>
       </div>
       <div class="tabs" id="segGrp">
-        <button data-v="all" class="on">Tất cả</button><button data-v="bi">BI</button><button data-v="fa">FA</button>
+        <button data-v="all" class="on">Tất cả</button><!-- Nhãn hiển thị đổi BI → AAA (trung tâm đổi tên chương trình, user chốt
+             2026-09-08). Giá trị data-v="bi" GIỮ NGUYÊN: nó là khoá kỹ thuật dùng
+             xuyên suốt (S.grp, l.bi, deep link ?grp=bi, bot chụp ảnh). Đổi cả khoá
+             thì phải sửa hàng chục chỗ và hỏng mọi link cũ. -->
+        <button data-v="bi">AAA</button><button data-v="fa">FA</button>
       </div>
       <div class="calwrap">
         <button class="calbtn" id="calBtn" title="Chọn ngày hoặc khoảng ngày">🗓 Chọn ngày</button>
@@ -245,8 +249,8 @@ td b{font-weight:550}
         <div class="plot"><svg id="cChan"></svg></div>
       </div>
       <div class="card">
-        <div class="hd"><h3>BI vs FA</h3><span class="sub" id="subGrp"></span>
-          <div class="legend"><span><i style="background:var(--pill)"></i>BI</span><span><i style="background:var(--sU)"></i>FA</span></div></div>
+        <div class="hd"><h3>AAA vs FA</h3><span class="sub" id="subGrp"></span>
+          <div class="legend"><span><i style="background:var(--pill)"></i>AAA</span><span><i style="background:var(--sU)"></i>FA</span></div></div>
         <div class="plot"><svg id="cGrp"></svg></div>
       </div>
     </div>
@@ -668,7 +672,7 @@ const EXP_COLS=[
   ["Ngày lên Hot",    l=>l.ha||""],
   ["Phân loại",       l=>l.cls.map(c=>CLSN[c]?CLSN[c][0]:c).join(" + ")||"Chưa gắn tag"],
   ["Khoá",            l=>(l.co||[]).join(", ")],
-  ["Mảng",            l=>(l.bi?"BI":"")+(l.bi&&l.fa?" + ":"")+(l.fa?"FA":"")],
+  ["Mảng",            l=>(l.bi?"AAA":"")+(l.bi&&l.fa?" + ":"")+(l.fa?"FA":"")],
   ["Kênh",            l=>(l.ch||[]).join(", ")],
   ["SĐT",             l=>l.ph||""],
   ["Chưa phản hồi",   l=>l.cph?"x":""],
@@ -762,7 +766,7 @@ function tableCard(a){
   $("tbl").innerHTML="<tr><th class='num' style='width:40px'>#</th><th>Tên</th><th>Nguồn</th><th>Chat đầu</th><th>Lên Hot</th><th>Phân loại</th><th>Mảng</th><th>Kênh</th><th>SĐT</th><th></th></tr>"+
     (rows.length?rows.map((l,i)=>{
       const c=exCls(l)||(l.cls.includes("H")?"H":null);
-      const mang=(l.bi?"BI":"")+(l.bi&&l.fa?" + ":"")+(l.fa?"FA":"")||"—";
+      const mang=(l.bi?"AAA":"")+(l.bi&&l.fa?" + ":"")+(l.fa?"FA":"")||"—";
       return "<tr"+(l.re?" class='remkt'":"")+"><td class='num' style='color:var(--ink3)'>"+(i+1)+"</td><td><b>"+l.n+"</b>"+(l.re?" <span class='badge re' title='Đã là lead/học viên khoá trước — không tính lead mới'>⟲ reMKT</span><div style='font-size:10.5px;color:var(--sW)'>khoá cũ: "+l.re+"</div>":"")+(l.up?" <span class='badge up' title='Đã gắn Cold/Warm/Prospect trước đó — lên Hot là nâng hạng, không tính Hot mới'>↑ nâng hạng</span><div style='font-size:10.5px;color:var(--ink3)'>đã gắn tag từ "+fmtD(l.upFrom)+"</div>":"")+(l.n2?"<div style='font-size:10.5px;color:var(--ink3)'>SMAX: "+l.n2+"</div>":"")+"</td><td>"+(l.sf?"<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>":"<span class='badge'>SMAX</span>")+"</td><td>"+(l.d?fmtD(l.d):"—")+"</td><td>"+(l.ha?fmtD(l.ha):"—")+"</td><td>"
         +(l.cls.includes("H")?clsChip("H")+" ":"")+(c&&c!=="H"?clsChip(c):(!l.cls.length?"<span class='badge'>chưa tag</span>":""))
         +"</td><td>"+mang+"</td><td>"+(l.ch.join(", ")||"—")+"</td><td>"+(l.ph||"—")+"</td><td>"
@@ -904,6 +908,16 @@ function calMin(){
 const dDiff=(a,b)=>Math.round((new Date(b+"T00:00:00Z")-new Date(a+"T00:00:00Z"))/86400000);
 /* "KH62" và "K62" là CÙNG một khoá (user chốt 2026-09-03) → quy về một mã. */
 const coKey=c=>String(c||"").toUpperCase().replace(/^KH(\d)/,"K$1");
+/* CHỈ LẤY TỪ K58 TRỞ ĐI (user chốt 2026-09-08: "các dữ liệu khoá trước k cần
+   lấy"). Khoá cũ hơn có tag nhập hồi tố theo lô nên "ngày mở" suy ra được là
+   ngày ngồi nhập liệu, không phải ngày tuyển sinh — kéo theo tỷ lệ Hot 54-124%,
+   bất khả thi, làm bẩn mọi biểu đồ so cùng kỳ.
+   Hệ FA giữ nguyên cả 4 khoá (F1-F4): chỉ có bấy nhiêu, bỏ bớt thì hết cái so. */
+const CO_MIN_K = 58;
+function coShown(code){
+  const m = /^K(\d{2,3})$/.exec(code);
+  return m ? Number(m[1]) >= CO_MIN_K : true;
+}
 /* ─────────────────────────────────────────────────────────────────────────────
    SỐ CỦA TRANG NÀY TÍNH THẲNG TỪ DATA.leads — CÙNG bộ lọc và CÙNG quy tắc đếm
    với trang Tổng quan, nên hai trang không thể lệch nhau nữa.
@@ -927,6 +941,7 @@ function coCalc(){
     if(S.ch.size&&!l.ch.some(c=>S.ch.has(c)))continue;
     for(const code of new Set((l.co||[]).map(coKey))){
       if(!open[code])continue;                        // khoá chưa có ngày mở → bỏ
+      if(!coShown(code))continue;                     // khoá cũ hơn K58 → không so
       if(S.grp==="bi"&&/^F\d/.test(code))continue;    // lọc BI thì không kê khoá FA
       if(S.grp==="fa"&&!/^F\d/.test(code))continue;
       let o=byC.get(code);
@@ -970,6 +985,8 @@ function coCalc(){
     // Số CẢ KHOÁ (không cắt) — chỉ dùng cho cột cuối của bảng so sánh.
     o.leadsAll=o.leadD.length; o.hotAll=o.hotD.length;
   }
+  // Sắp MỚI → CŨ ở đây vì các biểu đồ đều .slice(0,N) để lấy N khoá gần nhất
+  // rồi .reverse() thành cũ → mới khi vẽ. Riêng BẢNG thì đảo lại bên dưới.
   list.sort((a,b)=>b.openDay.localeCompare(a.openDay));
   return {list,cur:newest,dayN};
 }
@@ -1026,7 +1043,9 @@ function renderCohort(){
   chartCohort(cs,cur); chartCoMix(cs); chartCoRate(cs,cur); chartCoSame(cs,cur);
 
   let t="<thead><tr><th>Khoá</th><th>Ngày mở</th><th class='num'>Lead cùng kỳ</th><th class='num'>Hot cùng kỳ</th><th class='num'>Tỷ lệ Hot</th><th class='num'>Cả khoá (lead/Hot)</th></tr></thead><tbody>";
-  for(const c of cs){
+  // Bảng xếp K NHỎ → LỚN cho khớp thứ tự các biểu đồ phía trên (user chốt
+  // 2026-09-08: "sort theo K từ nhỏ đến lớn để dễ so sánh").
+  for(const c of [...cs].reverse()){
     const rate=c.leadsAt?Math.round(c.hotAt/c.leadsAt*100):0;
     t+="<tr"+(c.running?" style='font-weight:700;background:rgba(37,99,235,.06)'":"")+">"
       +"<td>"+c.code+(c.running?" ●":"")+"</td><td>"+(c.openDay||"—")+"</td>"
@@ -1329,9 +1348,17 @@ function syncCoBtn(){
 // mà cửa sổ 40 ngày không có. Giữ nguyên khoá đang chọn.
 function buildCourses(){
   const c={};
-  for(const l of DATA.leads)for(const k of (l.co||[]))c[k]=(c[k]||0)+1;
+  // Cùng luật với trang Theo khoá: khoá cũ hơn K58 không đưa vào bộ lọc nữa.
+  for(const l of DATA.leads)for(const k of (l.co||[]))if(coShown(coKey(k)))c[k]=(c[k]||0)+1;
   const list=$("coList");list.innerHTML="";
-  const arr=Object.entries(c).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));
+  // Xếp theo MÃ KHOÁ tăng dần (K58 → K62, rồi F1 → F4), không theo số lead —
+  // user chốt 2026-09-08 "sort theo K từ nhỏ đến lớn để dễ so sánh", và thứ tự
+  // này khớp luôn với các biểu đồ ở trang Theo khoá.
+  const rank=k=>{const m=/^([A-Z]+)(\d+)/.exec(k)||[];return [(m[1]||"Z")==="K"?0:1, Number(m[2]||0)]};
+  const arr=Object.entries(c).sort((a,b)=>{
+    const [ga,na]=rank(a[0]), [gb,nb]=rank(b[0]);
+    return ga-gb || na-nb || a[0].localeCompare(b[0]);
+  });
   if(!arr.length){list.innerHTML="<div style='font-size:11px;color:var(--ink3);grid-column:1/-1'>Không có tag khoá nào trong kỳ</div>";return}
   for(const [k,n] of arr){
     const b=document.createElement("button");b.innerHTML=k+" <i>"+n+"</i>";

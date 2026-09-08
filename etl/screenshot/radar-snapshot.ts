@@ -41,11 +41,11 @@ const U = "https://open.larksuite.com/open-apis";
 //
 // data-v="1" là nút "Hôm qua" trong #segDays. data-v của #segGrp: all/bi/fa.
 const REPORTS = [
-  { win: "1", grp: "bi", label: "BI", color: "blue" },
+  { win: "1", grp: "bi", label: "AAA", color: "blue" },
   { win: "1", grp: "fa", label: "FA", color: "turquoise" },
   // SO SÁNH KHOÁ (sếp yêu cầu 2026-09-03): khoá đang chạy so với các khoá trước
   // ở CÙNG số ngày kể từ lúc mở tuyển sinh.
-  { win: "cohort:BI", grp: "all", label: "Khoá BI — so với các khoá trước", color: "carmine" },
+  { win: "cohort:BI", grp: "all", label: "Khoá AAA — so với các khoá trước", color: "carmine" },
   { win: "cohort:FA", grp: "all", label: "Khoá FA — so với các khoá trước", color: "orange" },
 ];
 
