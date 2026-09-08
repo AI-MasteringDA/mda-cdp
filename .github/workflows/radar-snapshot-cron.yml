@@ -1,12 +1,21 @@
 name: Radar dashboard snapshot → gửi Lark group
 
+# BỎ HẲN "schedule:" CỦA GITHUB — cron-job.org là nơi giữ lịch (2026-09-07).
+#
+# Lịch nội bộ của GitHub Actions chạy TRỄ 4,5–5,5 TIẾNG so với giờ đặt. Đo trên
+# chính workflow này: đặt 03:30 UTC nhưng chạy lúc 07:45 / 08:00 / 08:05 / 08:30.
+# Đây là lý do hôm trước "5 giờ chiều rồi mà chưa thấy bắn".
+#
+# cron-job.org gọi workflow_dispatch thì tới NGAY: đo 07/09 — nó gửi lúc
+# 09:04:08 GMT, GitHub nhận 09:04:07 UTC, lệch dưới 1 giây.
+#
+# Để cả hai thì mỗi ngày bắn HAI loạt: một đúng 10:00 và một lúc 14–15h. Nên
+# chỉ giữ một nguồn lịch duy nhất.
+#
+# MỘT ĐỢT MỖI NGÀY, số của NGUYÊN NGÀY HÔM QUA. Trước đây 2 đợt Sáng/Chiều cắt
+# theo giờ (17:00→10:30 và 10:30→17:00) làm một người "vào" và "lên Hot" rơi vào
+# hai đợt khác nhau, số nhìn khó hiểu.
 on:
-  schedule:
-    # 10:00 sáng giờ VN (UTC+7) = 03:00 UTC.
-    # MỘT ĐỢT MỖI NGÀY, số của NGUYÊN NGÀY HÔM QUA (user chốt 2026-09-07).
-    # Trước đây 2 đợt Sáng/Chiều cắt theo giờ (17:00→10:30 và 10:30→17:00) làm
-    # một người "vào" và "lên Hot" rơi vào hai đợt khác nhau, số nhìn khó hiểu.
-    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       run:
