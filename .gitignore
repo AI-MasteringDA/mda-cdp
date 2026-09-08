@@ -41,3 +41,7 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+
+# Ảnh chụp dashboard sinh ra khi chạy thử báo cáo (etl/screenshot/radar-snapshot.ts)
+radar-snapshot-*.png
+scratch_*.png
