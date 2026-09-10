@@ -35,7 +35,19 @@ const txt = (v: unknown): string => Array.isArray(v) ? (v as { text?: string }[]
 const lst = (v: unknown): string[] => Array.isArray(v) ? (v as any[]).map(x => typeof x === "object" && x ? (x.text ?? x.name ?? "") : String(x)).filter(Boolean) : [];
 const normPh = (p: unknown) => { const d = String(p ?? "").replace(/\D/g, ""); return d.length >= 9 ? d.slice(-9) : ""; };
 const normEm = (e: unknown) => String(e ?? "").toLowerCase().trim();
-/** Khoá chống trùng — khớp keyOf() bên lark-push.ts (Time|Event|Tên). */
+/**
+ * Khoá chống trùng của RIÊNG job này: Time | Event | Tên SF.
+ *
+ * ⚠ ĐỪNG BẬT LẠI lark-push.ts (đã tắt 2026-09-08). Nó cũng ghi vào bảng này
+ * nhưng dùng khoá KHÁC — Time | Event | Lead Name | Title — nên không nhìn
+ * thấy dòng do job này tạo và ngược lại. Hậu quả đo được 2026-09-10: khoá K62
+ * có 110 dòng lead_created cho 67 lead thật, 35 người bị nhân đôi. Ví dụ:
+ *   recvsx2fORXffd  Lead Name "Vũ Thị Thu Uyên"      Title ""            ← job này
+ *   recvu3pvPiJaGk  Lead Name "Julie Vu_0376565355"  Title "🚪 Tạo Lead" ← lark-push
+ * cùng Time, cùng Tên SF, nhưng Lead Name và Title khác nên hai bên đều tưởng
+ * dòng kia chưa tồn tại.
+ * (Ghi chú cũ ở đây nói khoá hai bên "khớp nhau" — SAI, lark-push có 4 trường.)
+ */
 const rowKey = (timeMs: number, name: string) => `${timeMs}|lead_created|${name.trim().toLowerCase()}`;
 /**
  * Chuẩn hoá TÊN để dò giữa SF và SMAX. Bỏ dấu, bỏ đuôi "_0912345678" mà SMAX
