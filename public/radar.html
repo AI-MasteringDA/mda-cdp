@@ -1210,15 +1210,21 @@ function chartSf(days,lab){
   const idx={}; days.forEach((d,i)=>idx[d]=i);
   const z=()=>days.map(()=>0);
   const Hh=z(),Cc=z(),Uu=z(); let tong=0,hot=0;
+  // MẶC ĐỊNH BÁM KHOÁ ĐANG TUYỂN SINH, để khớp đúng report "Lead By Day" bên
+  // Salesforce — report đó cố định lọc "Product chứa K62". Không lọc thì biểu
+  // đồ gộp cả K61, KH62… ra 108 lead trong khi SF ghi 67, user tưởng sai số
+  // (2026-09-10). Chọn khoá khác ở thanh lọc thì theo lựa chọn đó.
+  const khoaSF = S.co.size ? null : coRunningCode();
   for(const x of (SF||[])){
     const co=x.co||"";
     if(S.grp==="bi"&&/^F\d/i.test(co))continue;
     if(S.grp==="fa"&&!/^F\d/i.test(co))continue;
-    if(S.co.size&&!S.co.has(co))continue;
+    if(S.co.size ? !S.co.has(co) : (khoaSF && co!==khoaSF))continue;
     const i=idx[x.d]; if(i==null)continue;
     tong+=x.n; if(x.r==="H"){Hh[i]+=x.n;hot+=x.n} else if(x.r==="C")Cc[i]+=x.n; else Uu[i]+=x.n;
   }
-  $("subSf").textContent=(SF?("thẳng từ Salesforce · mọi lead có contact · "
+  const nhanKhoa = S.co.size ? [...S.co].join(", ") : (khoaSF || "tất cả khoá");
+  $("subSf").textContent=(SF?("thẳng từ Salesforce · khoá "+nhanKhoa+" · "
     +tong+" lead · "+hot+" Hot"):"đang tải…");
   const tot=days.map((_,i)=>Hh[i]+Cc[i]+Uu[i]);
   const maxV=Math.max(3,...tot)*1.2;
