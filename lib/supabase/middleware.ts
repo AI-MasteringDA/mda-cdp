@@ -19,7 +19,7 @@ const PUBLIC_ROUTES = [
 // thiết (trang tĩnh + API dữ liệu) mà không mở toàn bộ app ra công khai.
 // /api/cohort thêm 2026-09-03 — trang dashboard gọi nó để vẽ phần so sánh khoá,
 // nên bot chụp ảnh và người vào bằng mật khẩu chung đều phải qua được cửa này.
-const SNAPSHOT_PATHS = ["/radar.html", "/api/radar", "/api/cohort"];
+const SNAPSHOT_PATHS = ["/radar.html", "/api/radar", "/api/cohort", "/api/sf-leads"];
 function isSnapshotBypass(request: NextRequest): boolean {
   const secret = process.env.RADAR_SNAPSHOT_KEY;
   if (!secret) return false;

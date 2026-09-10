@@ -236,9 +236,21 @@ td b{font-weight:550}
           <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sU)"></i>Chưa gắn tag</span></div></div>
         <div class="plot"><svg id="cStack"></svg></div>
       </div>
-      <div class="card">
+      <!-- HAI THẺ XẾP CHỒNG trong cùng một ô lưới (user chốt 2026-09-10):
+           trên là góc nhìn MARKETING (tag Hot trên SMAX), dưới là góc nhìn SALES
+           (lead tạo trên Salesforce). Đặt cạnh nhau để ai nhìn cũng thấy ngay
+           hai bên đang đếm hai thứ khác nhau, khỏi phải đi hỏi. -->
+      <div style="display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0">
+        <div class="card" style="flex:1;min-height:0">
         <div class="hd"><h3>Lên Hot theo ngày</h3><span class="sub" id="subHot">SMAX (giờ gắn tag) + Salesforce (lead chưa có trên SMAX)</span></div>
         <div class="plot"><svg id="cHot"></svg></div>
+        </div>
+
+        <div class="card" id="cardSf" style="flex:1;min-height:0">
+          <div class="hd"><h3>Lead tạo trên Salesforce theo ngày</h3><span class="sub" id="subSf"></span>
+            <div class="legend"><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sC)"></i>Cold</span></div></div>
+          <div class="plot"><svg id="cSf"></svg></div>
+        </div>
       </div>
       <div class="card">
         <div class="hd"><h3>Nhịp lead vào</h3><span class="sub" id="subLine">đậm = TB trượt 7 ngày</span></div>
@@ -816,7 +828,7 @@ function renderAll(){
     const fd=fixedDays();
     const F=fd?agg(fd):A;          // cố định từ ngày mở khoá → 5 biểu đồ
     kpis(A);tableCard(A);
-    chartStack(F);chartHot(F);chartLine(F);chartGrp(F);chartChan(F);
+    chartStack(F);chartHot(F);chartLine(F);chartGrp(F);chartChan(F);chartSf(F.days,F.lab);
     // Phụ đề: card rộng nhất ghi đủ chữ "từ ngày mở"; mấy card hẹp chỉ ghi
     // "K62 · 15/08 → 07/09" cho khỏi xuống dòng đè lên biểu đồ.
     const dai=fd?fixedNote():"", ngan=fd?fixedNote(true):"";
@@ -1172,6 +1184,69 @@ function chartCoMix(cs){
     hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
   });
 }
+/* LEAD TẠO TRÊN SALESFORCE THEO NGÀY — GÓC NHÌN CỦA SALES.
+   Số lấy THẲNG từ Salesforce qua /api/sf-leads, KHÔNG qua bản sao trên Lark
+   (bản đó có dòng trùng và dòng chết, đo 2026-09-10: 110 dòng cho 67 lead).
+   User chốt: "sai thì trên SF fix, dưới này chỉnh theo".
+   Khác "Lên Hot theo ngày" ở trên: bên đó đếm người ĐƯỢC GẮN TAG HOT trên
+   SMAX; bên này đếm người ĐƯỢC TẠO HỒ SƠ trên Salesforce, Cold và Hot đếm như
+   nhau vì Sales coi mọi lead có contact là đáng ghi nhận. */
+let SF=null, sfReq=0;
+async function loadSf(n){
+  const my=++sfReq;
+  try{
+    const u=new URL(location.origin+"/api/sf-leads");
+    u.searchParams.set("days",String(Math.min(400,Math.max(30,n))));
+    if(KEY)u.searchParams.set("key",KEY);
+    const j=await fetch(u,{cache:"no-store"}).then(r=>r.json());
+    if(my!==sfReq||j.error)return;
+    SF=j.rows||[]; renderAll();
+  }catch(e){ console.warn("[radar] không nạp được lead Salesforce:",e.message) }
+}
+function chartSf(days,lab){
+  const svg=$("cSf"); if(!svg)return;
+  const {W,H}=dims(svg,420,150),pad={t:12,b:22,l:30,r:8};
+  const idx={}; days.forEach((d,i)=>idx[d]=i);
+  const z=()=>days.map(()=>0);
+  const Hh=z(),Cc=z(),Uu=z(); let tong=0,hot=0;
+  for(const x of (SF||[])){
+    const co=x.co||"";
+    if(S.grp==="bi"&&/^F\d/i.test(co))continue;
+    if(S.grp==="fa"&&!/^F\d/i.test(co))continue;
+    if(S.co.size&&!S.co.has(co))continue;
+    const i=idx[x.d]; if(i==null)continue;
+    tong+=x.n; if(x.r==="H"){Hh[i]+=x.n;hot+=x.n} else if(x.r==="C")Cc[i]+=x.n; else Uu[i]+=x.n;
+  }
+  $("subSf").textContent=(SF?("thẳng từ Salesforce · mọi lead có contact, Cold và Hot đếm như nhau · "
+    +tong+" lead"+(hot?" · "+hot+" Hot":"")):"đang tải…");
+  const tot=days.map((_,i)=>Hh[i]+Cc[i]+Uu[i]);
+  const maxV=Math.max(3,...tot)*1.2;
+  const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
+  const band=plotW/Math.max(1,days.length);
+  days.forEach((d,i)=>{
+    if(!tot[i])return;
+    const x=pad.l+band*i+band*.2,w=Math.max(2,band*.6); let acc=0;
+    for(const [arr,col] of [[Cc,"--sC"],[Uu,"--sU"],[Hh,"--sH"]]){
+      const v=arr[i]; if(!v)continue;
+      const h=v/maxV*plotH,y=pad.t+plotH-h-acc;
+      g.appendChild(svgEl("rect",{x,y,width:w,height:h,style:"fill:var("+col+")",rx:1}));
+      acc+=h;
+    }
+    const t=svgEl("text",{x:x+w/2,y:pad.t+plotH-acc-3,class:"axis","text-anchor":"middle"});
+    t.textContent=tot[i];g.appendChild(t);
+    const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
+    hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+fmtD(d)+"</div>"
+      +"<div class='row'><span>Tổng lead</span><b>"+tot[i]+"</b></div>"
+      +(Hh[i]?"<div class='row'><span>Hot</span><b>"+Hh[i]+"</b></div>":"")
+      +(Cc[i]?"<div class='row'><span>Cold</span><b>"+Cc[i]+"</b></div>":""),e.clientX,e.clientY));
+    hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
+  });
+  const step=Math.max(1,Math.ceil(days.length/8));
+  for(let i=0;i<days.length;i+=step){
+    const t=svgEl("text",{x:pad.l+band*i+band/2,y:pad.t+plotH+13,class:"axis","text-anchor":"middle"});
+    t.textContent=lab[i];g.appendChild(t);
+  }
+}
 /* ---- nới cửa sổ dữ liệu ----
    API mặc định chỉ trả 40 ngày cho nhanh. Khoá như K61 chạy suốt 3 tháng nên
    40 ngày là không đủ — khi người dùng chọn kỳ dài hơn phần đang có thì gọi lại
@@ -1426,6 +1501,7 @@ renderAll();
     for(const d of Object.values(run))need=Math.max(need,dDiff(d,asofDate)+2);
     await ensureWindow(need);
     renderAll();
+    loadSf(need);          // lead Salesforce phủ đúng khoảng biểu đồ đang vẽ
   }catch(e){ console.warn("[radar] không nạp được bảng khoá:",e.message) }
 })();
 
