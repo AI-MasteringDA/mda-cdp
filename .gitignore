@@ -45,3 +45,4 @@ next-env.d.ts
 # Ảnh chụp dashboard sinh ra khi chạy thử báo cáo (etl/screenshot/radar-snapshot.ts)
 radar-snapshot-*.png
 scratch_*.png
+sf-dup-backup-*.json
