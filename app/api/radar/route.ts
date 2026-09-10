@@ -134,6 +134,15 @@ export async function GET(req: Request) {
   const webLead = new Map<string, number>();
   // key → mã khoá bên SF ("K61"), để bù cho lead mà SMAX ghi khoá khác.
   const sfCourse = new Map<string, Set<string>>();
+  // LEAD TẠO TRÊN SALESFORCE — dữ liệu cho biểu đồ "Lead tạo trên Salesforce
+  // theo ngày" (user yêu cầu 2026-09-10, đưa report "Lead By Day" bên SF vào
+  // dashboard). Sales tính KHÁC marketing: hễ khách để lại contact là đã ghi
+  // nhận, Cold hay Hot đếm NHƯ NHAU — nên ở đây KHÔNG lọc theo rating.
+  // KHỬ TRÙNG: bảng Salesforce_Database đang có 38/71 người bị nhân đôi dòng
+  // (cùng người, cùng ngày, cùng rating, khác record_id — dấu vết hai lần
+  // import). Không khử thì số vống gần gấp đôi: 109 dòng cho 67 lead thật.
+  const sfSeenNew = new Set<string>();
+  const sfNew: { d: string; r: string; co: string; conv: boolean }[] = [];
 
   // Nhanh: search có filter (bc > cutoff OR hot-lúc > cutoff)
   let searched = false;
@@ -230,6 +239,33 @@ export async function GET(req: Request) {
         const prodRaw = gs(f["Khoá (SF)"]).trim();
         const pm = prodRaw.match(/^(KH?\d{2,3}|F\d(?:\.\d)?)\b/i);
         if (pm) for (const k of keys) { const s = sfCourse.get(k) ?? new Set<string>(); s.add(coCode(pm[1])); sfCourse.set(k, s); }
+        // Ghi nhận lead mới bên SF — TRƯỚC bước chống đếm đôi bên dưới, vì đây
+        // là con số của Sales, độc lập với việc SMAX có đếm người đó hay không.
+        {
+          const dNew = vnDate(f["Time"]);
+          if (dNew) {
+            // Khoá khử trùng = TÊN + SĐT/email. KHÔNG đưa ngày vào khoá: hai
+            // bản sao có thể lệch ngày, và cũng không đưa cả mảng keys vì bản
+            // này có email bản kia không ⇒ khoá khác nhau, lọt lưới.
+            // Đo 2026-09-10: 110 dòng → 76 người (Salesforce có 67).
+            const nm = (gs(f["Tên SF"]) || gs(f["Lead Name"]))
+              .toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+              .replace(/đ/g, "d").replace(/[^a-z0-9]+/g, " ").trim();
+            // Ưu tiên khoá LIÊN HỆ (sđt/email) — cùng người thì cùng số, bất
+            // kể tên viết khác nhau. Không có liên hệ mới rơi về tên.
+            const dupKey = keys[0] ?? `n:${nm}`;
+            if (!sfSeenNew.has(dupKey)) {
+              sfSeenNew.add(dupKey);
+              const rr = gs(f["Rating (SF)"]).trim().toLowerCase();
+              sfNew.push({
+                d: dNew,
+                r: rr === "hot" ? "H" : rr === "cold" ? "C" : rr === "warm" ? "W" : "",
+                co: pm ? coCode(pm[1]) : "",
+                conv: f["Đã chốt (SF)"] === true,
+              });
+            }
+          }
+        }
         // CHỐNG ĐẾM ĐÔI — chỉ bỏ khi SMAX THẬT SỰ đếm người này là Hot. Trước
         // đây bỏ khi có BẤT KỲ tag SMAX nào, nên ai có tag "SF_Done"/"BI Student"
         // mà không có "Hot Lead" thì lọt khe: SF bỏ vì "SMAX đếm rồi", còn SMAX
@@ -318,5 +354,5 @@ export async function GET(req: Request) {
   const out = leads.map(({ ky, ...rest }) => { void ky; return rest; });
 
   const asOf = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 16).replace("T", " ");
-  return NextResponse.json({ asOf, days, leads: out, reCount, webFix }, { headers: { "Cache-Control": "private, max-age=120" } });
+  return NextResponse.json({ asOf, days, leads: out, sfNew, reCount, webFix }, { headers: { "Cache-Control": "private, max-age=120" } });
 }
