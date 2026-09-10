@@ -248,7 +248,7 @@ td b{font-weight:550}
 
         <div class="card" id="cardSf" style="flex:1;min-height:0">
           <div class="hd"><h3>Lead tạo trên Salesforce theo ngày</h3><span class="sub" id="subSf"></span>
-            <div class="legend"><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sC)"></i>Cold</span></div></div>
+            <div class="legend"><span><i style="background:var(--sH)"></i>Hot (SF)</span><span><i style="background:var(--sC)"></i>Cold (SF)</span><span><i style="background:var(--sW)"></i>Hot theo SMAX</span></div></div>
           <div class="plot"><svg id="cSf"></svg></div>
         </div>
       </div>
@@ -828,7 +828,7 @@ function renderAll(){
     const fd=fixedDays();
     const F=fd?agg(fd):A;          // cố định từ ngày mở khoá → 5 biểu đồ
     kpis(A);tableCard(A);
-    chartStack(F);chartHot(F);chartLine(F);chartGrp(F);chartChan(F);chartSf(F.days,F.lab);
+    chartStack(F);chartHot(F);chartLine(F);chartGrp(F);chartChan(F);chartSf(F.days,F.lab,F.H);
     // Phụ đề: card rộng nhất ghi đủ chữ "từ ngày mở"; mấy card hẹp chỉ ghi
     // "K62 · 15/08 → 07/09" cho khỏi xuống dòng đè lên biểu đồ.
     const dai=fd?fixedNote():"", ngan=fd?fixedNote(true):"";
@@ -1203,7 +1203,7 @@ async function loadSf(n){
     SF=j.rows||[]; renderAll();
   }catch(e){ console.warn("[radar] không nạp được lead Salesforce:",e.message) }
 }
-function chartSf(days,lab){
+function chartSf(days,lab,smaxHot){
   const svg=$("cSf"); if(!svg)return;
   const {W,H}=dims(svg,420,150),pad={t:12,b:22,l:30,r:8};
   const idx={}; days.forEach((d,i)=>idx[d]=i);
@@ -1217,8 +1217,10 @@ function chartSf(days,lab){
     const i=idx[x.d]; if(i==null)continue;
     tong+=x.n; if(x.r==="H"){Hh[i]+=x.n;hot+=x.n} else if(x.r==="C")Cc[i]+=x.n; else Uu[i]+=x.n;
   }
-  $("subSf").textContent=(SF?("thẳng từ Salesforce · mọi lead có contact, Cold và Hot đếm như nhau · "
-    +tong+" lead"+(hot?" · "+hot+" Hot":"")):"đang tải…");
+  const smTong=(smaxHot||[]).reduce((p,c)=>p+c,0);
+  const lech=smTong-hot;
+  $("subSf").textContent=(SF?("thẳng từ Salesforce · "+tong+" lead · "+hot+" Hot"
+    +"  —  SMAX ghi nhận "+smTong+" Hot"+(lech?" · lệch "+(lech>0?"+":"")+lech:" · khớp")):"đang tải…");
   const tot=days.map((_,i)=>Hh[i]+Cc[i]+Uu[i]);
   const maxV=Math.max(3,...tot)*1.2;
   const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
@@ -1238,9 +1240,21 @@ function chartSf(days,lab){
     hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+fmtD(d)+"</div>"
       +"<div class='row'><span>Tổng lead</span><b>"+tot[i]+"</b></div>"
       +(Hh[i]?"<div class='row'><span>Hot</span><b>"+Hh[i]+"</b></div>":"")
-      +(Cc[i]?"<div class='row'><span>Cold</span><b>"+Cc[i]+"</b></div>":""),e.clientX,e.clientY));
+      +(Cc[i]?"<div class='row'><span>Cold</span><b>"+Cc[i]+"</b></div>":"")
+      +((smaxHot&&smaxHot[i]!=null)?"<div class='row'><span>SMAX Hot</span><b>"+smaxHot[i]+"</b></div>"
+        +"<div class='row'><span>lệch</span><b>"+((smaxHot[i]-Hh[i])>0?"+":"")+(smaxHot[i]-Hh[i])+"</b></div>":""),
+      e.clientX,e.clientY));
     hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
   });
+  // ĐƯỜNG SO SÁNH: số Hot mà SMAX ghi nhận cùng ngày. Cột là Salesforce, đường
+  // là SMAX — khoảng cách giữa chúng chính là phần chênh lệch từng ngày.
+  if(smaxHot&&smaxHot.length===days.length){
+    const X=i=>pad.l+band*i+band/2, Y=v=>pad.t+plotH-Math.min(v,maxV)/maxV*plotH;
+    g.appendChild(svgEl("path",{d:smaxHot.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" "),
+      fill:"none",style:"stroke:var(--sW)","stroke-width":"2","stroke-dasharray":"4 3","stroke-linecap":"round"}));
+    for(let i=0;i<days.length;i++) if(smaxHot[i])
+      g.appendChild(svgEl("circle",{cx:X(i),cy:Y(smaxHot[i]),r:2.4,style:"fill:var(--sW)"}));
+  }
   const step=Math.max(1,Math.ceil(days.length/8));
   for(let i=0;i<days.length;i+=step){
     const t=svgEl("text",{x:pad.l+band*i+band/2,y:pad.t+plotH+13,class:"axis","text-anchor":"middle"});
