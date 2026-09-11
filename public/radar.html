@@ -128,7 +128,9 @@ svg text{font-family:inherit}
 .axis{font-size:9.5px;fill:var(--ink3)}
 .gridline{stroke:var(--line);stroke-width:1}
 .dlab{font-size:9.5px;fill:var(--ink2)}
-/* cardStack KHÔNG còn chiếm 2 cột — mỗi biểu đồ một ô bằng nhau. */
+/* 5 thẻ trên lưới 3×2: thẻ Hot (số chính của Sales) chiếm 2 ô, 4 thẻ còn
+   lại mỗi thẻ 1 ô. cardStack KHÔNG chiếm 2 cột nữa. */
+#cardHot{grid-column:span 2}
 #cardTbl{grid-column:3/5}
 /* tooltip */
 #tip{position:fixed;z-index:99;pointer-events:none;background:var(--pill);color:#fff;border-radius:10px;
@@ -172,7 +174,7 @@ td b{font-weight:550}
 .dlab{font-weight:550}
 .axis{font-weight:450}
 #tip .t{font-weight:550}
-@media(max-width:1100px){body{overflow:auto}.app{height:auto;grid-template-columns:1fr}.main{grid-column:auto}.side{position:static;width:auto;flex-direction:row;align-items:center;gap:12px;padding:12px 16px}.side:hover{width:auto;box-shadow:none}.side .txt{opacity:1}.side nav{margin:0;flex-direction:row}.side .foot{display:none}.charts{grid-template-columns:1fr;grid-template-rows:none}.charts .card{min-height:240px}#cardStack,#cardTbl{grid-column:auto}.kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:1100px){body{overflow:auto}.app{height:auto;grid-template-columns:1fr}.main{grid-column:auto}.side{position:static;width:auto;flex-direction:row;align-items:center;gap:12px;padding:12px 16px}.side:hover{width:auto;box-shadow:none}.side .txt{opacity:1}.side nav{margin:0;flex-direction:row}.side .foot{display:none}.charts{grid-template-columns:1fr;grid-template-rows:none}.charts .card{min-height:240px}#cardStack,#cardTbl,#cardHot{grid-column:auto}.kpis{grid-template-columns:repeat(3,1fr)}}
 </style>
 
 <div class="app">
@@ -240,14 +242,10 @@ td b{font-weight:550}
            nhìn quá… Lead mới theo ngày to quá kìa, làm nhỏ lại cho có space").
            Trước đây "Lên Hot" và "Lead tạo trên Salesforce" bị nhét chung một ô
            nên cả hai đều tí xíu, còn "Lead mới theo ngày" chiếm 2 cột. -->
-<div class="card">
-      <div class="hd"><h3>Lên Hot theo ngày</h3><span class="sub" id="subHot">SMAX (giờ gắn tag) + Salesforce (lead chưa có trên SMAX)</span></div>
-      <div class="plot"><svg id="cHot"></svg></div>
-      </div>
-<div class="card" id="cardSf">
-        <div class="hd"><h3>Lead tạo trên Salesforce theo ngày</h3><span class="sub" id="subSf"></span>
-          <div class="legend"><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sC)"></i>Cold</span></div></div>
-        <div class="plot"><svg id="cSf"></svg></div>
+<div class="card" id="cardHot">
+        <div class="hd"><h3>Hot lead theo ngày</h3><span class="sub" id="subHot">thẳng từ Salesforce</span>
+          <div class="legend"><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sU)"></i>Chưa đánh giá</span></div></div>
+        <div class="plot"><svg id="cHot"></svg></div>
       </div>
       <div class="card">
         <div class="hd"><h3>Nhịp lead vào</h3><span class="sub" id="subLine">đậm = TB trượt 7 ngày</span></div>
@@ -304,13 +302,13 @@ td b{font-weight:550}
           <div class="plot"><svg id="cCoSame"></svg></div>
         </div>
         <div class="card">
-          <div class="hd"><h3>Cơ cấu phễu theo khoá</h3><span class="sub">phân loại lead của từng khoá, cắt tại cùng mốc ngày</span>
-            <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sU)"></i>Chưa tag</span></div>
+          <div class="hd"><h3>Cơ cấu tag SMAX theo khoá</h3><span class="sub">tag sales gắn cho người đã chat, cắt tại cùng mốc ngày — không phải Hot của Salesforce</span>
+            <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Đã gắn Hot</span><span><i style="background:var(--sU)"></i>Chưa tag</span></div>
           </div>
           <div class="plot"><svg id="cCoMix"></svg></div>
         </div>
         <div class="card">
-          <div class="hd"><h3>Tỷ lệ Hot theo khoá</h3><span class="sub">Hot ÷ Lead tại cùng mốc ngày — đo chất lượng lead</span></div>
+          <div class="hd"><h3>Tỷ lệ Hot theo khoá</h3><span class="sub">Hot (Salesforce) ÷ Lead (SMAX) tại cùng mốc ngày — đo chất lượng lead</span></div>
           <div class="plot"><svg id="cCoRate"></svg></div>
         </div>
       </div>
@@ -377,6 +375,15 @@ function rangeLbl(){
   const sp=spanDays();
   return fmtD(sp[0])+" – "+fmtD(sp[sp.length-1])+(S.days>=9999?" · toàn bộ ("+sp.length+" ngày)":"");
 }
+/* SĐT (9 số cuối) của MỌI người đã có hồ sơ bên Salesforce. Dùng để đếm
+   "SMAX đã gắn Hot mà SF chưa có dòng" — phần việc còn treo của sales. */
+const ph9=s=>{const x=String(s||"").replace(/\D/g,"");return x.length>=9?x.slice(-9):""};
+let SFPH=new Set(), SFPH_FOR=null;
+function buildSfPh(){
+  SFPH=new Set();
+  for(const l of DATA.leads)if(l.sf){const v=ph9(l.ph);if(v)SFPH.add(v)}
+  SFPH_FOR=DATA.leads;
+}
 function leadPass(l){
   if(S.grp==="bi"&&!l.bi)return false;
   if(S.grp==="fa"&&!l.fa)return false;
@@ -424,15 +431,17 @@ function bucketize(span){
 function aggCustom(cw){
   const days=["·"],lab=[cw.label],gran="custom";
   const z=()=>days.map(()=>0);
-  const r={days,lab,gran,moi:z(),P:z(),C:z(),W:z(),Hc:z(),U:z(),H:z(),chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],newWin:[],byCls:{P:[],C:[],W:[],H:[],U:[],cph:[]},cphWin:0,reWin:0,upWin:0,Hsrc:{smax:0,sf:0},prev:{moi:0,P:0,C:0,W:0,H:0}};
+  const r={days,lab,gran,moi:z(),P:z(),C:z(),W:z(),Hc:z(),U:z(),H:z(),Hsplit:{H:z(),C:z(),O:z()},chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],hsOnly:[],newWin:[],byCls:{P:[],C:[],W:[],H:[],U:[],cph:[]},cphWin:0,reWin:0,upWin:0,prev:{moi:0,P:0,C:0,W:0,H:0}};
   CHDEFS.forEach(([k])=>r.chCount[k]=0);
+  const bumpH=l=>{r.H[0]++;r.Hsplit[l.sfR==="H"?"H":(l.sfR==="C"?"C":"O")][0]++};
   const inCur=ms=>ms!=null&&ms>=cw.from&&ms<cw.to;
   const inPrev=ms=>ms!=null&&ms>=cw.pFrom&&ms<cw.pTo;
   for(const l of DATA.leads){
     if(!leadPass(l))continue;
     const has=c=>l.cls.includes(c);
     if(l.re){
-      if(inCur(l.dMs)||inCur(l.haMs)){r.reWin++;r.newWin.push(l);if(inCur(l.haMs))r.hotLeads.push(l)}
+      if(inCur(l.dMs)||inCur(l.haMs)){r.reWin++;r.newWin.push(l);
+        if(inCur(l.haMs)){r.hotLeads.push(l);bumpH(l)}}
       continue;
     }
     if(inCur(l.dMs)){
@@ -448,8 +457,8 @@ function aggCustom(cw){
       r.prev.moi++;
       if(has("P"))r.prev.P++;else if(has("W"))r.prev.W++;else if(has("C"))r.prev.C++;
     }
-    if(inCur(l.haMs)){if(l.up)r.upWin++;else{r.H[0]++;r.Hsrc[l.sf?"sf":"smax"]++}r.hotLeads.push(l)}
-    else if(inPrev(l.haMs)&&!l.up)r.prev.H++;
+    if(inCur(l.haMs)){bumpH(l);r.hotLeads.push(l)}
+    else if(inPrev(l.haMs))r.prev.H++;
   }
   r.hotLeads.sort((a,b)=>(b.ha||"").localeCompare(a.ha||""));
   r.newWin.sort((a,b)=>(b.d||"").localeCompare(a.d||""));
@@ -462,8 +471,10 @@ function agg(spanArg){
   const days=keys,idx=dIdx;
   const prevSet=new Set(span.map(d=>addDays(d,-span.length)));
   const z=()=>days.map(()=>0);
-  const r={days,lab,gran,moi:z(),P:z(),C:z(),W:z(),Hc:z(),U:z(),H:z(),chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],newWin:[],byCls:{P:[],C:[],W:[],H:[],U:[],cph:[]},cphWin:0,reWin:0,upWin:0,Hsrc:{smax:0,sf:0},prev:{moi:0,P:0,C:0,W:0,H:0}};
+  const r={days,lab,gran,moi:z(),P:z(),C:z(),W:z(),Hc:z(),U:z(),H:z(),Hsplit:{H:z(),C:z(),O:z()},chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],hsOnly:[],newWin:[],byCls:{P:[],C:[],W:[],H:[],U:[],cph:[]},cphWin:0,reWin:0,upWin:0,prev:{moi:0,P:0,C:0,W:0,H:0}};
   CHDEFS.forEach(([k])=>r.chCount[k]=0);
+  // Cộng một lead Salesforce vào ô thứ i, đồng thời tách theo Rating bên SF.
+  const bumpH=(l,i)=>{r.H[i]++;r.Hsplit[l.sfR==="H"?"H":(l.sfR==="C"?"C":"O")][i]++};
   for(const l of DATA.leads){
     if(!leadPass(l))continue;
     const has=c=>l.cls.includes(c);
@@ -473,7 +484,11 @@ function agg(spanArg){
     // lead mới — đây là re-marketing, không phải lead mới sinh.
     if(l.re){
       const inWin=(l.d&&idx[l.d]!=null)||(l.ha&&idx[l.ha]!=null);
-      if(inWin){r.reWin++;r.newWin.push(l);if(l.ha&&idx[l.ha]!=null)r.hotLeads.push(l)}
+      if(inWin){r.reWin++;r.newWin.push(l);
+        // Dòng Salesforce thì VẪN cộng vào Hot: bên SF khách quay lại cũng được
+        // tạo lead và đếm như mọi người khác, mà cột Hot giờ mirror SF 1:1.
+        // Chỉ riêng "Lead mới" của MKT là không tính (quy tắc reMKT cũ).
+        if(l.ha&&idx[l.ha]!=null){r.hotLeads.push(l);bumpH(l,idx[l.ha])}}
       continue;
     }
     // QUY TẮC ĐẾM (user chốt 2026-08-11):
@@ -501,8 +516,14 @@ function agg(spanArg){
     // từ ngày TRƯỚC rồi hôm nay mới lên Hot ⇒ KHÔNG phải "new in day", không
     // tính vào KPI "Hot mới". Vẫn HIỆN trong bảng chi tiết kèm nhãn ↑ nâng hạng
     // để sales theo dõi được — chỉ không đếm.
-    if(l.ha&&idx[l.ha]!=null){if(l.up)r.upWin++;else{r.H[idx[l.ha]]++;r.Hsrc[l.sf?"sf":"smax"]++}r.hotLeads.push(l)}
-    else if(l.ha&&prevSet.has(l.ha)&&!l.up)r.prev.H++;
+    // HOT = LEAD TRÊN SALESFORCE (user chốt 2026-09-11). Chỉ dòng sf mới có
+    // l.ha, nên không còn phải loại "nâng hạng": ngày tạo lead bên SF là một
+    // sự kiện có thật, không phải thao tác đổi tag.
+    if(l.ha&&idx[l.ha]!=null){bumpH(l,idx[l.ha]);r.hotLeads.push(l)}
+    else if(l.ha&&prevSet.has(l.ha))r.prev.H++;
+    // SMAX đã gắn Hot mà Salesforce chưa có hồ sơ người này ⇒ sales còn nợ
+    // nhập liệu. Không vào phép đếm, chỉ hiện thành ghi chú dưới thẻ Hot.
+    if(l.hs&&idx[l.hs]!=null&&!l.sf&&!SFPH.has(ph9(l.ph)))r.hsOnly.push(l);
   }
   r.hotLeads.sort((a,b)=>(b.ha||"").localeCompare(a.ha||""));
   r.newWin.sort((a,b)=>(b.d||"").localeCompare(a.d||""));
@@ -571,20 +592,56 @@ function chartStack(a){
   });
   xLabels(g,a.lab,pad,plotH,band,Math.ceil(a.days.length/12));
 }
-function chartHot(a){
-  const svg=$("cHot"),{W,H}=dims(svg,300,160),pad={t:12,b:22,l:26,r:6};
-  const maxV=Math.max(3,...a.H)*1.15;
+function chartHot(days,lab){
+  const svg=$("cHot"); if(!svg)return;
+  const {W,H}=dims(svg,300,160),pad={t:14,b:22,l:26,r:6};
+  const idx={}; days.forEach((d,i)=>idx[d]=i);
+  const z=()=>days.map(()=>0);
+  const Hh=z(),Cc=z(),Uu=z(); let tong=0,hot=0;
+  // MẶC ĐỊNH BÁM KHOÁ ĐANG TUYỂN SINH — để con số ở đây khớp ĐÚNG ô
+  // "No. of Leads" trên dashboard Salesforce, vì report bên đó cố định lọc
+  // "Product (Lead) contains K62". Không bám khoá thì biểu đồ gộp cả K61, K60…
+  // và ra ~97 trong khi Sales đọc 73, tưởng là sai số (bắt được 2026-09-11).
+  // Chọn khoá khác ở thanh lọc thì theo lựa chọn đó.
+  // KHÔNG áp bộ lọc KÊNH: lead bên SF không mang kênh chat của SMAX, lọc vào
+  // là biểu đồ trống trơn.
+  const khoa = S.co.size ? null : coRunningCode();
+  for(const l of DATA.leads){
+    if(!l.sf||!l.ha)continue;
+    if(S.grp==="bi"&&!l.bi)continue;
+    if(S.grp==="fa"&&!l.fa)continue;
+    if(S.co.size ? !(l.co||[]).some(c=>S.co.has(c)) : (khoa && !(l.co||[]).includes(khoa)))continue;
+    const i=idx[l.ha]; if(i==null)continue;
+    tong++;
+    if(l.sfR==="H"){Hh[i]++;hot++} else if(l.sfR==="C")Cc[i]++; else Uu[i]++;
+  }
+  const nhan = S.co.size ? [...S.co].join(", ") : (khoa || "tất cả khoá");
+  $("subHot").textContent="thẳng từ Salesforce · khoá "+nhan+" · "+tong+" lead · "+hot+" Hot";
+  // Xếp chồng theo Rating bên SF. Sales đếm Cold và Hot NHƯ NHAU (hễ khách để
+  // lại contact là ghi nhận) nên SỐ TRÊN ĐẦU CỘT là tổng — đúng ô "No. of
+  // Leads"; màu chỉ để thấy tỉ trọng.
+  const SEG=[["C",Cc,"--sC","Cold"],["O",Uu,"--sU","Chưa đánh giá"],["H",Hh,"--sH","Hot"]];
+  const tot=days.map((_,i)=>Hh[i]+Cc[i]+Uu[i]);
+  const maxV=Math.max(3,...tot)*1.15;
   const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
-  const band=plotW/a.days.length,bw=Math.min(band*.6,28);
-  a.days.forEach((d,i)=>{
-    const v=a.H[i],x=pad.l+band*i+(band-bw)/2,hpx=v/maxV*plotH,y=pad.t+plotH-hpx;
-    if(v>0){g.appendChild(svgEl("path",{d:topRoundRect(x,y,bw,hpx,4),style:"fill:var(--sH)",opacity:d===YDAY?"1":".8"}));
-      const t=svgEl("text",{x:x+bw/2,y:y-3,class:"dlab","text-anchor":"middle"});t.textContent=v;g.appendChild(t)}
+  const band=plotW/Math.max(1,days.length),bw=Math.min(band*.6,28);
+  days.forEach((d,i)=>{
+    const v=tot[i],x=pad.l+band*i+(band-bw)/2; let acc=0;
+    for(const [,arr,col] of SEG){
+      const vv=arr[i]; if(!vv)continue;
+      const h=vv/maxV*plotH,y=pad.t+plotH-h-acc;
+      g.appendChild(svgEl("rect",{x,y,width:bw,height:h,style:"fill:var("+col+")",rx:1}));
+      acc+=h;
+    }
+    if(v>0){const t=svgEl("text",{x:x+bw/2,y:pad.t+plotH-acc-3,class:"dlab","text-anchor":"middle"});t.textContent=v;g.appendChild(t)}
     const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
-    hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+bkLbl(a,i)+"</div><div class='row'><span><i style='background:var(--sH)'></i>Lên Hot</span><b>"+v+"</b></div>",e.clientX,e.clientY));
+    hit.addEventListener("mousemove",e=>{
+      let h="<div class='t'>"+fmtD(d)+"</div><div class='row'><span>Lead trên Salesforce</span><b>"+v+"</b></div>";
+      for(const [,arr,col,nm] of SEG){const vv=arr[i];if(vv)h+="<div class='row'><span><i style='background:var("+col+")'></i>"+nm+"</span><b>"+vv+"</b></div>"}
+      showTip(h,e.clientX,e.clientY)});
     hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
   });
-  xLabels(g,a.lab,pad,plotH,band,Math.ceil(a.days.length/6));
+  xLabels(g,lab,pad,plotH,band,Math.ceil(days.length/6));
 }
 function chartLine(a){
   const svg=$("cLine"),{W,H}=dims(svg,300,160),pad={t:12,b:22,l:26,r:8};
@@ -650,9 +707,11 @@ function kpis(a){
     const v=sum(k),base=a.prev[k],diff=v-base;
     const cls=diff>0?"up":(diff<0?"down":"");
     const arrow=diff>0?"▲":(diff<0?"▼":"–");
-    // Hot mới gộp từ 2 nguồn (SMAX gắn tag + Salesforce lead riêng) — tách nhỏ
-    // ra để Sales biết tỉ trọng, không phải đoán qua bảng chi tiết.
-    const srcSub=k==="H"?"<div class='delta' style='margin-top:1px'>SMAX "+a.Hsrc.smax+" · SF "+a.Hsrc.sf+"</div>":"";
+    // Hot lấy 100% từ Salesforce. Ghi rõ nguồn ngay dưới số, kèm số ca SMAX đã
+    // gắn Hot mà bên SF chưa có hồ sơ — phần sales còn nợ nhập liệu, xem được
+    // danh sách ở tab "Hot mới".
+    const srcSub=k==="H"?"<div class='delta' style='margin-top:1px'>nguồn Salesforce"
+      +(a.hsOnly.length?" · <b>"+a.hsOnly.length+"</b> ca SMAX đã Hot, SF chưa có":"")+"</div>":"";
     h+="<div class='kpi'><span class='lbl'>"+nm+"</span><div class='v'>"+v+"</div><span class='tag' style='background:var("+cvar+")'></span>"
       +"<div class='delta'><span class='"+cls+"'>"+arrow+" "+Math.abs(diff)+"</span> so kỳ trước ("+base+")</div>"+srcSub
       +"<button class='vd' data-tab='"+tab+"'>Xem chi tiết →</button></div>";
@@ -682,7 +741,10 @@ const EXP_COLS=[
   ["Tên bên SMAX",    l=>l.n2||""],
   ["Nguồn",           l=>l.sf?"Salesforce":"SMAX"],
   ["Ngày chat đầu",   l=>l.d||""],
-  ["Ngày lên Hot",    l=>l.ha||""],
+  ["Ngày vào Salesforce", l=>l.ha||""],
+  ["SMAX gắn Hot lúc",    l=>l.hs||""],
+  ["Rating (SF)",         l=>({H:"Hot",C:"Cold",W:"Warm"})[l.sfR]||""],
+  ["Đã chốt (SF)",        l=>l.sfConv?"x":""],
   ["Phân loại",       l=>l.cls.map(c=>CLSN[c]?CLSN[c][0]:c).join(" + ")||"Chưa gắn tag"],
   ["Khoá",            l=>(l.co||[]).join(", ")],
   ["Mảng",            l=>(l.bi?"AAA":"")+(l.bi&&l.fa?" + ":"")+(l.fa?"FA":"")],
@@ -765,7 +827,7 @@ function expXlsx(){
   dl(zipStore(files),expName("xlsx"));
 }
 function tableCard(a){
-  const T={all:"Tất cả lead mới",hot:"🔥 Hot mới (theo giờ gắn tag)",P:"Prospect",C:"Cold",W:"Warm",U:"Chưa gắn tag",cph:"Chưa phản hồi"};
+  const T={all:"Tất cả lead mới",hot:"🔥 Hot mới (lead tạo trên Salesforce)",P:"Prospect",C:"Cold",W:"Warm",U:"Chưa gắn tag",cph:"Chưa phản hồi"};
   $("tblTitle").textContent=T[S.tbl]+" trong kỳ";
   const exCls=l=>l.cls.includes("P")?"P":(l.cls.includes("W")?"W":(l.cls.includes("C")?"C":null));
   // Lấy đúng danh sách đã dựng lúc ĐẾM → số dòng luôn khớp KPI
@@ -776,7 +838,7 @@ function tableCard(a){
   const ghi=[nRe?nRe+" reMKT":"", nUp?nUp+" nâng hạng":""].filter(Boolean).join(" · ");
   $("tblSub").textContent=rows.length+" người"+(ghi?" (gồm "+ghi+" — không tính vào KPI)":"");
   EXP.rows=rows;EXP.title=T[S.tbl];   // giữ lại đúng danh sách đang hiện để export
-  $("tbl").innerHTML="<tr><th class='num' style='width:40px'>#</th><th>Tên</th><th>Nguồn</th><th>Chat đầu</th><th>Lên Hot</th><th>Phân loại</th><th>Mảng</th><th>Kênh</th><th>SĐT</th><th></th></tr>"+
+  $("tbl").innerHTML="<tr><th class='num' style='width:40px'>#</th><th>Tên</th><th>Nguồn</th><th>Chat đầu</th><th>Vào Salesforce</th><th>Phân loại</th><th>Mảng</th><th>Kênh</th><th>SĐT</th><th></th></tr>"+
     (rows.length?rows.map((l,i)=>{
       const c=exCls(l)||(l.cls.includes("H")?"H":null);
       const mang=(l.bi?"AAA":"")+(l.bi&&l.fa?" + ":"")+(l.fa?"FA":"")||"—";
@@ -825,16 +887,16 @@ function coRunningCode(){
 function renderAll(){
   try{
     $("rangeLbl").textContent=rangeLbl();
+    if(SFPH_FOR!==DATA.leads)buildSfPh();   // phải có TRƯỚC agg(): agg dùng SFPH
     A=agg();                       // theo bộ lọc kỳ → hàng thẻ số + bảng chi tiết
     const fd=fixedDays();
     const F=fd?agg(fd):A;          // cố định từ ngày mở khoá → 5 biểu đồ
     kpis(A);tableCard(A);
-    chartStack(F);chartHot(F);chartLine(F);chartGrp(F);chartChan(F);chartSf(F.days,F.lab);
+    chartStack(F);chartHot(F.days,F.lab);chartLine(F);chartGrp(F);chartChan(F);
     // Phụ đề: card rộng nhất ghi đủ chữ "từ ngày mở"; mấy card hẹp chỉ ghi
     // "K62 · 15/08 → 07/09" cho khỏi xuống dòng đè lên biểu đồ.
     const dai=fd?fixedNote():"", ngan=fd?fixedNote(true):"";
     for(const [id,txt,full] of [["subStack","theo ngày chat đầu · đã loại reMKT",0],
-                                ["subHot","SMAX giờ gắn tag + Salesforce",0],
                                 ["subLine","đậm = TB trượt 7 ngày",0],
                                 ["subChan","lead mới",0],["subGrp","",0]]){
       const el=$(id); if(!el)continue;
@@ -920,7 +982,12 @@ function calMin(){
 }
 const dDiff=(a,b)=>Math.round((new Date(b+"T00:00:00Z")-new Date(a+"T00:00:00Z"))/86400000);
 /* "KH62" và "K62" là CÙNG một khoá (user chốt 2026-09-03) → quy về một mã. */
-const coKey=c=>String(c||"").toUpperCase().replace(/^KH(\d)/,"K$1");
+/* MÃ KHOÁ — KHÔNG gộp KH## vào K## nữa (2026-09-11).
+   Tag SMAX đã được /api/radar gộp sẵn ngay tại nguồn, còn dòng lấy từ
+   Salesforce phải giữ NGUYÊN mã bên SF: bộ lọc "Product (Lead)" trên dashboard
+   Salesforce không hề có mục KH nào, "contains K62" ra 72 chứ không phải 82.
+   Gộp ở đây là cộng nhầm 10 lead KH62 vào K62 rồi lệch với số Sales đang đọc. */
+const coKey=c=>String(c||"").trim().toUpperCase();
 /* CHỈ LẤY TỪ K58 TRỞ ĐI (user chốt 2026-09-08: "các dữ liệu khoá trước k cần
    lấy"). Khoá cũ hơn có tag nhập hồi tố theo lô nên "ngày mở" suy ra được là
    ngày ngồi nhập liệu, không phải ngày tuyển sinh — kéo theo tỷ lệ Hot 54-124%,
@@ -961,14 +1028,19 @@ function coCalc(){
       // Giữ NGÀY của từng lead theo nhóm, không chỉ giữ số đếm — có vậy mới cắt
       // được phễu tại một mốc bất kỳ. Trước 2026-09-07 chỉ đếm tổng nên chọn
       // ngày xong biểu đồ đổi mà hàng KPI vẫn trơ ra số cả khoá.
-      if(!o){o={code,openDay:open[code],hotD:[],leadD:[],pD:[],cD:[],wD:[]};byC.set(code,o)}
-      if(l.re)continue;                               // reMKT: không đếm (giống Tổng quan)
-      if(l.d){
+      if(!o){o={code,openDay:open[code],hotD:[],leadD:[],pD:[],cD:[],wD:[],hsD:[]};byC.set(code,o)}
+      // reMKT: MKT không tính vào "lead mới". Riêng dòng Salesforce VẪN tính,
+      // vì bên SF khách quay lại cũng được tạo lead và đếm như mọi người khác.
+      if(l.re&&!l.sf)continue;
+      if(!l.re&&l.d){
         o.leadD.push(l.d);
         const h=c=>l.cls.includes(c);
         if(h("P"))o.pD.push(l.d);else if(h("W"))o.wD.push(l.d);else if(h("C"))o.cD.push(l.d);
+        // Người CHỈ mang tag Hot bên SMAX. Giữ riêng để cột "Khác / chưa tag"
+        // vẫn cộng đủ bằng tổng lead — KHÔNG phải con số Hot của dashboard.
+        else if(h("H"))o.hsD.push(l.d);
       }
-      if(l.ha&&!l.up)o.hotD.push(l.ha);
+      if(l.ha)o.hotD.push(l.ha);
     }
   }
   const list=[...byC.values()].filter(o=>o.leadD.length>=5);
@@ -990,10 +1062,11 @@ function coCalc(){
     const lim=addDays(o.openDay,dayN), upto=arr=>arr.filter(x=>x<=lim).length;
     o.leads=upto(o.leadD); o.H=upto(o.hotD);
     o.P=upto(o.pD); o.C=upto(o.cD); o.W=upto(o.wD);
-    // "Khác": phần còn lại của phễu — lead chưa gắn tag phân loại, cộng thêm
-    // lead nâng hạng (đang là Hot nhưng không tính vào Hot mới). Để cột chồng
-    // luôn cộng đúng bằng tổng lead, không đẻ ra con số Hot thứ hai.
-    o.Un=Math.max(0,o.leads-o.P-o.C-o.W-o.H);
+    o.hS=upto(o.hsD);
+    // "Khác": phần còn lại của phễu SMAX. Trừ o.hS (người CHỈ có tag Hot bên
+    // SMAX) chứ KHÔNG trừ o.H — o.H đếm hồ sơ bên Salesforce, là một tập người
+    // khác hẳn, trừ vào đây thì cột chồng hết cộng đúng bằng tổng lead.
+    o.Un=Math.max(0,o.leads-o.P-o.C-o.W-o.hS);
     o.hotAt=o.H; o.leadsAt=o.leads;
     // Số CẢ KHOÁ (không cắt) — chỉ dùng cho cột cuối của bảng so sánh.
     o.leadsAll=o.leadD.length; o.hotAll=o.hotD.length;
@@ -1038,14 +1111,14 @@ function renderCohort(){
     $("coSub").textContent="không có khoá nào khớp bộ lọc hiện tại";return}
   const cs=R.list, cur=R.cur, dayN=R.dayN;
   $("coSub").textContent="so "+cs.length+" khoá tại cùng mốc ngày thứ "+dayN
-    +" · cùng nguồn & cùng cách đếm với trang Tổng quan";
+    +" · Hot lấy thẳng từ Salesforce, lead lấy từ SMAX";
   const cutting=dayN<cur.days;
   const hetNgay=cutting?addDays(cur.openDay,dayN):asofDate;
   $("coHead").textContent=cur.code+" · ngày thứ "+(cutting?dayN:cur.days)
     +" · "+fmtD(cur.openDay)+" → "+fmtD(hetNgay);
   const tot=cur.leads||0, pc=v=>tot?Math.round(v/tot*100)+"% tổng":"";
   const K=[["Lead của khoá",tot,"",""],
-           ["🔥 Hot",cur.H,"--sH",pc(cur.H)],
+           ["🔥 Hot",cur.H,"--sH","nguồn Salesforce"],
            ["Warm",cur.W,"--sW",pc(cur.W)],
            ["Cold",cur.C,"--sC",pc(cur.C)],
            ["Prospect",cur.P,"--sP",pc(cur.P)],
@@ -1167,7 +1240,7 @@ function chartCoMix(cs){
   const maxV=Math.max(4,...d.map(c=>c.leads))*1.1;
   const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
   const band=plotW/d.length;
-  const SEG=[["P","--sP","Prospect"],["C","--sC","Cold"],["W","--sW","Warm"],["H","--sH","Hot"],["Un","--sU","Khác / chưa tag"]];
+  const SEG=[["P","--sP","Prospect"],["C","--sC","Cold"],["W","--sW","Warm"],["hS","--sH","Đã gắn Hot (SMAX)"],["Un","--sU","Khác / chưa tag"]];
   d.forEach((c,i)=>{
     const x=pad.l+band*i+band*.18,w=band*.64; let acc=0;
     for(const [k,col] of SEG){
@@ -1185,76 +1258,11 @@ function chartCoMix(cs){
     hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
   });
 }
-/* LEAD TẠO TRÊN SALESFORCE THEO NGÀY — GÓC NHÌN CỦA SALES.
-   Số lấy THẲNG từ Salesforce qua /api/sf-leads, KHÔNG qua bản sao trên Lark
-   (bản đó có dòng trùng và dòng chết, đo 2026-09-10: 110 dòng cho 67 lead).
-   User chốt: "sai thì trên SF fix, dưới này chỉnh theo".
-   Khác "Lên Hot theo ngày" ở trên: bên đó đếm người ĐƯỢC GẮN TAG HOT trên
-   SMAX; bên này đếm người ĐƯỢC TẠO HỒ SƠ trên Salesforce, Cold và Hot đếm như
-   nhau vì Sales coi mọi lead có contact là đáng ghi nhận. */
-let SF=null, sfReq=0;
-async function loadSf(n){
-  const my=++sfReq;
-  try{
-    const u=new URL(location.origin+"/api/sf-leads");
-    u.searchParams.set("days",String(Math.min(400,Math.max(30,n))));
-    if(KEY)u.searchParams.set("key",KEY);
-    const j=await fetch(u,{cache:"no-store"}).then(r=>r.json());
-    if(my!==sfReq||j.error)return;
-    SF=j.rows||[]; renderAll();
-  }catch(e){ console.warn("[radar] không nạp được lead Salesforce:",e.message) }
-}
-function chartSf(days,lab){
-  const svg=$("cSf"); if(!svg)return;
-  const {W,H}=dims(svg,420,150),pad={t:12,b:22,l:30,r:8};
-  const idx={}; days.forEach((d,i)=>idx[d]=i);
-  const z=()=>days.map(()=>0);
-  const Hh=z(),Cc=z(),Uu=z(); let tong=0,hot=0;
-  // MẶC ĐỊNH BÁM KHOÁ ĐANG TUYỂN SINH, để khớp đúng report "Lead By Day" bên
-  // Salesforce — report đó cố định lọc "Product chứa K62". Không lọc thì biểu
-  // đồ gộp cả K61, KH62… ra 108 lead trong khi SF ghi 67, user tưởng sai số
-  // (2026-09-10). Chọn khoá khác ở thanh lọc thì theo lựa chọn đó.
-  const khoaSF = S.co.size ? null : coRunningCode();
-  for(const x of (SF||[])){
-    const co=x.co||"";
-    if(S.grp==="bi"&&/^F\d/i.test(co))continue;
-    if(S.grp==="fa"&&!/^F\d/i.test(co))continue;
-    if(S.co.size ? !S.co.has(co) : (khoaSF && co!==khoaSF))continue;
-    const i=idx[x.d]; if(i==null)continue;
-    tong+=x.n; if(x.r==="H"){Hh[i]+=x.n;hot+=x.n} else if(x.r==="C")Cc[i]+=x.n; else Uu[i]+=x.n;
-  }
-  const nhanKhoa = S.co.size ? [...S.co].join(", ") : (khoaSF || "tất cả khoá");
-  $("subSf").textContent=(SF?("thẳng từ Salesforce · khoá "+nhanKhoa+" · "
-    +tong+" lead · "+hot+" Hot"):"đang tải…");
-  const tot=days.map((_,i)=>Hh[i]+Cc[i]+Uu[i]);
-  const maxV=Math.max(3,...tot)*1.2;
-  const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
-  const band=plotW/Math.max(1,days.length);
-  days.forEach((d,i)=>{
-    if(!tot[i])return;
-    const x=pad.l+band*i+band*.2,w=Math.max(2,band*.6); let acc=0;
-    for(const [arr,col] of [[Cc,"--sC"],[Uu,"--sU"],[Hh,"--sH"]]){
-      const v=arr[i]; if(!v)continue;
-      const h=v/maxV*plotH,y=pad.t+plotH-h-acc;
-      g.appendChild(svgEl("rect",{x,y,width:w,height:h,style:"fill:var("+col+")",rx:1}));
-      acc+=h;
-    }
-    const t=svgEl("text",{x:x+w/2,y:pad.t+plotH-acc-3,class:"axis","text-anchor":"middle"});
-    t.textContent=tot[i];g.appendChild(t);
-    const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
-    hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+fmtD(d)+"</div>"
-      +"<div class='row'><span>Tổng lead</span><b>"+tot[i]+"</b></div>"
-      +(Hh[i]?"<div class='row'><span>Hot</span><b>"+Hh[i]+"</b></div>":"")
-      +(Cc[i]?"<div class='row'><span>Cold</span><b>"+Cc[i]+"</b></div>":"")
-      ,e.clientX,e.clientY));
-    hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
-  });
-  const step=Math.max(1,Math.ceil(days.length/8));
-  for(let i=0;i<days.length;i+=step){
-    const t=svgEl("text",{x:pad.l+band*i+band/2,y:pad.t+plotH+13,class:"axis","text-anchor":"middle"});
-    t.textContent=lab[i];g.appendChild(t);
-  }
-}
+/* Trước 2026-09-11 chỗ này là thẻ "Lead tạo trên Salesforce theo ngày" riêng,
+   đặt cạnh thẻ "Lên Hot theo ngày" của SMAX để thấy độ chênh. Nay Hot đã lấy
+   100% từ Salesforce nên hai thẻ nói cùng một chuyện — bỏ thẻ trùng, giữ lại
+   một thẻ Hot duy nhất (chartHot ở trên). Endpoint /api/sf-leads vẫn còn, dùng
+   làm bản đối chiếu độc lập khi cần kiểm tra lại số. */
 /* ---- nới cửa sổ dữ liệu ----
    API mặc định chỉ trả 40 ngày cho nhanh. Khoá như K61 chạy suốt 3 tháng nên
    40 ngày là không đủ — khi người dùng chọn kỳ dài hơn phần đang có thì gọi lại
@@ -1509,7 +1517,6 @@ renderAll();
     for(const d of Object.values(run))need=Math.max(need,dDiff(d,asofDate)+2);
     await ensureWindow(need);
     renderAll();
-    loadSf(need);          // lead Salesforce phủ đúng khoảng biểu đồ đang vẽ
   }catch(e){ console.warn("[radar] không nạp được bảng khoá:",e.message) }
 })();
 

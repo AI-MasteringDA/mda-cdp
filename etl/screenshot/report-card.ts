@@ -20,8 +20,10 @@ const short = (label: string, value: string): El => ({ is_short: true, text: { t
 /** Một khối cho mỗi mảng (BI / FA). */
 function section(name: string, icon: string, k: Kpi, c: Course): El[] {
   const g = (n: string) => k.rows.find(x => x.k === n)?.v ?? "0";
-  // "SMAX 34 · SF 2" — nguồn của Hot mới, để dưới dạng chú thích nhỏ.
-  const src = (k.rows.find(x => x.k === "Hot mới")?.d || []).find(x => x.startsWith("SMAX")) || "";
+  // Dòng nguồn của Hot mới: "nguồn Salesforce · 7 ca SMAX đã Hot, SF chưa có".
+  // Từ 2026-09-11 Hot lấy 100% từ Salesforce nên phải ghi rõ, kèm số ca sales
+  // còn nợ nhập liệu — đó là việc phải làm ngay khi đọc báo cáo.
+  const src = (k.rows.find(x => x.k === "Hot mới")?.d || []).find(x => x.includes("Salesforce")) || "";
   const out: El[] = [
     { tag: "div", text: { tag: "lark_md", content: c ? `**${icon} ${name}** · đang tuyển sinh **${c.code}** — ngày thứ ${c.days}` : `**${icon} ${name}**` } },
     { tag: "div", fields: [
@@ -31,7 +33,7 @@ function section(name: string, icon: string, k: Kpi, c: Course): El[] {
       short("Chưa phản hồi", g("Chưa phản hồi")),
     ] },
   ];
-  if (src) out.push({ tag: "note", elements: [{ tag: "lark_md", content: `Hot mới đến từ ${src}` }] });
+  if (src) out.push({ tag: "note", elements: [{ tag: "lark_md", content: `🔥 Hot mới — ${src}` }] });
   if (c) {
     const pc = (v: number) => c.leads ? Math.round(v / c.leads * 100) + "%" : "0%";
     out.push({ tag: "div", text: { tag: "lark_md", content: `Luỹ kế cả khoá **${c.code}** — **${c.leads}** lead` } });

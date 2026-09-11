@@ -53,6 +53,81 @@ const idKeysOf = (phone: string, email: string): string[] =>
     k.startsWith("p:") ? !COMPANY_PHONE_TAILS.has(k.slice(2))
       : !COMPANY_EMAIL_RE.test(k.slice(2)));
 
+/**
+ * MÃ KHOÁ ĐÚNG NHƯ SALESFORCE GHI — "KH62" KHÔNG gộp vào "K62".
+ * Khác hẳn coCode() ở trên (dùng cho tag SMAX). Lý do: bộ lọc "Product (Lead)"
+ * trên dashboard Salesforce chỉ có các mục "contains K59 / K60 / K61 / K62 /
+ * F2 / F3 / F4" — KHÔNG hề có mục KH nào, nên "contains K62" không bắt được
+ * "KH62 - 2026" và con số Sales đọc hằng ngày là 72 (user chốt 2026-09-11:
+ * "k có KH62, 72 là đúng rồi"). Cột Hot bên mình mirror Salesforce 1:1 nên
+ * phải gom y hệt: KH62 đứng riêng, không cộng vào K62.
+ * ⚠ Trên các khoá cũ chênh này KHÔNG nhỏ — KH58 có 107 lead trong khi K58 có
+ * 98; nếu sau này BU xác nhận KH## chính là K## thì đổi hàm này thành coCode().
+ */
+const sfCo = (s: string): string => {
+  const m = String(s || "").trim().match(/^(KH?\d{2,3}|F\d(?:\.\d)?)\b/i);
+  return m ? m[1].toUpperCase() : "";
+};
+
+type SfLead = {
+  Id: string; Name: string | null; Phone: string | null; MobilePhone: string | null;
+  Email: string | null; Rating: string | null; IsConverted: boolean;
+  CreatedDate: string; Product__r: { Name: string | null } | null;
+};
+
+/**
+ * KÉO THẲNG LEAD TỪ SALESFORCE (SOQL), không qua bản sao trên Lark.
+ * Bản sao "Salesforce_Database" từng có 110 dòng lead_created cho khoá K62
+ * trong khi Salesforce chỉ có 72 lead — nhân đôi do hai job ghi bằng hai khoá
+ * chống trùng khác nhau, cộng thêm dòng đã đổi sản phẩm / đã xoá bên SF mà
+ * Lark còn giữ. Khử kiểu gì cũng không về đúng được, nên bỏ hẳn.
+ * Trả null nếu thiếu biến môi trường hoặc SF lỗi — khi đó dashboard vẫn chạy,
+ * chỉ là cột Hot bằng 0 và `sfErr` nói rõ lý do (không im lặng ra số sai).
+ */
+/**
+ * TRẦN CỬA SỔ LẤY LEAD SALESFORCE — 420 ngày.
+ * Salesforce đang có 50.120 Lead từ 2023 (đo 2026-09-11). Kỳ "Tất cả" của
+ * dashboard xin tới 3000 ngày; kéo hết chừng đó vừa nặng (~7 MB nhét thêm vào
+ * /api/radar) vừa vô ích — dashboard đã chốt chỉ quan tâm từ K58 (mở
+ * 10/01/2026, tức ~245 ngày) trở đi. 420 ngày phủ K58 còn dư nửa năm.
+ */
+const SF_MAX_DAYS = 420;
+
+async function pullSf(sinceMs: number): Promise<{ rows: SfLead[] } | { err: string }> {
+  const INST = process.env.SALESFORCE_INSTANCE_URL, CID = process.env.SALESFORCE_CLIENT_ID,
+        CSEC = process.env.SALESFORCE_CLIENT_SECRET, V = process.env.SALESFORCE_API_VERSION || "v59.0";
+  if (!INST || !CID || !CSEC) return { err: "thiếu biến môi trường Salesforce" };
+  const tr = await fetch(`${INST}/services/oauth2/token`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "client_credentials", client_id: CID, client_secret: CSEC }),
+    cache: "no-store",
+  }).then(r => r.json()).catch(() => null);
+  if (!tr?.access_token) return { err: "đăng nhập Salesforce thất bại" };
+  const gioiHan = Date.now() - SF_MAX_DAYS * 86400_000;
+  const from = new Date(Math.max(sinceMs, gioiHan)).toISOString().slice(0, 19) + "Z";
+  // ORDER BY ... DESC: nếu có chạm trần phân trang thì phần bị cắt là lead CŨ
+  // NHẤT, không phải lead mới. Lần đầu viết để ASC nên trần 20.000 cắt mất toàn
+  // bộ lead gần đây — dashboard ra Hot = 0 cho K62 (bắt được 2026-09-11).
+  const soql = `SELECT Id, Name, Phone, MobilePhone, Email, Rating, IsConverted, `
+    + `CreatedDate, Product__r.Name FROM Lead WHERE CreatedDate >= ${from} ORDER BY CreatedDate DESC`;
+  const rows: SfLead[] = [];
+  let url: string | null = `${INST}/services/data/${V}/query?q=${encodeURIComponent(soql)}`;
+  // SOQL trả tối đa 2000 bản ghi/lượt; nextRecordsUrl để lấy trang tiếp.
+  // 15 trang = 30.000 lead, dư xa cho 420 ngày (đo được ~2.800).
+  for (let i = 0; url && i < 15; i++) {
+    const q: { records?: SfLead[]; nextRecordsUrl?: string } | { 0: { message: string } } | null =
+      await fetch(url, { headers: { Authorization: `Bearer ${tr.access_token}` }, cache: "no-store" })
+        .then(r => r.json()).catch(() => null);
+    if (!q) return { err: "gọi SOQL thất bại" };
+    const bad = (q as Record<number, { message?: string }>)[0];
+    if (bad?.message) return { err: `SOQL: ${bad.message}` };
+    const ok = q as { records?: SfLead[]; nextRecordsUrl?: string };
+    rows.push(...(ok.records ?? []));
+    url = ok.nextRecordsUrl ? `${INST}${ok.nextRecordsUrl}` : null;
+  }
+  return { rows };
+}
+
 function toLead(f: Record<string, Cell>, cutoff: string) {
   const tags = g(f["Tag SMAX"]);
   // RULE SALES: Spam / Đã Block là rác — KHÔNG phải lead.
@@ -71,7 +146,6 @@ function toLead(f: Record<string, Cell>, cutoff: string) {
   // chưa có cột này vẫn rơi về mốc nửa đêm như trước, không hỏng view theo ngày.
   const bcMs = typeof f["Chat đầu lúc"] === "number" ? f["Chat đầu lúc"] as number
     : (typeof f["Báo cáo ngày"] === "number" ? f["Báo cáo ngày"] as number : null);
-  const haMs = typeof f["Hot Lead lúc"] === "number" ? f["Hot Lead lúc"] as number : null;
   // LUỒNG CHỊ LA (chốt 2026-08-10): ĐÃ gắn tag phân loại từ trước thì hôm nay
   // lên Hot chỉ là NÂNG HẠNG, không phải "Hot lead mới trong ngày". Mốc gắn tag
   // nằm ngay trên cùng dòng (SMAX gộp mọi tag của 1 khách vào 1 bản ghi) nên
@@ -90,7 +164,12 @@ function toLead(f: Record<string, Cell>, cutoff: string) {
     const dd = vnDate(f[col]); if (dd) cd[k] = dd;
   }
   return {
-    n: gs(f["Lead Name"]) || "(?)", d: bc, ha, dMs: bcMs, haMs, cd, up, upFrom: up ? priorCls : "",
+    // ha/haMs = MỐC HOT. Từ 2026-09-11 Hot lấy 100% từ Salesforce (user chốt:
+    // "Hot lead luôn luôn lấy từ SF, SF chuẩn 100%, lấy số nó để dùng") nên
+    // lead SMAX KHÔNG còn mang mốc Hot nữa — tag "Hot Lead" bên SMAX chỉ còn
+    // giữ ở `hs` để HIỂN THỊ trong bảng chi tiết và để đo độ trễ nhập liệu
+    // ("SMAX đã gắn Hot mà SF chưa có dòng"), tuyệt đối không vào phép đếm.
+    n: gs(f["Lead Name"]) || "(?)", d: bc, ha: null as string | null, dMs: bcMs, haMs: null as number | null, hs: ha, cd, up, upFrom: up ? priorCls : "",
     cls: tags.map(t => ({ hotlead: "H", coldlead: "C", warmlead: "W", prospect: "P" } as Record<string, string>)[norm(t)]).filter(Boolean),
     bi: tags.some(t => /^kh?\d{2,3}$/i.test(t.trim())),
     fa: tags.some(t => /^f\d(\.\d)?$/i.test(t.trim())),
@@ -103,7 +182,7 @@ function toLead(f: Record<string, Cell>, cutoff: string) {
   };
 }
 
-type Lead = { n: string; n2?: string; d: string | null; ha: string | null; dMs: number | null; haMs: number | null; cd: Record<string, string>; up: boolean; upFrom: string; cls: string[]; bi: boolean; fa: boolean; co: string[]; ch: string[]; ph: string; cph: boolean; ky: string[]; re: string; sf?: boolean };
+type Lead = { n: string; n2?: string; d: string | null; ha: string | null; hs?: string | null; sfR?: string; sfConv?: boolean; dMs: number | null; haMs: number | null; cd: Record<string, string>; up: boolean; upFrom: string; cls: string[]; bi: boolean; fa: boolean; co: string[]; ch: string[]; ph: string; cph: boolean; ky: string[]; re: string; sf?: boolean };
 
 export async function GET(req: Request) {
   // Cửa sổ dữ liệu tính bằng ngày. Mặc định 40 cho nhanh (~2,6s); dashboard tự
@@ -129,20 +208,8 @@ export async function GET(req: Request) {
   const leads: Lead[] = [];
   // key → nhãn khoá cũ ("K45 - 2024"). Đọc từ cột "Lead cũ (SF)" = RelevantLeads__c.
   const remkt = new Map<string, string>();
-  // key (SĐT/email) → mốc lead vào WEB sớm nhất bên SF. Dùng để quy ngày Hot
-  // cho lead web (xem khối "LEAD ĐẾN TỪ WEB" bên dưới).
-  const webLead = new Map<string, number>();
   // key → mã khoá bên SF ("K61"), để bù cho lead mà SMAX ghi khoá khác.
   const sfCourse = new Map<string, Set<string>>();
-  // LEAD TẠO TRÊN SALESFORCE — dữ liệu cho biểu đồ "Lead tạo trên Salesforce
-  // theo ngày" (user yêu cầu 2026-09-10, đưa report "Lead By Day" bên SF vào
-  // dashboard). Sales tính KHÁC marketing: hễ khách để lại contact là đã ghi
-  // nhận, Cold hay Hot đếm NHƯ NHAU — nên ở đây KHÔNG lọc theo rating.
-  // KHỬ TRÙNG: bảng Salesforce_Database đang có 38/71 người bị nhân đôi dòng
-  // (cùng người, cùng ngày, cùng rating, khác record_id — dấu vết hai lần
-  // import). Không khử thì số vống gần gấp đôi: 109 dòng cho 67 lead thật.
-  const sfSeenNew = new Set<string>();
-  const sfNew: { d: string; r: string; co: string; conv: boolean }[] = [];
 
   // Nhanh: search có filter (bc > cutoff OR hot-lúc > cutoff)
   let searched = false;
@@ -193,11 +260,6 @@ export async function GET(req: Request) {
   // của lead_created = CreatedDate của Lead gốc (đã sửa 2026-08-10).
   const sfTable = tR.data?.items?.find((t: { name: string; table_id: string }) => t.name === "Salesforce_Database")?.table_id;
   if (sfTable) {
-    // Khoá của những người ĐÃ được đếm — vừa để gộp lead SF trùng nhau, vừa để
-    // không đếm lại người mà nhánh SMAX đã tính (bổ sung cho phép kiểm tag
-    // "Hot Lead" bên dưới, vì lead SF có thể không mang tag SMAX nào).
-    const sfSeen = new Set<string>();
-    for (const l of leads) for (const k of idKeysOf(l.ph, "")) sfSeen.add(k);
     let spt: string | undefined; let pages = 0;
     while (pages < 30) {
       const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${sfTable}/records/search`);
@@ -222,131 +284,76 @@ export async function GET(req: Request) {
         // bên nhánh SMAX (ca chị Hà: SF bị skip do đã có Tag SMAX).
         const prior = gs(f["Lead cũ (SF)"]).trim();
         if (prior) for (const k of keys) if (!remkt.has(k)) remkt.set(k, prior);
-        // LEAD ĐẾN TỪ WEB — ghi nhận mốc vào web để quy ngày Hot cho đúng.
-        // Luồng thật (user mô tả 2026-08-18, ca "chị Nhâm"): khách điền form
-        // web ⇒ SF tạo lead ngay hôm đó với kênh "Web -> Email + Call"; sau đó
-        // khách mới nhắn SMAX và sales gắn tag Hot — có thể LỆCH SANG NGÀY KHÁC.
-        // Đếm theo giờ gắn tag SMAX là đẩy công sang ngày sales thao tác chứ
-        // không phải ngày lead thật sự vào. Ghi ở ĐÂY (không phải trong nhánh
-        // đếm bên dưới) vì phần lớn ca này bị nhánh SF bỏ qua do SMAX đã có tag.
-        if (/web\s*->/i.test(gs(f["Kênh (SF)"]))) {
-          const wMs = typeof f["Time"] === "number" ? f["Time"] as number : 0;
-          if (wMs) for (const k of keys) { const cur = webLead.get(k); if (cur == null || wMs < cur) webLead.set(k, wMs); }
-        }
         // KHOÁ BÊN SF: SMAX và SF hay ghi khác khoá cho cùng một người (ca
         // "H Xuan": SMAX ghi K60, SF ghi K61). Gom lại để lead nào cũng lọc
         // được theo khoá của CẢ HAI hệ, không bị hụt khi lọc K61.
         const prodRaw = gs(f["Khoá (SF)"]).trim();
         const pm = prodRaw.match(/^(KH?\d{2,3}|F\d(?:\.\d)?)\b/i);
         if (pm) for (const k of keys) { const s = sfCourse.get(k) ?? new Set<string>(); s.add(coCode(pm[1])); sfCourse.set(k, s); }
-        // Ghi nhận lead mới bên SF — TRƯỚC bước chống đếm đôi bên dưới, vì đây
-        // là con số của Sales, độc lập với việc SMAX có đếm người đó hay không.
-        {
-          const dNew = vnDate(f["Time"]);
-          if (dNew) {
-            // Khoá khử trùng = TÊN + SĐT/email. KHÔNG đưa ngày vào khoá: hai
-            // bản sao có thể lệch ngày, và cũng không đưa cả mảng keys vì bản
-            // này có email bản kia không ⇒ khoá khác nhau, lọt lưới.
-            // Đo 2026-09-10: 110 dòng → 76 người (Salesforce có 67).
-            const nm = (gs(f["Tên SF"]) || gs(f["Lead Name"]))
-              .toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
-              .replace(/đ/g, "d").replace(/[^a-z0-9]+/g, " ").trim();
-            // Ưu tiên khoá LIÊN HỆ (sđt/email) — cùng người thì cùng số, bất
-            // kể tên viết khác nhau. Không có liên hệ mới rơi về tên.
-            const dupKey = keys[0] ?? `n:${nm}`;
-            if (!sfSeenNew.has(dupKey)) {
-              sfSeenNew.add(dupKey);
-              const rr = gs(f["Rating (SF)"]).trim().toLowerCase();
-              sfNew.push({
-                d: dNew,
-                r: rr === "hot" ? "H" : rr === "cold" ? "C" : rr === "warm" ? "W" : "",
-                co: pm ? coCode(pm[1]) : "",
-                conv: f["Đã chốt (SF)"] === true,
-              });
-            }
-          }
-        }
-        // CHỐNG ĐẾM ĐÔI — chỉ bỏ khi SMAX THẬT SỰ đếm người này là Hot. Trước
-        // đây bỏ khi có BẤT KỲ tag SMAX nào, nên ai có tag "SF_Done"/"BI Student"
-        // mà không có "Hot Lead" thì lọt khe: SF bỏ vì "SMAX đếm rồi", còn SMAX
-        // không đủ điều kiện để đếm ⇒ mất hẳn (16 ca khoá K61, đo 2026-08-10).
-        if (g(f["Tag SMAX"]).some(t => norm(t) === "hotlead")) continue;
-        const ha = vnDate(f["Time"]); if (!ha || ha < cutoff) continue;
-        const haMs2 = typeof f["Time"] === "number" ? f["Time"] as number : null;
-        // Tên SF thường khác tên SMAX (SMAX "K40-Bảo Lee" ↔ SF "Lý Hồng Bảo") →
-        // hiện tên SF làm chính để tra trên Salesforce được ngay, kèm tên SMAX.
-        const sfName = gs(f["Tên SF"]).trim(), smaxName = gs(f["Lead Name"]).trim();
-        // Nhánh này chỉ bổ sung HOT. Trước đây coi MỌI lead SF là Hot — sai, vì
-        // riêng khoá K61 trên SF đã có 80 lead Cold.
-        //
-        // RATING TRỐNG: trước kia VẪN tính, vì dữ liệu đi qua Supabase có thể
-        // chưa backfill xong nên trống = "chưa biết". Từ 2026-08-18 KHÔNG tính
-        // nữa (user chốt): sf-lark-bridge.ts luôn ghi Rating thẳng từ Salesforce
-        // ⇒ trống nghĩa là sales THẬT SỰ chưa đánh giá, không phải thiếu dữ liệu.
-        // Đo lúc đổi: 21/86 lead SF đang được tính Hot chỉ nhờ rating trống — ca
-        // "Julie Vu" (không email, không SĐT, không rating) là ví dụ user bắt được.
-        const rating = norm(gs(f["Rating (SF)"]));
-        if (rating !== "hot") continue;
-        // ĐÃ CHỐT SALES thì thôi đếm Hot (user chốt 2026-08-18): lead convert
-        // sang Contact/Opportunity bên SF đã thành KHÁCH, không còn nằm trong
-        // phễu "Hot lead" nữa. Cột này do sf-lark-bridge.ts ghi từ IsConverted.
-        // Đo lúc thêm: 51 lead convert trong 45 ngày, 10 mang Rating=Hot vẫn
-        // đang được đếm (ca "Vũ Thị Thu Uyên" user bắt được).
-        if (f["Đã chốt (SF)"] === true) continue;
-        // GỘP LEAD TRÙNG BÊN SF (user chốt 2026-08-18 "gộp lead chính xác trên
-        // SF, để k dup"). Salesforce cho phép cùng một người tồn tại nhiều Lead
-        // — đo trên 486 lead/90 ngày: 17 nhóm trùng email, 16 nhóm trùng SĐT.
-        // Không gộp thì mỗi bản ghi đếm một lần ⇒ thổi phồng Hot.
-        // Khoá gộp đã LỌC BỎ liên hệ công ty (idKeysOf) vì 0961486648 đang nằm
-        // trên 2 lead của hai người khác nhau — gộp theo đó là sai người.
-        // Lead không có cả email lẫn SĐT thì KHÔNG có căn cứ nào để gộp (2 ca:
-        // "Julie Vu", "Mai Trinh") — đành để riêng, phải sửa dữ liệu bên SF.
-        const idKeys = idKeysOf(gs(f["Phone"]), gs(f["Email"]));
-        if (idKeys.some(k => sfSeen.has(k))) continue;
-        for (const k of idKeys) sfSeen.add(k);
-        // "K61 - ONL - 2026" → "K61" để lọc chung một rổ với tag SMAX.
-        const prod = gs(f["Khoá (SF)"]).trim();
-        const m = prod.match(/^(KH?\d{2,3}|F\d(?:\.\d)?)\b/i);
-        leads.push({
-          n: sfName || smaxName || "(?)", n2: sfName && smaxName && sfName !== smaxName ? smaxName : "",
-          d: null, ha, dMs: null, haMs: haMs2, cd: ha ? { H: ha } : {}, up: false, upFrom: "", cls: ["H"],
-          bi: /^KH?\d/i.test(prod), fa: /^F\d/i.test(prod),
-          co: m ? [coCode(m[1])] : [],
-          ch: ["Salesforce"], ph: gs(f["Phone"]), cph: false, sf: true,
-          ky: keys, re: "",
-        });
+        // (Trước 2026-09-11 chỗ này đẩy lead Hot lấy từ bản sao Lark
+        //  "Salesforce_Database". Đã bỏ — Hot giờ lấy THẲNG từ Salesforce bằng
+        //  SOQL ở khối dưới. Bản sao trên Lark vẫn dùng, nhưng chỉ cho reMKT và
+        //  khoá-bên-SF, là hai thứ không đòi con số phải khớp tuyệt đối.)
       }
       pages++;
       if (!d.data?.has_more) break; spt = d.data.page_token;
     }
   }
 
+  // ── HOT = LEAD TRÊN SALESFORCE, MIRROR 1:1 ────────────────────────────────
+  // User chốt 2026-09-11: "Hot lead luôn luôn lấy từ SF, SF chuẩn 100%, lấy số
+  // nó để dùng" — và trước đó "đúng sai gì kệ, sai thì trên SF fix, dưới này
+  // chỉnh theo". Nên khối này CỐ Ý KHÔNG lọc và KHÔNG gộp gì cả:
+  //   · không lọc Rating — Sales coi khách để lại contact là đã ghi nhận, Cold
+  //     hay Hot đếm như nhau (user xác nhận với đội sales 2026-09-10);
+  //   · không bỏ lead đã convert — dashboard SF đếm cả 15 lead đã chốt của K62
+  //     trong con số 72 (ô "No. of Leads" 72 vs "Not yet Convert" 57);
+  //   · không gộp lead trùng người — SF đếm theo BẢN GHI. Trùng thì sửa bên SF.
+  //   · không loại khách quay lại (reMKT) — vẫn dán nhãn để sales nhìn thấy,
+  //     nhưng vẫn cộng, vì bên SF họ cũng được đếm.
+  // Mỗi Lead bên SF = một dòng ở đây ⇒ đếm ra đúng con số trên dashboard SF.
+  const sf = await pullSf(cutoffMs);
+  let sfHot = 0;
+  const sfErr = "err" in sf ? sf.err : "";
+  if ("rows" in sf) {
+    for (const r of sf.rows) {
+      const ms = Date.parse(r.CreatedDate);
+      if (!Number.isFinite(ms)) continue;
+      // Múi giờ org Salesforce là Asia/Ho_Chi_Minh (UTC+7, đã kiểm 2026-09-11)
+      // ⇒ cộng 7h rồi cắt ngày cho ra ĐÚNG cột ngày mà report bên SF hiển thị.
+      const ha = vnDate(ms); if (!ha || ha < cutoff) continue;
+      const code = sfCo(r.Product__r?.Name ?? "");
+      const phone = gs(r.Phone) || gs(r.MobilePhone);
+      leads.push({
+        n: gs(r.Name) || "(?)", d: null, ha, dMs: null, haMs: ms, hs: null,
+        cd: { H: ha }, up: false, upFrom: "", cls: ["H"],
+        bi: /^KH?\d/i.test(code), fa: /^F\d/i.test(code), co: code ? [code] : [],
+        ch: ["Salesforce"], ph: phone, cph: false, sf: true,
+        ky: idKeysOf(phone, gs(r.Email)), re: "",
+        sfR: r.Rating === "Hot" ? "H" : r.Rating === "Cold" ? "C" : r.Rating === "Warm" ? "W" : "",
+        sfConv: r.IsConverted === true,
+      });
+      sfHot++;
+    }
+  }
+
   // Dán nhãn reMKT cho MỌI lead (cả SMAX lẫn SF) khớp người đã học khoá trước.
   // Dashboard hiện nhãn để sales biết đây là re-marketing, KHÔNG đếm vào lead
   // mới trong ngày. Lark không có nhãn này (theo yêu cầu 2026-08-10).
-  let reCount = 0, webFix = 0;
+  let reCount = 0;
   for (const l of leads) {
     for (const k of l.ky) { const lab = remkt.get(k); if (lab) { l.re = lab; reCount++; break; } }
-    // Bổ sung khoá bên SF vào lead SMAX (và ngược lại) → lọc theo khoá không hụt
-    for (const k of l.ky) { const s = sfCourse.get(k); if (s) for (const c of s) if (!l.co.includes(c)) l.co.push(c); }
+    // Bổ sung khoá bên SF vào lead SMAX → lọc theo khoá không hụt.
+    // KHÔNG áp cho chính dòng Salesforce: khoá của nó đọc thẳng từ Product bên
+    // SF rồi, mà sfCourse lại đã gộp KH→K ⇒ nhét vào là dòng "KH62" bỗng mang
+    // thêm "K62" và cộng nhầm vào khoá K62, lệch ngay với dashboard SF.
+    if (!l.sf) for (const k of l.ky) { const s2 = sfCourse.get(k); if (s2) for (const c of s2) if (!l.co.includes(c)) l.co.push(c); }
     // MẢNG (BI/FA) phải suy lại TỪ danh sách khoá SAU KHI đã gộp khoá bên SF.
     // Trước đây bi/fa chỉ đọc tag SMAX, nên lead có khoá K62 lấy từ SF (Đỗ Trung
     // Đức, Linh Nhâm, Anh Auto, Nguyễn Đức Trọng) mang co=["K62"] nhưng bi=false
     // ⇒ lọc "KHOÁ K62 + mảng BI" bị hụt 4 người (44 thay vì 48). 2026-09-03.
     if (l.co.some(c => /^KH?\d/i.test(c))) l.bi = true;
     if (l.co.some(c => /^F\d/i.test(c))) l.fa = true;
-    // QUY NGÀY HOT CHO LEAD WEB (user chốt 2026-08-18).
-    // Khách điền form web ⇒ SF tạo lead ngay hôm đó. Sau đó khách mới nhắn SMAX
-    // và sales gắn tag Hot — thường LỆCH SANG NGÀY KHÁC. Đếm theo giờ gắn tag là
-    // ghi công vào ngày sales thao tác, không phải ngày lead thật sự vào.
-    // Ca "chị Nhâm": vào web 17/08 09:46, chat SMAX 18/08 14:09, tag Hot 18/08
-    // 14:15 ⇒ trước đây bị đếm 18/08, đúng ra phải là 17/08.
-    // Chỉ LÙI về trước, không bao giờ đẩy tới: mốc web muộn hơn tag thì giữ tag.
-    if (!l.sf && l.haMs != null) {
-      let w: number | null = null;
-      for (const k of l.ky) { const t = webLead.get(k); if (t != null && (w == null || t < w)) w = t; }
-      if (w != null && w < l.haMs) { l.haMs = w; l.ha = vnDate(w); l.cd = { ...l.cd, H: l.ha ?? l.cd.H }; webFix++; }
-    }
   }
 
   // `ky` chỉ dùng để ghép reMKT ở trên, client không cần → bỏ đi cho nhẹ
@@ -354,5 +361,5 @@ export async function GET(req: Request) {
   const out = leads.map(({ ky, ...rest }) => { void ky; return rest; });
 
   const asOf = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 16).replace("T", " ");
-  return NextResponse.json({ asOf, days, leads: out, sfNew, reCount, webFix }, { headers: { "Cache-Control": "private, max-age=120" } });
+  return NextResponse.json({ asOf, days, leads: out, reCount, sfHot, sfDays: Math.min(days, SF_MAX_DAYS), sfErr }, { headers: { "Cache-Control": "private, max-age=120" } });
 }
