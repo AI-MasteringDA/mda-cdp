@@ -174,6 +174,15 @@ td b{font-weight:550}
 .dlab{font-weight:550}
 .axis{font-weight:450}
 #tip .t{font-weight:550}
+#mask{position:fixed;inset:0;z-index:80;display:none;align-items:center;justify-content:center;
+  background:rgba(246,248,252,.82);backdrop-filter:blur(2px)}
+body[data-loading] #mask{display:flex}
+#mask .box{background:var(--card);border-radius:var(--r);box-shadow:var(--cshadow);
+  padding:22px 30px;text-align:center;font-size:13px;color:var(--ink2)}
+#mask .hint{margin-top:5px;font-size:11px;color:var(--ink3)}
+#mask .sp{width:26px;height:26px;margin:0 auto 12px;border-radius:50%;
+  border:3px solid var(--line);border-top-color:var(--pill);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:1100px){body{overflow:auto}.app{height:auto;grid-template-columns:1fr}.main{grid-column:auto}.side{position:static;width:auto;flex-direction:row;align-items:center;gap:12px;padding:12px 16px}.side:hover{width:auto;box-shadow:none}.side .txt{opacity:1}.side nav{margin:0;flex-direction:row}.side .foot{display:none}.charts{grid-template-columns:1fr;grid-template-rows:none}.charts .card{min-height:240px}#cardStack,#cardTbl,#cardHot{grid-column:auto}.kpis{grid-template-columns:repeat(3,1fr)}}
 </style>
 
@@ -320,6 +329,13 @@ td b{font-weight:550}
   </main>
 </div>
 <div id="tip"></div>
+<!-- LỚP PHỦ KHI ĐANG TẢI.
+     Kỳ "Tất cả" phải gọi /api/radar?days=3000 — ~25-30 giây vì bảng SMAX đã
+     hơn 19.000 dòng. Trước 2026-09-11 trang vẫn vẽ bằng phần dữ liệu đã có,
+     nên ai mở trang Theo khoá trong lúc đó thấy "chỉ có K61, Hot = 0" và
+     tưởng dữ liệu sai (user bắt được). Nay che hẳn cho tới khi tải xong. -->
+<div id="mask"><div class="box"><div class="sp"></div><div id="maskTxt">Đang tải…</div>
+  <div class="hint">lần đầu mở kỳ “Tất cả” mất khoảng nửa phút</div></div></div>
 
 <script type="module">
 let DATA;
@@ -1103,6 +1119,9 @@ function syncBar(){
 }
 function renderCohort(){
   if(!CO)return;
+  // Đang tải thêm dữ liệu ⇒ coCalc() sẽ ra số của nửa bộ dữ liệu (thiếu hẳn
+  // khoá cũ). Thà để trống còn hơn vẽ ra con số sai.
+  if(loading){$("coSub").textContent="đang tải lịch sử các khoá cũ…";return}
   const R=coCalc();
   // Chỉ báo "đã render xong" khi KHÔNG còn tải thêm dữ liệu — nếu không, bot
   // chụp ngay lúc mới có nửa số khoá.
@@ -1272,28 +1291,43 @@ function chartCoMix(cs){
 const ALL_DAYS=3000;
 let LOADED=DATA.days||40;
 let loading=false;
+/* Promise của lượt tải ĐANG chạy.
+   BUG 2026-09-11: trước đây ensureWindow() gặp lượt khác đang chạy thì `return`
+   ngay. Mở trang rồi bấm sang "Theo khoá" trong lúc trang còn đang tải lần đầu
+   ⇒ lệnh xin 3000 ngày bị NUỐT, cửa sổ kẹt ở ~50 ngày, trang khoá hiện thiếu
+   hẳn K58–K60 và K61 ra 0 Hot — user tưởng dữ liệu sai.
+   Nay: CHỜ lượt đang chạy xong rồi xét lại, không bao giờ bỏ lệnh. */
+let inflight=null;
 async function ensureWindow(n){
-  if(n<=LOADED||loading)return;
-  loading=true;
-  const lbl=$("rangeLbl"),old=lbl.textContent;
-  lbl.textContent="đang tải dữ liệu…";
-  try{
-    // PHẢI kèm key như lần tải đầu: mở trang bằng ?key= (bot chụp ảnh, link báo
-    // cáo) thì thiếu key sẽ bị middleware đá về trang đăng nhập, fetch nhận HTML
-    // và chết ở r.json() ⇒ "Tất cả"/"30 ngày" im lặng không tải thêm được gì.
-    const r=await fetch("/api/radar?days="+n+(KEY?"&key="+encodeURIComponent(KEY):""),{cache:"no-store"});
-    if(!r.ok)throw new Error("API "+r.status);
-    const j=await r.json();
-    if(j.error)throw new Error(j.error);
-    DATA.leads=j.leads;DATA.asOf=j.asOf;LOADED=j.days||n;
-    buildCourses();                       // khoá cũ giờ mới xuất hiện
-    MIN_D=addDays(asofDate,-(LOADED-1));  // lịch mở rộng theo
-    drawCal();
-  }catch(err){
-    lbl.textContent=old;
-    showFatal("không tải được dữ liệu kỳ dài — "+err.message);
-    throw err;
-  }finally{loading=false}
+  while(inflight){ try{ await inflight }catch{ /* lượt kia hỏng, mình vẫn thử */ } }
+  if(n<=LOADED)return;
+  inflight=(async()=>{
+    loading=true;
+    const lbl=$("rangeLbl"),old=lbl.textContent;
+    lbl.textContent="đang tải dữ liệu…";
+    // Che trang lại: KHÔNG được để người dùng đọc con số của nửa bộ dữ liệu.
+    $("maskTxt").textContent = n>=ALL_DAYS ? "Đang tải toàn bộ lịch sử các khoá…"
+                                           : "Đang tải thêm dữ liệu…";
+    document.body.dataset.loading="1";
+    try{
+      // PHẢI kèm key như lần tải đầu: mở trang bằng ?key= (bot chụp ảnh, link báo
+      // cáo) thì thiếu key sẽ bị middleware đá về trang đăng nhập, fetch nhận HTML
+      // và chết ở r.json() ⇒ "Tất cả"/"30 ngày" im lặng không tải thêm được gì.
+      const r=await fetch("/api/radar?days="+n+(KEY?"&key="+encodeURIComponent(KEY):""),{cache:"no-store"});
+      if(!r.ok)throw new Error("API "+r.status);
+      const j=await r.json();
+      if(j.error)throw new Error(j.error);
+      DATA.leads=j.leads;DATA.asOf=j.asOf;LOADED=j.days||n;
+      buildCourses();                       // khoá cũ giờ mới xuất hiện
+      MIN_D=addDays(asofDate,-(LOADED-1));  // lịch mở rộng theo
+      drawCal();
+    }catch(err){
+      lbl.textContent=old;
+      showFatal("không tải được dữ liệu kỳ dài — "+err.message);
+      throw err;
+    }finally{loading=false;delete document.body.dataset.loading}
+  })();
+  try{ await inflight }finally{ inflight=null }
 }
 // Trang "Theo khoá" mặc định KỲ = "Tất cả" (user chốt 2026-09-03: "default khi
 // chụp cũng như khi mở thì tất cả"). Cửa sổ mặc định chỉ tải ~40 ngày nên các

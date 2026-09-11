@@ -71,7 +71,7 @@ const sfCo = (s: string): string => {
 
 type SfLead = {
   Id: string; Name: string | null; Phone: string | null; MobilePhone: string | null;
-  Email: string | null; Rating: string | null; IsConverted: boolean;
+  Email: string | null; Rating: string | null; IsConverted: boolean; RelevantLeads__c: string | null;
   CreatedDate: string; Product__r: { Name: string | null } | null;
 };
 
@@ -108,7 +108,7 @@ async function pullSf(sinceMs: number): Promise<{ rows: SfLead[] } | { err: stri
   // ORDER BY ... DESC: nếu có chạm trần phân trang thì phần bị cắt là lead CŨ
   // NHẤT, không phải lead mới. Lần đầu viết để ASC nên trần 20.000 cắt mất toàn
   // bộ lead gần đây — dashboard ra Hot = 0 cho K62 (bắt được 2026-09-11).
-  const soql = `SELECT Id, Name, Phone, MobilePhone, Email, Rating, IsConverted, `
+  const soql = `SELECT Id, Name, Phone, MobilePhone, Email, Rating, IsConverted, RelevantLeads__c, `
     + `CreatedDate, Product__r.Name FROM Lead WHERE CreatedDate >= ${from} ORDER BY CreatedDate DESC`;
   const rows: SfLead[] = [];
   let url: string | null = `${INST}/services/data/${V}/query?q=${encodeURIComponent(soql)}`;
@@ -258,47 +258,10 @@ export async function GET(req: Request) {
   // Hot ngày X = Hot của SMAX + lead SF chỉ-có-trên-SF. Dòng SF có "Tag SMAX"
   // CÓ dữ liệu ⇒ SMAX đã đếm rồi ⇒ bỏ qua (chống đếm đôi). Quy ngày theo Time
   // của lead_created = CreatedDate của Lead gốc (đã sửa 2026-08-10).
-  const sfTable = tR.data?.items?.find((t: { name: string; table_id: string }) => t.name === "Salesforce_Database")?.table_id;
-  if (sfTable) {
-    let spt: string | undefined; let pages = 0;
-    while (pages < 30) {
-      const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${sfTable}/records/search`);
-      url.searchParams.set("page_size", "500"); if (spt) url.searchParams.set("page_token", spt);
-      const d = await fetch(url.toString(), {
-        method: "POST", headers: H, cache: "no-store",
-        body: JSON.stringify({
-          field_names: ["Time", "Event", "Lead Name", "Tên SF", "Tag SMAX", "Phone", "Email", "Lead cũ (SF)", "Khoá (SF)", "Rating (SF)", "Đã chốt (SF)", "Kênh (SF)"],
-          filter: { conjunction: "and", conditions: [
-            { field_name: "Event", operator: "is", value: ["lead_created"] },
-            { field_name: "Time", operator: "isGreater", value: ["ExactDate", String(cutoffMs)] },
-          ] },
-        }),
-      }).then(r => r.json()).catch(() => ({ code: -1 }));
-      if (d.code !== 0) break;
-      for (const r of (d.data?.items ?? []) as LarkRecord[]) {
-        const f = r.fields ?? {};
-        const keys = keysOf(gs(f["Phone"]), gs(f["Email"]));
-        // KHÁCH QUAY LẠI: "Lead cũ (SF)" (RelevantLeads__c) liệt kê các khoá
-        // trước của chính người này — VD chị Thu Hà "K45 - 2024". Ghi nhận ở
-        // ĐÂY, kể cả dòng bị bỏ qua bên dưới, vì người đó có thể đang được đếm
-        // bên nhánh SMAX (ca chị Hà: SF bị skip do đã có Tag SMAX).
-        const prior = gs(f["Lead cũ (SF)"]).trim();
-        if (prior) for (const k of keys) if (!remkt.has(k)) remkt.set(k, prior);
-        // KHOÁ BÊN SF: SMAX và SF hay ghi khác khoá cho cùng một người (ca
-        // "H Xuan": SMAX ghi K60, SF ghi K61). Gom lại để lead nào cũng lọc
-        // được theo khoá của CẢ HAI hệ, không bị hụt khi lọc K61.
-        const prodRaw = gs(f["Khoá (SF)"]).trim();
-        const pm = prodRaw.match(/^(KH?\d{2,3}|F\d(?:\.\d)?)\b/i);
-        if (pm) for (const k of keys) { const s = sfCourse.get(k) ?? new Set<string>(); s.add(coCode(pm[1])); sfCourse.set(k, s); }
-        // (Trước 2026-09-11 chỗ này đẩy lead Hot lấy từ bản sao Lark
-        //  "Salesforce_Database". Đã bỏ — Hot giờ lấy THẲNG từ Salesforce bằng
-        //  SOQL ở khối dưới. Bản sao trên Lark vẫn dùng, nhưng chỉ cho reMKT và
-        //  khoá-bên-SF, là hai thứ không đòi con số phải khớp tuyệt đối.)
-      }
-      pages++;
-      if (!d.data?.has_more) break; spt = d.data.page_token;
-    }
-  }
+  // (Trước 2026-09-11 chỗ này quét bảng Lark "Salesforce_Database" tới 30
+  //  trang chỉ để lấy hai thứ: nhãn khách-quay-lại và mã khoá bên SF. Nay cả
+  //  hai lấy luôn từ chính lượt SOQL bên dưới — bớt ~30 lượt gọi Lark, và
+  //  không còn phụ thuộc bản sao vốn có dòng trùng / dòng chết.)
 
   // ── HOT = LEAD TRÊN SALESFORCE, MIRROR 1:1 ────────────────────────────────
   // User chốt 2026-09-11: "Hot lead luôn luôn lấy từ SF, SF chuẩn 100%, lấy số
@@ -324,12 +287,25 @@ export async function GET(req: Request) {
       const ha = vnDate(ms); if (!ha || ha < cutoff) continue;
       const code = sfCo(r.Product__r?.Name ?? "");
       const phone = gs(r.Phone) || gs(r.MobilePhone);
+      const keys = idKeysOf(phone, gs(r.Email));
+      // KHÁCH QUAY LẠI: RelevantLeads__c liệt kê lead/khoá trước của chính người
+      // này (VD chị Thu Hà → "K45 - 2024"). Dashboard hiện nhãn để sales biết
+      // đây là re-marketing; riêng "Lead mới" của MKT thì không đếm.
+      const prior = gs(r.RelevantLeads__c).trim();
+      if (prior) for (const k of keys) if (!remkt.has(k)) remkt.set(k, prior);
+      // KHOÁ BÊN SF: SMAX và SF hay ghi khác khoá cho cùng một người (ca
+      // "H Xuan": SMAX ghi K60, SF ghi K61). Gom lại để lead SMAX lọc được theo
+      // khoá của cả hai hệ. Ở đây gộp KH→K vì bên nhận là tag SMAX.
+      if (code) for (const k of keys) {
+        const cur = sfCourse.get(k) ?? new Set<string>();
+        cur.add(coCode(code)); sfCourse.set(k, cur);
+      }
       leads.push({
         n: gs(r.Name) || "(?)", d: null, ha, dMs: null, haMs: ms, hs: null,
         cd: { H: ha }, up: false, upFrom: "", cls: ["H"],
         bi: /^KH?\d/i.test(code), fa: /^F\d/i.test(code), co: code ? [code] : [],
         ch: ["Salesforce"], ph: phone, cph: false, sf: true,
-        ky: idKeysOf(phone, gs(r.Email)), re: "",
+        ky: keys, re: "",
         sfR: r.Rating === "Hot" ? "H" : r.Rating === "Cold" ? "C" : r.Rating === "Warm" ? "W" : "",
         sfConv: r.IsConverted === true,
       });
@@ -358,8 +334,20 @@ export async function GET(req: Request) {
 
   // `ky` chỉ dùng để ghép reMKT ở trên, client không cần → bỏ đi cho nhẹ
   // (kỳ "Tất cả" ~8.3k lead: 1,46 MB → 1,33 MB).
-  const out = leads.map(({ ky, ...rest }) => { void ky; return rest; });
+  // `ky` chỉ dùng để ghép reMKT ở trên; `cd` (mốc gắn từng tag) không trang nào
+  // đọc — bỏ cả hai cho nhẹ đường truyền.
+  const out = leads.map(({ ky, cd, ...rest }) => { void ky; void cd; return rest; });
 
   const asOf = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 16).replace("T", " ");
-  return NextResponse.json({ asOf, days, leads: out, reCount, sfHot, sfDays: Math.min(days, SF_MAX_DAYS), sfErr }, { headers: { "Cache-Control": "private, max-age=120" } });
+  return NextResponse.json({ asOf, days, leads: out, reCount, sfHot, sfDays: Math.min(days, SF_MAX_DAYS), sfErr }, { headers: {
+    // CHO EDGE CỦA VERCEL CACHE LẠI.
+    // Kỳ "Tất cả" mất ~27s vì bảng SMAX đã hơn 19.000 dòng và Lark chỉ trả
+    // 500 dòng/lượt (38 lượt nối tiếp, không song song được vì phải có
+    // page_token của lượt trước). Không cache thì MỌI người mở dashboard đều
+    // phải chờ ngần ấy. Với s-maxage + stale-while-revalidate: người đầu tiên
+    // chịu 27s, những người sau nhận ngay bản đã có rồi edge tự làm mới nền.
+    // Dashboard vốn đã public (Supabase Auth chết từ 08/2026) nên để "public"
+    // không mở thêm gì mới.
+    "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=900",
+  } });
 }

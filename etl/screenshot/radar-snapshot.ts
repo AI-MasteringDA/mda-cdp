@@ -49,9 +49,21 @@ const REPORTS = [
   { win: "cohort:FA", grp: "all", label: "Khoá FA — so với các khoá trước", color: "orange" },
 ];
 
+/**
+ * CHỜ TRANG TẢI XONG HẲN.
+ * Kỳ "Tất cả" phải gọi /api/radar?days=3000, mất ~25-30 giây. Trong lúc đó
+ * dashboard bật lớp phủ `body[data-loading]`. Chụp sớm thì vừa dính lớp phủ
+ * vừa lấy số của nửa bộ dữ liệu (đo 2026-09-11: trang Theo khoá chỉ còn K61,
+ * Hot = 0). Luôn gọi hàm này ngay trước mỗi lần chụp.
+ */
+async function xongTai(page: import("playwright").Page) {
+  await page.waitForFunction(() => !document.body.dataset.loading, null, { timeout: 180_000 });
+}
+
 /** Tắt hẳn bảng chú giải trước khi chụp — di chuột ra chỗ khác vẫn có thể còn
  *  sót nếu con trỏ dừng đúng vùng bắt sự kiện của biểu đồ. */
 async function hideTip(page: import("playwright").Page) {
+  await xongTai(page);
   await page.evaluate(() => { const t = document.getElementById("tip"); if (t) t.style.display = "none"; });
 }
 
