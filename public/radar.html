@@ -196,7 +196,7 @@ body[data-loading] #mask{display:flex}
       <button data-p="ls" title="Danh sách lead"><span class="dot"></span><span class="txt">Danh sách lead</span></button>
       <button data-p="co" title="So sánh khoá"><span class="dot"></span><span class="txt">Theo khoá</span></button>
     </nav>
-    <div class="foot txt">Dữ liệu SMAX đến<br><b id="asof"></b><br><br>Nguồn: SMAX_Database<br>1 người = 1 dòng · Hot theo giờ gắn tag, còn lại theo ngày chat đầu</div>
+    <div class="foot txt">Dữ liệu đến<br><b id="asof"></b><br><br>🔥 Hot — lấy thẳng từ Salesforce<br>Còn lại — SMAX, theo ngày chat đầu</div>
   </aside>
 
   <main class="main">
@@ -296,7 +296,10 @@ body[data-loading] #mask{display:flex}
       <!-- KPI = PHỄU CỦA KHOÁ ĐANG CHẠY (tới thời điểm hiện tại), KHÔNG so sánh.
            Việc so sánh khoá nằm hết ở các biểu đồ bên dưới. -->
       <div class="kpis" id="coKpis"></div>
-      <div class="charts" style="flex:none;grid-template-columns:repeat(2,1fr);grid-template-rows:none;grid-auto-rows:minmax(240px,auto)">
+      <!-- Bỏ "Bảng so sánh" (user chốt 2026-09-11: "bảng so sánh k cần, xoá đi")
+           — mọi con số trong bảng đã có sẵn trên 4 biểu đồ này, mà biểu đồ thì
+           đọc nhanh hơn. Nhờ vậy 4 thẻ được chiếm trọn chiều cao trang. -->
+      <div class="charts" style="flex:1;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,minmax(250px,1fr))">
         <div class="card">
           <div class="hd"><h3>Tích luỹ Hot theo ngày</h3>
             <span class="sub" id="coSub"></span>
@@ -320,10 +323,6 @@ body[data-loading] #mask{display:flex}
           <div class="hd"><h3>Tỷ lệ Hot theo khoá</h3><span class="sub">Hot (Salesforce) ÷ Lead (SMAX) tại cùng mốc ngày — đo chất lượng lead</span></div>
           <div class="plot"><svg id="cCoRate"></svg></div>
         </div>
-      </div>
-      <div class="card" style="flex:none;min-height:320px">
-        <div class="hd"><h3>Bảng so sánh</h3><span class="sub">cắt tại cùng số ngày mà khoá đang chạy đã đi được</span></div>
-        <div class="tblwrap"><table id="coTbl"></table></div>
       </div>
     </div><!-- /pgCo -->
   </main>
@@ -551,7 +550,7 @@ const tip=$("tip");
 function showTip(html,x,y){tip.innerHTML=html;tip.style.display="block";const w=tip.offsetWidth,h=tip.offsetHeight;let L=x+14,T=y-h-8;if(L+w>innerWidth-8)L=x-w-14;if(T<8)T=y+14;tip.style.left=L+"px";tip.style.top=T+"px"}
 function hideTip(){tip.style.display="none"}
 function dims(svg,defW,defH){const r=svg.parentElement.getBoundingClientRect();return {W:Math.max(r.width,defW),H:Math.max(r.height,defH)}}
-function frame(svg,W,H,pad,maxV,nY){
+function frame(svg,W,H,pad,maxV,nY,fmt){
   svg.setAttribute("viewBox","0 0 "+W+" "+H);
   while(svg.firstChild)svg.removeChild(svg.firstChild);
   const g=svgEl("g",{});svg.appendChild(g);
@@ -559,7 +558,9 @@ function frame(svg,W,H,pad,maxV,nY){
   for(let i=0;i<=nY;i++){
     const v=maxV*i/nY,y=pad.t+plotH-plotH*i/nY;
     g.appendChild(svgEl("line",{x1:pad.l,x2:pad.l+plotW,y1:y,y2:y,class:"gridline","stroke-opacity":i===0?1:.5}));
-    const t=svgEl("text",{x:pad.l-6,y:y+3.5,class:"axis","text-anchor":"end"});t.textContent=Math.round(v);g.appendChild(t);
+    // fmt: cho biểu đồ tỉ lệ ghi "37%" thay vì "37" trên trục tung.
+    const t=svgEl("text",{x:pad.l-6,y:y+3.5,class:"axis","text-anchor":"end"});
+    t.textContent=fmt?fmt(v):Math.round(v);g.appendChild(t);
   }
   return {g,plotH,plotW};
 }
@@ -1126,7 +1127,7 @@ function renderCohort(){
   // Chỉ báo "đã render xong" khi KHÔNG còn tải thêm dữ liệu — nếu không, bot
   // chụp ngay lúc mới có nửa số khoá.
   if(!loading)document.body.dataset.coGrp=S.grp;
-  if(!R){$("coKpis").innerHTML="";$("coTbl").innerHTML="";$("coHead").textContent="—";
+  if(!R){$("coKpis").innerHTML="";$("coHead").textContent="—";
     $("coSub").textContent="không có khoá nào khớp bộ lọc hiện tại";return}
   const cs=R.list, cur=R.cur, dayN=R.dayN;
   $("coSub").textContent="so "+cs.length+" khoá tại cùng mốc ngày thứ "+dayN
@@ -1147,48 +1148,58 @@ function renderCohort(){
     +"<div class='delta'>"+(sub||(cutting?"luỹ kế tới mốc trên":"tính tới hiện tại"))+"</div></div>").join("");
   chartCohort(cs,cur); chartCoMix(cs); chartCoRate(cs,cur); chartCoSame(cs,cur);
 
-  let t="<thead><tr><th>Khoá</th><th>Ngày mở</th><th class='num'>Lead cùng kỳ</th><th class='num'>Hot cùng kỳ</th><th class='num'>Tỷ lệ Hot</th><th class='num'>Cả khoá (lead/Hot)</th></tr></thead><tbody>";
-  // Bảng xếp K NHỎ → LỚN cho khớp thứ tự các biểu đồ phía trên (user chốt
-  // 2026-09-08: "sort theo K từ nhỏ đến lớn để dễ so sánh").
-  for(const c of [...cs].reverse()){
-    const rate=c.leadsAt?Math.round(c.hotAt/c.leadsAt*100):0;
-    t+="<tr"+(c.running?" style='font-weight:700;background:rgba(37,99,235,.06)'":"")+">"
-      +"<td>"+c.code+(c.running?" ●":"")+"</td><td>"+(c.openDay||"—")+"</td>"
-      +"<td class='num'>"+c.leadsAt+"</td><td class='num'>"+c.hotAt+"</td><td class='num'>"+rate+"%</td>"
-      +"<td class='num'>"+c.leadsAll+" / "+c.hotAll+"</td></tr>";
-  }
-  $("coTbl").innerHTML=t+"</tbody>";
 }
 function chartCohort(cs,cur){
-  const svg=$("cCohort"),{W,H}=dims(svg,600,260),pad={t:14,b:24,l:34,r:64};
+  const svg=$("cCohort"),{W,H}=dims(svg,600,260),pad={t:14,b:24,l:34,r:88};
   const n=(cur.curve||[]).length;
   if(!n){frame(svg,W,H,pad,4,4);return}
   const maxV=Math.max(4,...cs.flatMap(c=>c.curve||[]))*1.1;
   const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,4);
   const X=i=>pad.l+(n<=1?0:plotW*i/(n-1)), Y=v=>pad.t+plotH-v/maxV*plotH;
-  // Khoá cũ vẽ MỜ (user muốn thấy hết ~13 khoá mà không rối), khoá đang chạy ĐẬM.
+  // NHÃN CUỐI ĐƯỜNG (user yêu cầu 2026-09-11: "mỗi line khoá nào thì ghi ra
+  // luôn trên line để biết khoá nào tốt hơn khoá nào"). Ghi kèm luôn số Hot
+  // tại mốc cuối — đọc một cái là xếp hạng được, khỏi rê chuột từng đường.
+  const nhan=[];
   const others=cs.filter(c=>!c.running);
   for(const c of others){
     const cv=(c.curve||[]).slice(0,n); if(cv.length<2)continue;
-    g.appendChild(svgEl("path",{d:cv.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" "),fill:"none",style:"stroke:var(--sU)","stroke-width":"1.2",opacity:".45"}));
+    g.appendChild(svgEl("path",{d:cv.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" "),fill:"none",style:"stroke:var(--sU)","stroke-width":"1.3",opacity:".6"}));
+    nhan.push({t:c.code+"  "+cv[cv.length-1],y:Y(cv[cv.length-1]),y0:Y(cv[cv.length-1]),x:X(cv.length-1),col:"var(--ink3)",w:"500"});
   }
   // Đường TRUNG BÌNH các khoá cũ — mốc tham chiếu "bình thường thì tới đâu".
   if(others.length){
     const avg=[]; for(let i=0;i<n;i++){const vs=others.map(c=>(c.curve||[])[i]).filter(v=>v!=null);avg.push(vs.length?vs.reduce((p,c2)=>p+c2,0)/vs.length:0)}
     g.appendChild(svgEl("path",{d:avg.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" "),fill:"none",style:"stroke:var(--sW)","stroke-width":"1.8","stroke-dasharray":"5 4"}));
-    const la=svgEl("text",{x:X(n-1)+6,y:Y(avg[n-1])+4,class:"axis",style:"fill:var(--sW)"});la.textContent="TB khoá cũ";g.appendChild(la);
+    nhan.push({t:"TB  "+Math.round(avg[n-1]),y:Y(avg[n-1]),y0:Y(avg[n-1]),x:X(n-1),col:"var(--sW)",w:"600"});
   }
   const cv=cur.curve||[];
   g.appendChild(svgEl("path",{d:cv.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" "),fill:"none",style:"stroke:var(--sH)","stroke-width":"2.8","stroke-linecap":"round"}));
   g.appendChild(svgEl("circle",{cx:X(n-1),cy:Y(cv[n-1]),r:4.5,style:"fill:var(--sH);stroke:#fff","stroke-width":"2"}));
-  const lc=svgEl("text",{x:X(n-1)+6,y:Y(cv[n-1])+4,class:"axis",style:"fill:var(--sH);font-weight:700"});lc.textContent=cur.code;g.appendChild(lc);
+  nhan.push({t:cur.code+"  "+cv[n-1],y:Y(cv[n-1]),y0:Y(cv[n-1]),x:X(n-1),col:"var(--sH)",w:"700"});
+  // Các đường sát nhau thì nhãn đè lên nhau ⇒ đẩy dãn theo chiều dọc, rồi kéo
+  // ngược lên nếu tràn khỏi đáy biểu đồ.
+  const GAP=12, day=pad.t+plotH+4;
+  nhan.sort((a2,b2)=>a2.y-b2.y);
+  for(let i=1;i<nhan.length;i++) nhan[i].y=Math.max(nhan[i].y,nhan[i-1].y+GAP);
+  const tran=nhan[nhan.length-1].y-day;
+  if(tran>0){ for(const L of nhan) L.y-=tran;
+    for(let i=nhan.length-2;i>=0;i--) nhan[i].y=Math.min(nhan[i].y,nhan[i+1].y-GAP); }
+  for(const L of nhan){
+    // Nhãn bị đẩy lệch khỏi đường thì kéo một gạch nối mảnh để khỏi đọc nhầm
+    // nhãn này sang đường kia.
+    g.appendChild(svgEl("path",{d:"M"+(L.x+2)+" "+L.y0+"L"+(pad.l+plotW+4)+" "+L.y,
+      fill:"none",style:"stroke:var(--line)","stroke-width":"1",opacity:".9"}));
+    const t=svgEl("text",{x:pad.l+plotW+7,y:L.y+3.5,class:"axis",style:"fill:"+L.col+";font-weight:"+L.w});
+    t.textContent=L.t;g.appendChild(t);
+  }
   // vùng bắt chuột: hiện số của MỌI khoá tại đúng ngày thứ i
   for(let i=0;i<n;i++){
     const hw=plotW/Math.max(1,n-1);
     const hit=svgEl("rect",{x:X(i)-hw/2,y:pad.t,width:hw,height:plotH,fill:"transparent"});
     hit.addEventListener("mousemove",e=>{
       let h="<div class='t'>Ngày thứ "+i+"</div>";
-      for(const c of cs.slice(0,8)){const v=(c.curve||[])[i];if(v==null)continue;
+      for(const c of [...cs].sort((a2,b2)=>((b2.curve||[])[i]||0)-((a2.curve||[])[i]||0))){
+        const v=(c.curve||[])[i];if(v==null)continue;
         h+="<div class='row'><span>"+c.code+(c.running?" ●":"")+"</span><b>"+v+"</b></div>"}
       showTip(h,e.clientX,e.clientY)});
     hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
@@ -1250,29 +1261,48 @@ function chartCoRate(cs,cur){
     hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
   });
 }
-/* Cơ cấu phễu — mỗi khoá 1 cột xếp chồng, xem khoá nào đọng nhiều ở Cold/chưa
-   tag (dấu hiệu chăm sóc chưa tới) so với khoá đẩy được lên Hot. */
+/* CƠ CẤU TAG SMAX — mỗi khoá một CỤM cột, mỗi tag một cột riêng, chiều cao là
+   TỈ LỆ % trên tổng lead của chính khoá đó.
+   Trước 2026-09-11 vẽ cột xếp chồng theo số tuyệt đối. User bỏ: "gộp vậy k
+   thấy cơ cấu chính xác là bao nhiêu phần trăm, chỉ estimate được" — cột chồng
+   phải ướm mắt mới đoán ra tỉ lệ, mà khoá to (K59: 961 lead) lấn hết khoá nhỏ.
+   Vẽ theo % thì mọi khoá về chung một thước, so ngang được ngay, và số ghi
+   thẳng trên đầu cột nên không phải đoán. Số tuyệt đối vẫn có trong chú giải
+   khi rê chuột, và ở biểu đồ "So cùng kỳ" bên cạnh. */
 function chartCoMix(cs){
-  const svg=$("cCoMix"),{W,H}=dims(svg,600,190),pad={t:12,b:26,l:32,r:8};
+  const svg=$("cCoMix"),{W,H}=dims(svg,600,190),pad={t:16,b:26,l:34,r:8};
   const d=cs.filter(c=>c.leads>0).slice(0,12).reverse();
   if(!d.length){frame(svg,W,H,pad,4,3);return}
-  const maxV=Math.max(4,...d.map(c=>c.leads))*1.1;
-  const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
+  const SEG=[["P","--sP","Prospect"],["C","--sC","Cold"],["W","--sW","Warm"],
+             ["hS","--sH","Đã gắn Hot"],["Un","--sU","Chưa tag"]];
+  const pc=(c,k)=>c.leads?(c[k]||0)/c.leads*100:0;
+  const maxV=Math.max(30,...d.flatMap(c=>SEG.map(([k])=>pc(c,k))))*1.18;
+  const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3,v=>Math.round(v)+"%");
   const band=plotW/d.length;
-  const SEG=[["P","--sP","Prospect"],["C","--sC","Cold"],["W","--sW","Warm"],["hS","--sH","Đã gắn Hot (SMAX)"],["Un","--sU","Khác / chưa tag"]];
   d.forEach((c,i)=>{
-    const x=pad.l+band*i+band*.18,w=band*.64; let acc=0;
-    for(const [k,col] of SEG){
-      const v=c[k]||0; if(!v)continue;
-      const h=v/maxV*plotH,y=pad.t+plotH-h-acc;
-      g.appendChild(svgEl("rect",{x,y,width:w,height:h,style:"fill:var("+col+")",rx:1}));
-      acc+=h;
-    }
-    const lb=svgEl("text",{x:x+w/2,y:pad.t+plotH+14,class:"axis","text-anchor":"middle",style:c.running?"font-weight:700":""});lb.textContent=c.code;g.appendChild(lb);
+    const x0=pad.l+band*i+band*.1, wCum=band*.8, bw=wCum/SEG.length;
+    SEG.forEach(([k,col],j)=>{
+      const v=pc(c,k); if(v<=0)return;
+      const h=v/maxV*plotH,x=x0+bw*j,y=pad.t+plotH-h;
+      const p2=topRoundRect(x,y,Math.max(2,bw-2),h,2);
+      if(p2)g.appendChild(svgEl("path",{d:p2,style:"fill:var("+col+")",opacity:c.running?"1":".62"}));
+      // LUÔN ghi số — đó là lý do đổi sang cột nhóm. Cột hẹp (xem "Tất cả"
+      // với 9 khoá) thì thu nhỏ chữ và bỏ qua mấy cột dưới 5% cho đỡ chen chúc,
+      // chứ không bỏ nhãn hàng loạt.
+      const nho=bw<17;
+      if(!nho||v>=5){
+        const t=svgEl("text",{x:x+(bw-2)/2,y:y-3,class:"axis","text-anchor":"middle",
+          style:"font-size:"+(nho?7.8:9.5)+"px"+(c.running?";font-weight:700":"")});
+        t.textContent=Math.round(v)+"%";g.appendChild(t);
+      }
+    });
+    const lb=svgEl("text",{x:x0+wCum/2,y:pad.t+plotH+14,class:"axis","text-anchor":"middle",
+      style:c.running?"font-weight:700":""});lb.textContent=c.code;g.appendChild(lb);
     const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
     hit.addEventListener("mousemove",e=>{
       let h="<div class='t'>"+c.code+" · "+c.leads+" lead</div>";
-      for(const [k,,nm] of SEG){const v=c[k]||0;if(v)h+="<div class='row'><span>"+nm+"</span><b>"+v+" ("+Math.round(v/c.leads*100)+"%)</b></div>"}
+      for(const [k,col,nm] of SEG)h+="<div class='row'><span><i style='background:var("+col+")'></i>"+nm
+        +"</span><b>"+(c[k]||0)+" ("+Math.round(pc(c,k))+"%)</b></div>";
       showTip(h,e.clientX,e.clientY)});
     hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
   });
