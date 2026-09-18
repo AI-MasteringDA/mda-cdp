@@ -145,9 +145,8 @@ svg text{font-family:inherit}
 .axis{font-size:9.5px;fill:var(--ink3)}
 .gridline{stroke:var(--line);stroke-width:1}
 .dlab{font-size:9.5px;fill:var(--ink2)}
-/* 5 thẻ trên lưới 3×2: thẻ Hot (số chính của Sales) chiếm 2 ô, 4 thẻ còn
-   lại mỗi thẻ 1 ô. cardStack KHÔNG chiếm 2 cột nữa. */
-#cardHot{grid-column:span 2}
+/* 6 thẻ trên lưới 3×2, mỗi thẻ đúng 1 ô. Trước 18/09/2026 thẻ Hot chiếm 2 ô;
+   user thấy nó dài quá nên thu về 1 ô, lấy chỗ cho thẻ "Cơ cấu theo ngày". */
 #cardTbl{grid-column:3/5}
 /* tooltip */
 #tip{position:fixed;z-index:99;pointer-events:none;background:var(--pill);color:#fff;border-radius:10px;
@@ -273,6 +272,11 @@ body[data-loading] #mask{display:flex}
         <div class="hd"><h3>Hot lead theo ngày</h3><span class="sub" id="subHot">thẳng từ Salesforce</span>
           <div class="legend"><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sU)"></i>Chưa đánh giá</span></div></div>
         <div class="plot"><svg id="cHot"></svg></div>
+      </div>
+      <div class="card">
+        <div class="hd"><h3>Cơ cấu lead theo ngày</h3><span class="sub" id="subMix">số cam = ngày dưới 5 lead, tỉ lệ % chỉ tham khảo</span>
+          <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Đã gắn Hot</span><span><i style="background:var(--sU)"></i>Chưa gắn tag</span></div></div>
+        <div class="plot"><svg id="cMix"></svg></div>
       </div>
       <div class="card">
         <div class="hd"><h3>Nhịp lead vào</h3><span class="sub" id="subLine">đậm = TB trượt 7 ngày</span></div>
@@ -664,6 +668,52 @@ function chartStack(a){
   });
   xLabels(g,a.lab,pad,plotH,band,Math.ceil(a.days.length/12));
 }
+/* CƠ CẤU LEAD THEO NGÀY — 100% stacked, mỗi ngày một cột cao bằng nhau.
+ *
+ * BẮT BUỘC IN SỐ TỔNG (n) TRÊN ĐẦU MỖI CỘT. Đây không phải trang trí: đo
+ * 18/09/2026, F4 có 43% số ngày chỉ 1-2 lead. Ngày đúng 1 lead Cold thì cột vẽ
+ * ra "100% Cold", hôm sau 1 lead Hot thành "100% Hot" — người đọc tưởng cơ cấu
+ * đảo lộn trong khi thực tế chỉ là MỘT người. Có n ngay trên đầu cột thì nhìn
+ * phát biết ngay ngày nào đáng tin, ngày nào chỉ là nhiễu.
+ *
+ * Thẻ "Lead mới theo ngày" bên cạnh có thanh cơ cấu CẢ KỲ — đó mới là con số
+ * để trích dẫn; thẻ này để thấy XU HƯỚNG cơ cấu đang dịch chuyển ra sao. */
+function chartMixDay(a){
+  const svg=$("cMix"); if(!svg)return;
+  const {W,H}=dims(svg,300,160),pad={t:16,b:22,l:32,r:6};
+  const SEG=[["P","--sP","Prospect"],["C","--sC","Cold"],["W","--sW","Warm"],
+             ["Hc","--sH","Đã gắn Hot"],["U","--sU","Chưa gắn tag"]];
+  const {g,plotH,plotW}=frame(svg,W,H,pad,100,4,v=>Math.round(v)+"%");
+  const band=plotW/Math.max(1,a.days.length),bw=Math.min(band*.8,26);
+  a.days.forEach((d,i)=>{
+    const n=a.moi[i]; if(!n)return;              // ngày không có lead thì để trống
+    const x=pad.l+band*i+(band-bw)/2;
+    let y=pad.t+plotH;
+    const top=(()=>{for(let s=SEG.length-1;s>=0;s--)if(a[SEG[s][0]][i]>0)return s;return -1})();
+    SEG.forEach(([k,cvar],s)=>{
+      const v=a[k][i]; if(!v)return;
+      const hpx=v/n*plotH; y-=hpx;
+      if(s===top)g.appendChild(svgEl("path",{d:topRoundRect(x,y,bw,Math.max(hpx-1,1),3),style:"fill:var("+cvar+")"}));
+      else g.appendChild(svgEl("rect",{x,y,width:bw,height:Math.max(hpx-2,1),style:"fill:var("+cvar+")"}));
+    });
+    // CHỈ ghi số ở ngày ÍT LEAD, tô cam. Biểu đồ luôn vẽ trọn khoá (34-58 cột
+    // trong 1/3 bề rộng) nên ghi mọi ngày là chữ chồng lên nhau. Mà cũng không
+    // cần: ngày 20 lead thì tỉ lệ tự đáng tin, chỉ ngày 1-4 lead mới phải cảnh
+    // báo — n=1 là cột vẽ 100% một màu, trông y như một xu hướng thật.
+    if(n<5){const t=svgEl("text",{x:x+bw/2,y:pad.t-4,class:"dlab","text-anchor":"middle",
+      style:"font-size:8px;fill:var(--sW)"});t.textContent=n;g.appendChild(t)}
+    const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
+    hit.addEventListener("mousemove",e=>{
+      let h="<div class='t'>"+bkLbl(a,i)+"</div>";
+      for(const [k,cvar,nm] of SEG){const v=a[k][i];if(v)
+        h+="<div class='row'><span><i style='background:var("+cvar+")'></i>"+nm+"</span><b>"+v+" · "+Math.round(v/n*100)+"%</b></div>"}
+      h+="<div class='row' style='border-top:1px solid rgba(255,255,255,.25);margin-top:5px;padding-top:5px'><span>Tổng lead ngày này</span><b>"+n+"</b></div>";
+      if(n<5)h+="<div class='row' style='color:#FFD9A0'><span>⚠ ít lead — tỉ lệ % chỉ mang tính tham khảo</span></div>";
+      showTip(h,e.clientX,e.clientY)});
+    hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
+  });
+  xLabels(g,a.lab,pad,plotH,band,Math.ceil(a.days.length/6));
+}
 function chartHot(days,lab){
   const svg=$("cHot"); if(!svg)return;
   const {W,H}=dims(svg,300,160),pad={t:14,b:22,l:26,r:6};
@@ -964,11 +1014,12 @@ function renderAll(){
     const fd=fixedDays();
     const F=fd?agg(fd):A;          // cố định từ ngày mở khoá → 5 biểu đồ
     kpis(A);tableCard(A);
-    chartStack(F);mixBar(F);chartHot(F.days,F.lab);chartLine(F);chartGrp(F);chartChan(F);
+    chartStack(F);mixBar(F);chartHot(F.days,F.lab);chartMixDay(F);chartLine(F);chartGrp(F);chartChan(F);
     // Phụ đề: card rộng nhất ghi đủ chữ "từ ngày mở"; mấy card hẹp chỉ ghi
     // "K62 · 15/08 → 07/09" cho khỏi xuống dòng đè lên biểu đồ.
     const dai=fd?fixedNote():"", ngan=fd?fixedNote(true):"";
     for(const [id,txt,full] of [["subStack","thanh = cơ cấu tag SMAX cả kỳ · cột = lead mới theo ngày",0],
+                                ["subMix","số cam = ngày dưới 5 lead, tỉ lệ % chỉ tham khảo",0],
                                 ["subLine","đậm = TB trượt 7 ngày",0],
                                 ["subChan","lead mới",0],["subGrp","",0]]){
       const el=$(id); if(!el)continue;
