@@ -122,6 +122,23 @@ button:focus-visible,.chip:focus-visible{outline:2px solid var(--ink);outline-of
 .legend{display:flex;gap:10px;flex-wrap:wrap;margin-left:auto}
 .legend span{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:var(--ink2)}
 .legend i{width:9px;height:9px;border-radius:3px;display:inline-block}
+/* THANH CƠ CẤU 100% — trả lời "bao nhiêu phần trăm", đặt ngay trên biểu đồ cột.
+   VÌ SAO KHÔNG VẼ 100% STACKED THEO NGÀY (đo 18/09/2026): F4 có 43% số ngày chỉ
+   1-2 lead. Một ngày đúng 1 lead Cold sẽ vẽ ra "100% Cold", hôm sau 1 lead Hot
+   thành "100% Hot" — nhìn như cơ cấu đảo lộn từng ngày trong khi thực tế chỉ là
+   MỘT người. Mẫu số quá nhỏ làm phần trăm nói dối rất thuyết phục. Gộp cả kỳ
+   (K62: 371 lead · F4: 157 lead) thì tỉ lệ mới đứng yên và đáng tin.
+   Nhãn % nằm DƯỚI thanh chứ không đè lên: --sP và --sU quá nhạt, chữ trắng đè
+   lên không đọc nổi, mà đổi màu chữ theo từng đoạn thì mỗi đoạn một kiểu. */
+/* Lề trái/phải KHÔNG đặt cứng ở đây — mixBar() tính theo hệ số co của viewBox
+   rồi gán, xem ghi chú trong hàm đó. */
+.mix{flex:none;margin:6px 0 2px}
+.mixbar{display:flex;gap:2px;height:18px}
+.mixbar i{display:block;min-width:2px}
+.mixbar i:first-child{border-radius:4px 0 0 4px}
+.mixbar i:last-child{border-radius:0 4px 4px 0}
+.mixlab{display:flex;gap:2px;margin-top:3px}
+.mixlab span{font-size:10px;color:var(--ink2);text-align:center;overflow:hidden;white-space:nowrap}
 .plot{flex:1;min-height:0}
 svg{display:block;width:100%;height:100%}
 svg text{font-family:inherit}
@@ -244,7 +261,8 @@ body[data-loading] #mask{display:flex}
     <div class="charts">
       <div class="card" id="cardStack">
         <div class="hd"><h3>Lead mới theo ngày</h3><span class="sub" id="subStack">theo ngày chat đầu · đã loại khách quay lại (reMKT) · số trên cột = tổng</span>
-          <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sU)"></i>Chưa gắn tag</span></div></div>
+          <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Đã gắn Hot</span><span><i style="background:var(--sU)"></i>Chưa gắn tag</span></div></div>
+        <div class="mix" id="mixStack"></div>
         <div class="plot"><svg id="cStack"></svg></div>
       </div>
       <!-- Mỗi biểu đồ MỘT Ô LƯỚI riêng (user 2026-09-10: "nhỏ quá, khó
@@ -579,6 +597,43 @@ const bkLbl=(a,i)=>(a.gran==="week"?"Tuần ":(a.gran==="month"?"Tháng ":""))+a
 function topRoundRect(x,y,w,h,r){if(h<=0)return null;r=Math.min(r,w/2,h);
   return "M"+x+" "+(y+h)+"V"+(y+r)+"Q"+x+" "+y+" "+(x+r)+" "+y+"H"+(x+w-r)+"Q"+(x+w)+" "+y+" "+(x+w)+" "+(y+r)+"V"+(y+h)+"Z"}
 /* ---- charts ---- */
+/* THANH CƠ CẤU 100% của CẢ KỲ đang xem (xem ghi chú CSS .mix ở đầu file).
+   Chia việc rõ ràng với biểu đồ cột ngay bên dưới: thanh này trả lời "cơ cấu
+   bao nhiêu phần trăm", biểu đồ cột trả lời "ngày nào nhiều ngày nào ít" —
+   không cái nào lặp lại cái nào. */
+function mixBar(a){
+  const el=$("mixStack"); if(!el)return;
+  // CANH THẲNG VỚI VÙNG VẼ của biểu đồ cột bên dưới. Không đặt cứng 30px được:
+  // dims() lấy W=max(rộng thật,600) nên khi thẻ hẹp hơn 600 thì viewBox bị co
+  // lại, pad.l=30 đơn vị chỉ còn ~24px thật. Đặt cứng là lệch vài pixel — mắt
+  // thấy ngay dù không gọi tên được. Nhân theo đúng hệ số co thì thẳng ở mọi
+  // bề rộng.
+  const sv=$("cStack");
+  if(sv){const w=sv.getBoundingClientRect().width,k=w/Math.max(w,600);
+    el.style.paddingLeft=(30*k)+"px";el.style.paddingRight=(8*k)+"px"}
+  const SEG=[["P","--sP","Prospect"],["C","--sC","Cold"],["W","--sW","Warm"],
+             ["Hc","--sH","Hot"],["U","--sU","Chưa gắn tag"]];
+  const sum=k=>a[k].reduce((p,c)=>p+c,0);
+  const val=SEG.map(([k])=>sum(k)), tot=val.reduce((p,c)=>p+c,0);
+  if(!tot){el.innerHTML="";return}
+  // Làm tròn sao cho các phần trăm CỘNG ĐÚNG 100: chia phần dư cho những đoạn
+  // bị cắt nhiều nhất. Không làm thì hay ra 99% hoặc 101%, người đọc bắt ngay.
+  const raw=val.map(v=>v/tot*100), pct=raw.map(Math.floor);
+  let du=100-pct.reduce((p,c)=>p+c,0);
+  [...raw.keys()].sort((x,y)=>(raw[y]-pct[y])-(raw[x]-pct[x])).forEach(i=>{if(du>0){pct[i]++;du--}});
+  // Đoạn hẹp quá thì bỏ nhãn — chữ tràn ra ngoài còn khó đọc hơn không có chữ.
+  const bar=val.map((v,i)=>v?"<i style='flex:"+v+";background:var("+SEG[i][1]+")' data-i='"+i+"'></i>":"").join("");
+  const lab=val.map((v,i)=>v?"<span style='flex:"+v+"'>"+(pct[i]>=7?pct[i]+"%":"")+"</span>":"").join("");
+  el.innerHTML="<div class='mixbar'>"+bar+"</div><div class='mixlab'>"+lab+"</div>";
+  el.querySelectorAll(".mixbar i").forEach(seg=>{
+    const i=Number(seg.dataset.i);
+    seg.addEventListener("mousemove",e=>showTip("<div class='t'>"+SEG[i][2]+"</div>"
+      +"<div class='row'><span>Số lead</span><b>"+val[i]+"</b></div>"
+      +"<div class='row'><span>Tỉ trọng</span><b>"+pct[i]+"%</b></div>"
+      +"<div class='row' style='border-top:1px solid rgba(255,255,255,.25);margin-top:5px;padding-top:5px'><span>Tổng cả kỳ</span><b>"+tot+"</b></div>",e.clientX,e.clientY));
+    seg.addEventListener("mouseleave",hideTip);
+  });
+}
 function chartStack(a){
   const svg=$("cStack"),{W,H}=dims(svg,600,200),pad={t:14,b:22,l:30,r:8};
   const tot=a.moi; // = P+C+W+Hc+U (mỗi lead đúng 1 nhóm)
@@ -909,11 +964,11 @@ function renderAll(){
     const fd=fixedDays();
     const F=fd?agg(fd):A;          // cố định từ ngày mở khoá → 5 biểu đồ
     kpis(A);tableCard(A);
-    chartStack(F);chartHot(F.days,F.lab);chartLine(F);chartGrp(F);chartChan(F);
+    chartStack(F);mixBar(F);chartHot(F.days,F.lab);chartLine(F);chartGrp(F);chartChan(F);
     // Phụ đề: card rộng nhất ghi đủ chữ "từ ngày mở"; mấy card hẹp chỉ ghi
     // "K62 · 15/08 → 07/09" cho khỏi xuống dòng đè lên biểu đồ.
     const dai=fd?fixedNote():"", ngan=fd?fixedNote(true):"";
-    for(const [id,txt,full] of [["subStack","theo ngày chat đầu · đã loại reMKT",0],
+    for(const [id,txt,full] of [["subStack","thanh = cơ cấu tag SMAX cả kỳ · cột = lead mới theo ngày",0],
                                 ["subLine","đậm = TB trượt 7 ngày",0],
                                 ["subChan","lead mới",0],["subGrp","",0]]){
       const el=$(id); if(!el)continue;
