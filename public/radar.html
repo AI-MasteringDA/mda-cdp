@@ -238,7 +238,7 @@ body[data-loading] #mask{display:flex}
       </div>
       <span class="lbl" style="padding-left:8px">Khoá</span>
       <div class="calwrap">
-        <button class="calbtn" id="coBtn" title="Lọc theo khoá (K62, F4… — KH62 đã gộp vào K62)">🎓 Tất cả khoá</button>
+        <button class="calbtn" id="coBtn" title="Lọc theo khoá (K62, F4…). KH62 là mục riêng, không gộp vào K62">🎓 Tất cả khoá</button>
         <div class="cal" id="coPop"><div id="coList" class="colist"></div>
           <div class="calfoot"><button class="calbtn" id="coClear">Bỏ chọn</button><button class="calbtn" id="coClose">Xong</button></div>
         </div>
@@ -471,6 +471,7 @@ function aggCustom(cw){
   const r={days,lab,gran,moi:z(),P:z(),C:z(),W:z(),Hc:z(),U:z(),H:z(),Hsplit:{H:z(),C:z(),O:z()},chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],hsOnly:[],newWin:[],byCls:{P:[],C:[],W:[],H:[],U:[],cph:[]},cphWin:0,reWin:0,upWin:0,prev:{moi:0,P:0,C:0,W:0,H:0}};
   CHDEFS.forEach(([k])=>r.chCount[k]=0);
   const bumpH=l=>{r.H[0]++;r.Hsplit[l.sfR==="H"?"H":(l.sfR==="C"?"C":"O")][0]++};
+  const run=runningCodes();
   const inCur=ms=>ms!=null&&ms>=cw.from&&ms<cw.to;
   const inPrev=ms=>ms!=null&&ms>=cw.pFrom&&ms<cw.pTo;
   for(const l of DATA.leads){
@@ -478,7 +479,7 @@ function aggCustom(cw){
     const has=c=>l.cls.includes(c);
     if(l.re){
       if(inCur(l.dMs)||inCur(l.haMs)){r.reWin++;r.newWin.push(l);
-        if(inCur(l.haMs)){r.hotLeads.push(l);bumpH(l)}}
+        if(inCur(l.haMs)&&hotPass(l,run)){r.hotLeads.push(l);bumpH(l)}}
       continue;
     }
     if(inCur(l.dMs)){
@@ -494,8 +495,8 @@ function aggCustom(cw){
       r.prev.moi++;
       if(has("P"))r.prev.P++;else if(has("W"))r.prev.W++;else if(has("C"))r.prev.C++;
     }
-    if(inCur(l.haMs)){bumpH(l);r.hotLeads.push(l)}
-    else if(inPrev(l.haMs))r.prev.H++;
+    if(inCur(l.haMs)&&hotPass(l,run)){bumpH(l);r.hotLeads.push(l)}
+    else if(inPrev(l.haMs)&&hotPass(l,run))r.prev.H++;
   }
   r.hotLeads.sort((a,b)=>(b.ha||"").localeCompare(a.ha||""));
   r.newWin.sort((a,b)=>(b.d||"").localeCompare(a.d||""));
@@ -512,6 +513,7 @@ function agg(spanArg){
   CHDEFS.forEach(([k])=>r.chCount[k]=0);
   // Cộng một lead Salesforce vào ô thứ i, đồng thời tách theo Rating bên SF.
   const bumpH=(l,i)=>{r.H[i]++;r.Hsplit[l.sfR==="H"?"H":(l.sfR==="C"?"C":"O")][i]++};
+  const run=runningCodes();
   for(const l of DATA.leads){
     if(!leadPass(l))continue;
     const has=c=>l.cls.includes(c);
@@ -525,7 +527,7 @@ function agg(spanArg){
         // Dòng Salesforce thì VẪN cộng vào Hot: bên SF khách quay lại cũng được
         // tạo lead và đếm như mọi người khác, mà cột Hot giờ mirror SF 1:1.
         // Chỉ riêng "Lead mới" của MKT là không tính (quy tắc reMKT cũ).
-        if(l.ha&&idx[l.ha]!=null){r.hotLeads.push(l);bumpH(l,idx[l.ha])}}
+        if(l.ha&&idx[l.ha]!=null&&hotPass(l,run)){r.hotLeads.push(l);bumpH(l,idx[l.ha])}}
       continue;
     }
     // QUY TẮC ĐẾM (user chốt 2026-08-11):
@@ -556,8 +558,8 @@ function agg(spanArg){
     // HOT = LEAD TRÊN SALESFORCE (user chốt 2026-09-11). Chỉ dòng sf mới có
     // l.ha, nên không còn phải loại "nâng hạng": ngày tạo lead bên SF là một
     // sự kiện có thật, không phải thao tác đổi tag.
-    if(l.ha&&idx[l.ha]!=null){bumpH(l,idx[l.ha]);r.hotLeads.push(l)}
-    else if(l.ha&&prevSet.has(l.ha))r.prev.H++;
+    if(l.ha&&idx[l.ha]!=null&&hotPass(l,run)){bumpH(l,idx[l.ha]);r.hotLeads.push(l)}
+    else if(l.ha&&prevSet.has(l.ha)&&hotPass(l,run))r.prev.H++;
     // SMAX đã gắn Hot mà Salesforce chưa có hồ sơ người này ⇒ sales còn nợ
     // nhập liệu. Không vào phép đếm, chỉ hiện thành ghi chú dưới thẻ Hot.
     if(l.hs&&idx[l.hs]!=null&&!l.sf&&!SFPH.has(ph9(l.ph)))r.hsOnly.push(l);
@@ -727,17 +729,17 @@ function chartHot(days,lab){
   // Chọn khoá khác ở thanh lọc thì theo lựa chọn đó.
   // KHÔNG áp bộ lọc KÊNH: lead bên SF không mang kênh chat của SMAX, lọc vào
   // là biểu đồ trống trơn.
-  const khoa = S.co.size ? null : coRunningCode();
+  const run = runningCodes();
   for(const l of DATA.leads){
     if(!l.sf||!l.ha)continue;
     if(S.grp==="bi"&&!l.bi)continue;
     if(S.grp==="fa"&&!l.fa)continue;
-    if(S.co.size ? !(l.co||[]).some(c=>S.co.has(c)) : (khoa && !(l.co||[]).includes(khoa)))continue;
+    if(S.co.size ? !(l.co||[]).some(c=>S.co.has(c)) : !hotPass(l,run))continue;
     const i=idx[l.ha]; if(i==null)continue;
     tong++;
     if(l.sfR==="H"){Hh[i]++;hot++} else if(l.sfR==="C")Cc[i]++; else Uu[i]++;
   }
-  const nhan = S.co.size ? [...S.co].join(", ") : (khoa || "tất cả khoá");
+  const nhan = S.co.size ? [...S.co].join(", ") : ([...run].join(" + ") || "—");
   $("subHot").textContent="thẳng từ Salesforce · khoá "+nhan+" · "+tong+" lead · "+hot+" Hot";
   // Xếp chồng theo Rating bên SF. Sales đếm Cold và Hot NHƯ NHAU (hễ khách để
   // lại contact là ghi nhận) nên SỐ TRÊN ĐẦU CỘT là tổng — đúng ô "No. of
@@ -832,7 +834,8 @@ function kpis(a){
     // Hot lấy 100% từ Salesforce. Ghi rõ nguồn ngay dưới số, kèm số ca SMAX đã
     // gắn Hot mà bên SF chưa có hồ sơ — phần sales còn nợ nhập liệu, xem được
     // danh sách ở tab "Hot mới".
-    const srcSub=k==="H"?"<div class='delta' style='margin-top:1px'>nguồn Salesforce"
+    const srcSub=k==="H"?"<div class='delta' style='margin-top:1px'>nguồn Salesforce · "
+      +(S.co.size?[...S.co].join(", "):[...runningCodes()].join(" + "))
       +(a.hsOnly.length?" · <b>"+a.hsOnly.length+"</b> ca SMAX đã Hot, SF chưa có":"")+"</div>":"";
     h+="<div class='kpi'><span class='lbl'>"+nm+"</span><div class='v'>"+v+"</div><span class='tag' style='background:var("+cvar+")'></span>"
       +"<div class='delta'><span class='"+cls+"'>"+arrow+" "+Math.abs(diff)+"</span> so kỳ trước ("+base+")</div>"+srcSub
@@ -1006,6 +1009,30 @@ function coRunningCode(){
   }
   return best&&best.code;
 }
+/* KHOÁ ĐANG TUYỂN SINH CỦA TỪNG MẢNG — AAA một khoá K##, FA một khoá F#.
+   CHỈ nhận mã K## và F#, KHÔNG nhận KH##: KH62 bên Salesforce là sản phẩm
+   riêng, không phải K62 (user chốt 2026-09-21). Mảng "Tất cả" ra cả hai khoá.
+   Bảng khoá chưa tải xong thì tạm lấy mã số lớn nhất đang có trong dòng SF —
+   khoá mới luôn mang số lớn hơn khoá cũ. */
+function runningCodes(){
+  const best={};
+  const add=(g,code,open)=>{if(!best[g]||open>best[g].open)best[g]={code:coKey(code),open}};
+  if(CO&&CO.courses){
+    for(const c of CO.courses)
+      if(c.openDay&&/^[KF]\d/i.test(c.code))add(/^F/i.test(c.code)?"fa":"bi",c.code,c.openDay);
+  }else{
+    for(const l of DATA.leads)if(l.sf)for(const c of l.co||[]){
+      const m=/^[KF](\d+(?:\.\d+)?)$/i.exec(c);
+      if(m)add(/^F/i.test(c)?"fa":"bi",c,parseFloat(m[1]));
+    }
+  }
+  return new Set(Object.entries(best).filter(([g])=>S.grp==="all"||S.grp===g).map(([,v])=>v.code));
+}
+/* HOT CHỈ ĐẾM KHOÁ ĐANG TUYỂN SINH (user chốt 2026-09-21).
+   Ô KPI trước đây đếm MỌI lead Salesforce thuộc mảng AAA ⇒ gộp luôn KH62 và
+   khoá cũ: ngày 18/09 ra 11 trong khi K62 chỉ có 5. Giờ ô KPI, bảng chi tiết và
+   biểu đồ Hot cùng một quy tắc. Đã chọn khoá ở thanh lọc thì leadPass() lo. */
+const hotPass=(l,run)=>S.co.size>0||(l.co||[]).some(c=>run.has(c));
 function renderAll(){
   try{
     $("rangeLbl").textContent=rangeLbl();
@@ -1104,7 +1131,6 @@ function calMin(){
   return MIN_D;
 }
 const dDiff=(a,b)=>Math.round((new Date(b+"T00:00:00Z")-new Date(a+"T00:00:00Z"))/86400000);
-/* "KH62" và "K62" là CÙNG một khoá (user chốt 2026-09-03) → quy về một mã. */
 /* MÃ KHOÁ — KHÔNG gộp KH## vào K## nữa (2026-09-11).
    Tag SMAX đã được /api/radar gộp sẵn ngay tại nguồn, còn dòng lấy từ
    Salesforce phải giữ NGUYÊN mã bên SF: bộ lọc "Product (Lead)" trên dashboard
@@ -1595,9 +1621,10 @@ for(const [id,fn] of [["expXlsx",expXlsx],["expCsv",expCsv]])
     finally{setTimeout(()=>{b.disabled=false},600)}
   });
 /* ---- lọc theo KHOÁ (tag SMAX: K62, F3…) ----
-   "KH62" đã được /api/radar quy về "K62" ngay tại nguồn (user chốt 2026-09-03:
-   "KH và K như nhau"), nên danh sách dưới đây chỉ còn MỘT mục cho mỗi khoá và
-   số đã cộng đủ — không phải nhớ chọn kèm mục KH nữa. */
+   Tag SMAX "KH62" được /api/radar quy về "K62" ngay tại nguồn (user chốt
+   2026-09-03). Riêng dòng Salesforce giữ nguyên mã bên SF nên "KH62" vẫn hiện
+   thành mục riêng — đó là sản phẩm riêng bên SF, không cộng vào K62 (chốt
+   2026-09-11 và 2026-09-21). */
 // Danh sách khoá sinh từ chính dữ liệu, không hardcode — khoá mới mở là tự có.
 // Xếp theo số lead giảm dần để khoá đang chạy nằm trên đầu.
 function syncCoBtn(){
