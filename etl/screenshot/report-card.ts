@@ -23,7 +23,7 @@ function section(name: string, icon: string, k: Kpi, c: Course): El[] {
   // Dòng nguồn của Hot mới: "nguồn Salesforce · 7 ca SMAX đã Hot, SF chưa có".
   // Từ 2026-09-11 Hot lấy 100% từ Salesforce nên phải ghi rõ, kèm số ca sales
   // còn nợ nhập liệu — đó là việc phải làm ngay khi đọc báo cáo.
-  const src = (k.rows.find(x => x.k === "Hot mới")?.d || []).find(x => x.includes("Salesforce")) || "";
+  const src = (k.rows.find(x => x.k === "Hot SF")?.d || []).find(x => x.includes("Salesforce")) || "";
   const out: El[] = [
     { tag: "div", text: { tag: "lark_md", content: c ? `**${icon} ${name}** · đang tuyển sinh **${c.code}** — ngày thứ ${c.days}` : `**${icon} ${name}**` } },
     { tag: "div", fields: [
@@ -31,11 +31,12 @@ function section(name: string, icon: string, k: Kpi, c: Course): El[] {
       short("🔥 Hot mới / tổng", g("Hot mới")),
       short("Cold · Warm · Prospect", `${g("Cold")} · ${g("Warm")} · ${g("Prospect")}`),
       short("Chưa phản hồi", g("Chưa phản hồi")),
+      short("Hot lead SF", g("Hot SF")),
     ] },
     // Số dạng "1 / 3" từ 2026-09-22 (user: "sếp đọc vào biết hot mới là 1, total là 3").
-    { tag: "note", elements: [{ tag: "lark_md", content: "mới = khách vào trong ngày · tổng = thêm khách cũ và lead vào từ trước mà đổi sang trạng thái đó trong ngày" }] },
+    { tag: "note", elements: [{ tag: "lark_md", content: "mới = khách chat lần đầu trong ngày · tổng = thêm khách cũ và lead vào từ trước mà đổi sang trạng thái đó trong ngày · Hot lead SF = số lead tạo trên Salesforce" }] },
   ];
-  if (src) out.push({ tag: "note", elements: [{ tag: "lark_md", content: `🔥 Hot mới — ${src}` }] });
+  if (src) out.push({ tag: "note", elements: [{ tag: "lark_md", content: `Hot lead SF — ${src}` }] });
   if (c) {
     const pc = (v: number) => c.leads ? Math.round(v / c.leads * 100) + "%" : "0%";
     out.push({ tag: "div", text: { tag: "lark_md", content: `Luỹ kế cả khoá **${c.code}** — **${c.leads}** lead` } });
