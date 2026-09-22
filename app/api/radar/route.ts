@@ -163,6 +163,18 @@ function toLead(f: Record<string, Cell>, cutoff: string) {
     if (!tags.some(t => norm(t) === tag)) continue;
     const dd = vnDate(f[col]); if (dd) cd[k] = dd;
   }
+  // LỊCH SỬ ĐỔI TAG cho thẻ "Cập nhật trạng thái" (user 2026-09-22): tag gắn vào
+  // một NGÀY SAU ngày chat đầu. Đọc thẳng cột "<class> lúc" — cột đó là lịch sử,
+  // còn nguyên cả khi tag đã bị gỡ. Chỉ Prospect/Cold/Warm: Hot giờ tính theo
+  // Salesforce (xem khối nối SF ↔ SMAX bên dưới), không theo tag SMAX.
+  // `c0` = tag gắn SỚM NHẤT — để kể "vào 20/09 (Prospect) → Hot 21/09".
+  const tg: Record<string, string> = {};
+  let c0 = "", c0d = "";
+  for (const [k, col] of [["P", "Prospect lúc"], ["C", "Cold Lead lúc"], ["W", "Warm Lead lúc"]] as const) {
+    const dd = vnDate(f[col]); if (!dd) continue;
+    if (bc && dd > bc) tg[k] = dd;
+    if (!c0d || dd < c0d) { c0 = k; c0d = dd; }
+  }
   return {
     // ha/haMs = MỐC HOT. Từ 2026-09-11 Hot lấy 100% từ Salesforce (user chốt:
     // "Hot lead luôn luôn lấy từ SF, SF chuẩn 100%, lấy số nó để dùng") nên
@@ -179,10 +191,17 @@ function toLead(f: Record<string, Cell>, cutoff: string) {
     ch: g(f["Communication Channels"]), ph: gs(f["Phone"]),
     cph: f["Chưa phản hồi"] === true,
     ky: keysOf(gs(f["Phone"]), gs(f["Email"])), re: "",
+    tg: Object.keys(tg).length ? tg : undefined, c0,
   };
 }
 
-type Lead = { n: string; n2?: string; d: string | null; ha: string | null; hs?: string | null; sfR?: string; sfConv?: boolean; dMs: number | null; haMs: number | null; cd: Record<string, string>; up: boolean; upFrom: string; cls: string[]; bi: boolean; fa: boolean; co: string[]; ch: string[]; ph: string; cph: boolean; ky: string[]; re: string; sf?: boolean };
+type Lead = { n: string; n2?: string; d: string | null; ha: string | null; hs?: string | null; sfR?: string; sfConv?: boolean; dMs: number | null; haMs: number | null; cd: Record<string, string>; up: boolean; upFrom: string; cls: string[]; bi: boolean; fa: boolean; co: string[]; ch: string[]; ph: string; cph: boolean; ky: string[]; re: string; sf?: boolean;
+  /** SMAX: tag Prospect/Cold/Warm gắn SAU ngày chat đầu → ngày gắn. */
+  tg?: Record<string, string>;
+  /** SMAX: tag gắn sớm nhất. SF: tag đầu tiên của người này bên SMAX. */
+  c0?: string;
+  /** SF: ngày chat đầu của chính người này bên SMAX (nối qua SĐT/email). */
+  d0?: string };
 
 export async function GET(req: Request) {
   // Cửa sổ dữ liệu tính bằng ngày. Mặc định 40 cho nhanh (~2,6s); dashboard tự
@@ -313,6 +332,29 @@ export async function GET(req: Request) {
     }
   }
 
+  // NỐI LEAD SALESFORCE VỀ NGƯỜI ĐÃ CHAT TRÊN SMAX (user 2026-09-22).
+  // Sếp so số Ads ngày 20 với dashboard: khách chat ngày 20 nhưng 21 mới lên
+  // Salesforce thì ngày 20 không có Hot, còn ngày 21 có Hot mà không rõ từ đâu
+  // ra. Gắn ngày chat đầu + tag đầu bên SMAX vào dòng SF để thẻ "Cập nhật trạng
+  // thái" kể được "vào 20/09 (Prospect) → Hot 21/09". Khớp bằng SĐT/email; khoá
+  // bên SF đã lọc liên hệ công ty nên không dính số hotline. Đo 22/09: 75/102
+  // lead K62 nối được, 25 người lên Salesforce SAU ngày chat đầu.
+  // Chỉ GẮN THÊM thông tin, không gộp hay xoá dòng nào (feedback_no_auto_merge).
+  const firstChat = new Map<string, Lead>();
+  for (const l of leads) if (!l.sf && l.d) for (const k of l.ky) {
+    const o = firstChat.get(k); if (!o || l.d < (o.d as string)) firstChat.set(k, l);
+  }
+  for (const l of leads) if (l.sf) {
+    let best: Lead | undefined;
+    for (const k of l.ky) {
+      const o = firstChat.get(k);
+      if (o && (!best || (o.d as string) < (best.d as string))) best = o;
+    }
+    if (!best) continue;
+    l.d0 = best.d as string; l.c0 = best.c0 || "";
+    if (best.n !== l.n) l.n2 = best.n;   // bảng chi tiết hiện "SMAX: <tên>"
+  }
+
   // Dán nhãn reMKT cho MỌI lead (cả SMAX lẫn SF) khớp người đã học khoá trước.
   // Dashboard hiện nhãn để sales biết đây là re-marketing, KHÔNG đếm vào lead
   // mới trong ngày. Lark không có nhãn này (theo yêu cầu 2026-08-10).
@@ -336,7 +378,11 @@ export async function GET(req: Request) {
   // (kỳ "Tất cả" ~8.3k lead: 1,46 MB → 1,33 MB).
   // `ky` chỉ dùng để ghép reMKT ở trên; `cd` (mốc gắn từng tag) không trang nào
   // đọc — bỏ cả hai cho nhẹ đường truyền.
-  const out = leads.map(({ ky, cd, ...rest }) => { void ky; void cd; return rest; });
+  // `c0` của dòng SMAX chỉ dùng để nối sang dòng SF ở trên → cũng bỏ.
+  const out = leads.map(({ ky, cd, c0, ...rest }) => {
+    void ky; void cd;
+    return rest.sf && c0 ? { ...rest, c0 } : rest;
+  });
 
   const asOf = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 16).replace("T", " ");
   return NextResponse.json({ asOf, days, leads: out, reCount, sfHot, sfDays: Math.min(days, SF_MAX_DAYS), sfErr }, { headers: {

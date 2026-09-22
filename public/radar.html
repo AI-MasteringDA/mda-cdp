@@ -140,6 +140,17 @@ button:focus-visible,.chip:focus-visible{outline:2px solid var(--ink);outline-of
 .mixlab{display:flex;gap:2px;margin-top:3px}
 .mixlab span{font-size:10px;color:var(--ink2);text-align:center;overflow:hidden;white-space:nowrap}
 .plot{flex:1;min-height:0}
+.feed{flex:1;min-height:0;overflow:auto;margin-top:6px;scrollbar-width:thin}
+.fd{display:grid;grid-template-columns:38px 1fr;gap:0 8px;padding:5px 2px;border-top:1px solid var(--line);font-size:11.5px;line-height:1.35}
+.fd:first-child{border-top:0}
+.fd .t{color:var(--ink3);font-size:11px;font-variant-numeric:tabular-nums;padding-top:1px}
+.fd .l1{display:flex;align-items:baseline;gap:8px;min-width:0}
+.fd .l1 b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fd .tr{margin-left:auto;flex:none;color:var(--ink2);font-size:10.5px;white-space:nowrap}
+.fd .tr i{display:inline-block;width:8px;height:8px;border-radius:2px;margin:0 3px 0 1px;vertical-align:0}
+.fd .tr em{font-style:normal;font-weight:600;color:var(--ink)}
+.fd .w{color:var(--ink3);font-size:10.5px}
+.feed .empty{color:var(--ink3);font-size:11.5px;padding:10px 2px}
 svg{display:block;width:100%;height:100%}
 svg text{font-family:inherit}
 .axis{font-size:9.5px;fill:var(--ink3)}
@@ -278,9 +289,13 @@ body[data-loading] #mask{display:flex}
           <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Đã gắn Hot</span><span><i style="background:var(--sU)"></i>Chưa gắn tag</span></div></div>
         <div class="plot"><svg id="cMix"></svg></div>
       </div>
+      <!-- THAY "Nhịp lead vào" (user 2026-09-22: đường TB trượt không mang lại
+           giá trị). Sếp so số Ads ngày 20 với dashboard: khách chat 20 nhưng 21
+           mới lên Hot thì ngày 20 thiếu, ngày 21 thừa mà không rõ từ đâu. Thẻ này
+           kể từng ca đổi trạng thái SAU ngày vào để đối chiếu được. -->
       <div class="card">
-        <div class="hd"><h3>Nhịp lead vào</h3><span class="sub" id="subLine">đậm = TB trượt 7 ngày</span></div>
-        <div class="plot"><svg id="cLine"></svg></div>
+        <div class="hd"><h3>Cập nhật trạng thái</h3><span class="sub" id="subFeed">đổi trạng thái sau ngày chat đầu</span></div>
+        <div class="feed" id="feed"></div>
       </div>
       <div class="card">
         <div class="hd"><h3>Kênh</h3><span class="sub" id="subChan">lead mới trong kỳ</span></div>
@@ -767,21 +782,57 @@ function chartHot(days,lab){
   });
   xLabels(g,lab,pad,plotH,band,Math.ceil(days.length/6));
 }
-function chartLine(a){
-  const svg=$("cLine"),{W,H}=dims(svg,300,160),pad={t:12,b:22,l:26,r:8};
-  const maxV=Math.max(4,...a.moi)*1.15;
-  const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
-  const band=plotW/a.days.length;
-  const X=i=>pad.l+band*i+band/2,Y=v=>pad.t+plotH-v/maxV*plotH;
-  const ma=a.moi.map((_,i)=>{const s=a.moi.slice(Math.max(0,i-6),i+1);return s.reduce((p,c)=>p+c,0)/s.length});
-  g.appendChild(svgEl("path",{d:a.moi.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" "),fill:"none",style:"stroke:var(--sC)","stroke-width":"1.4",opacity:".4"}));
-  g.appendChild(svgEl("path",{d:ma.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" "),fill:"none",style:"stroke:var(--sC)","stroke-width":"2.4","stroke-linecap":"round"}));
-  const li=a.days.length-1;
-  g.appendChild(svgEl("circle",{cx:X(li),cy:Y(a.moi[li]),r:4,style:"fill:var(--sC);stroke:#fff","stroke-width":"2"}));
-  a.days.forEach((d,i)=>{const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
-    hit.addEventListener("mousemove",e=>showTip("<div class='t'>"+bkLbl(a,i)+"</div><div class='row'><span>Lead mới</span><b>"+a.moi[i]+"</b></div><div class='row'><span>TB 7 ngày</span><b>"+ma[i].toFixed(1)+"</b></div>",e.clientX,e.clientY));
-    hit.addEventListener("mouseleave",hideTip);g.appendChild(hit)});
-  xLabels(g,a.lab,pad,plotH,band,Math.ceil(a.days.length/6));
+/* ---- CẬP NHẬT TRẠNG THÁI -----------------------------------------------------
+   Mỗi dòng = một lead ĐỔI trạng thái vào một ngày SAU ngày chat đầu:
+     · lên Salesforce (= Hot) — dòng SF có d0 (ngày chat đầu bên SMAX, API nối
+       qua SĐT/email) sớm hơn ngày tạo lead. Cùng quy tắc khoá với ô Hot.
+     · gắn Prospect/Cold/Warm trên SMAX — tg (API chỉ trả tag gắn SAU ngày chat
+       đầu). Không lấy tag Hot bên SMAX: Hot giờ tính theo Salesforce.
+   Lên Hot cùng ngày chat đầu thì không phải "cập nhật" — đã nằm trong số của
+   chính ngày đó. Khoảng ngày = khoảng của các biểu đồ (từ ngày mở khoá). */
+const CLS_NM={P:"Prospect",C:"Cold",W:"Warm",H:"Hot","":"chưa tag"};
+const CLS_VAR={P:"--sP",C:"--sC",W:"--sW",H:"--sH","":"--sU"};
+// Ngày chat đầu có khi từ năm trước (khách cũ quay lại) → ghi kèm năm cho khỏi nhầm.
+const fmtDY=d=>fmtD(d)+(d.slice(0,4)!==asofDate.slice(0,4)?"/"+d.slice(2,4):"");
+const escH=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
+function feedEvents(from,to){
+  const run=runningCodes(),ev=[];
+  for(const l of DATA.leads){
+    if(l.sf){
+      if(!l.d0||!l.ha||l.d0>=l.ha||l.ha<from||l.ha>to)continue;
+      if(S.grp==="bi"&&!l.bi)continue;
+      if(S.grp==="fa"&&!l.fa)continue;
+      if(S.co.size?!(l.co||[]).some(c=>S.co.has(c)):!hotPass(l,run))continue;
+      ev.push({at:l.ha,ms:l.haMs||0,n:l.n,from:l.c0||"",to:"H",vao:l.d0,sf:true,re:l.re});
+    }else{
+      // Đi đúng bộ lọc của "Lead mới" (mảng / kênh / khoá) và cũng bỏ reMKT như ở đó.
+      if(!l.tg||l.re||!leadPass(l))continue;
+      const moc=Object.entries(l.tg).sort((a,b)=>a[1].localeCompare(b[1]));
+      // Tag gắn ngay ngày chat đầu không có trong tg → coi là trạng thái ban đầu.
+      const dau=["P","W","C"].find(k=>l.cls.includes(k)&&!l.tg[k])||"";
+      moc.forEach(([k,at],i)=>{
+        if(at<from||at>to)return;
+        ev.push({at,ms:0,n:l.n,from:i?moc[i-1][0]:dau,to:k,vao:l.d,sf:false});
+      });
+    }
+  }
+  return ev.sort((a,b)=>b.at.localeCompare(a.at)||b.ms-a.ms);
+}
+function feedCard(){
+  const box=$("feed"); if(!box)return;
+  const span=fixedDays()||spanDays();
+  const ev=feedEvents(span[0],span[span.length-1]);
+  $("subFeed").dataset.n=ev.length;
+  if(!ev.length){box.innerHTML="<div class='empty'>Chưa có lead nào đổi trạng thái sau ngày chat đầu.</div>";return}
+  let prev="";
+  box.innerHTML=ev.map(e=>{
+    const t=e.at===prev?"":fmtD(e.at); prev=e.at;
+    return "<div class='fd'><span class='t'>"+t+"</span><div>"
+      +"<div class='l1'><b>"+escH(e.n)+"</b><span class='tr'>"+CLS_NM[e.from]+" →"
+      +"<i style='background:var("+CLS_VAR[e.to]+")'></i><em>"+CLS_NM[e.to]+"</em></span></div>"
+      +"<div class='w'>chat đầu "+fmtDY(e.vao)+" · "+(e.sf?"tạo lead trên Salesforce":"gắn tag trên SMAX")
+      +(e.re?" · ⟲ khách cũ":"")+"</div></div></div>";
+  }).join("");
 }
 function chartGrp(a){
   const svg=$("cGrp"),{W,H}=dims(svg,300,160),pad={t:12,b:22,l:26,r:6};
@@ -1041,13 +1092,13 @@ function renderAll(){
     const fd=fixedDays();
     const F=fd?agg(fd):A;          // cố định từ ngày mở khoá → 5 biểu đồ
     kpis(A);tableCard(A);
-    chartStack(F);mixBar(F);chartHot(F.days,F.lab);chartMixDay(F);chartLine(F);chartGrp(F);chartChan(F);
+    chartStack(F);mixBar(F);chartHot(F.days,F.lab);chartMixDay(F);feedCard();chartGrp(F);chartChan(F);
     // Phụ đề: card rộng nhất ghi đủ chữ "từ ngày mở"; mấy card hẹp chỉ ghi
     // "K62 · 15/08 → 07/09" cho khỏi xuống dòng đè lên biểu đồ.
     const dai=fd?fixedNote():"", ngan=fd?fixedNote(true):"";
     for(const [id,txt,full] of [["subStack","thanh = cơ cấu tag SMAX cả kỳ · cột = lead mới theo ngày",0],
                                 ["subMix","số cam = ngày dưới 5 lead, tỉ lệ % chỉ tham khảo",0],
-                                ["subLine","đậm = TB trượt 7 ngày",0],
+                                ["subFeed",($("subFeed").dataset.n||0)+" ca",0],
                                 ["subChan","lead mới",0],["subGrp","",0]]){
       const el=$(id); if(!el)continue;
       const note=full?dai:ngan;
