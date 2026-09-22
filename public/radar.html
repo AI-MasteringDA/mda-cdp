@@ -162,6 +162,17 @@ button:focus-visible,.chip:focus-visible{outline:2px solid var(--ink);outline-of
 .fd .tr{align-self:center;color:var(--ink2);font-size:10.5px;white-space:nowrap}
 .fd .tr i{display:inline-block;width:8px;height:8px;border-radius:2px;margin:0 3px 0 1px;vertical-align:0}
 .fd .tr em{font-style:normal;font-weight:600;color:var(--ink)}
+.dch,.dtop{display:grid;grid-template-columns:44px 1fr 44px 40px 72px;gap:0 6px;align-items:baseline}
+.dch{position:sticky;top:0;z-index:1;background:var(--card);color:var(--ink3);font-size:10px;letter-spacing:.04em;text-transform:uppercase;padding:0 2px 4px;border-bottom:1px solid var(--line)}
+.dday{padding:5px 2px 6px;border-top:1px solid var(--line);font-size:11.5px;line-height:1.4}
+.dch+.dday{border-top:0}
+.dtop b{font-variant-numeric:tabular-nums}
+.dtop .n{font-variant-numeric:tabular-nums;text-align:center}
+.dtop .lech{color:var(--sW);font-weight:600;text-align:center}
+.dtop .khop{color:var(--sH);text-align:center}
+.dday .ok{color:var(--ink3);font-size:10.5px;margin-top:2px}
+.dday .miss{font-size:10.5px;margin-top:2px;color:var(--ink2)}
+.dday .miss em{font-style:normal;color:var(--sW)}
 .feed .empty{color:var(--ink3);font-size:11.5px;padding:10px 2px}
 svg{display:block;width:100%;height:100%}
 svg text{font-family:inherit}
@@ -313,10 +324,12 @@ body[data-loading] #mask{display:flex}
         <div class="hd"><h3>Kênh</h3><span class="sub" id="subChan">lead mới trong kỳ</span></div>
         <div class="plot"><svg id="cChan"></svg></div>
       </div>
+      <!-- THAY "AAA vs FA" (user 2026-09-22: "không có giá trị"). Đối chiếu từng
+           người giữa Hot mới / Hot tổng / Hot lead SF của kỳ đang chọn, kèm lý do
+           lệch — người đọc thấy ngay vì sao "Hot mới 4 mà SF 3". -->
       <div class="card">
-        <div class="hd"><h3>AAA vs FA</h3><span class="sub" id="subGrp"></span>
-          <div class="legend"><span><i style="background:var(--pill)"></i>AAA</span><span><i style="background:var(--sU)"></i>FA</span></div></div>
-        <div class="plot"><svg id="cGrp"></svg></div>
+        <div class="hd"><h3>Đối chiếu Hot SMAX ↔ Salesforce</h3><span class="sub" id="subDc"></span></div>
+        <div class="feed" id="doiChieu"></div>
       </div>
     </div>
     </div><!-- /pgOv -->
@@ -572,7 +585,7 @@ function moiTong(cur,prv){
       let note="";
       if(!moi&&!x.re)note=(x.rep.sf&&!x.rep.d0?"chỉ có trên Salesforce":"vào "+fmtD(x.vao.d))+" · "
         +(sfIn?"lên Hot "+fmtD(sfIn.ha):"đổi sang "+CLS_NM[st]+" "+fmtD(doiIn[doiIn.length-1].at));
-      o.list.push({l:x.rep,st,moi,note,re:x.re,chuaTag});
+      o.list.push({l:x.rep,st,moi,note,re:x.re,chuaTag,sfIn:sfIn||null,sfs:x.sf});
     }
   }
   o.list.sort((a,b)=>(b.l.d||b.l.ha||"").localeCompare(a.l.d||a.l.ha||""));
@@ -945,21 +958,49 @@ function feedCard(){
         +"<span class='tr'>"+CLS_NM[e.from]+" →<i style='background:var("+CLS_VAR[e.to]+")'></i><em>"+CLS_NM[e.to]+"</em></span></div>";
     }).join("");
 }
-function chartGrp(a){
-  const svg=$("cGrp"),{W,H}=dims(svg,300,160),pad={t:12,b:22,l:26,r:6};
-  const cats=[["Prospect","P"],["Cold","C"],["Warm","W"],["Hot","H"]];
-  const maxV=Math.max(3,...cats.map(([,k])=>Math.max(a.biCls[k],a.faCls[k])))*1.2;
-  const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,3);
-  const band=plotW/cats.length,bw=Math.min(band*.24,30),gap=4;
-  cats.forEach(([nm,k],i)=>{
-    const cx=pad.l+band*i+band/2;
-    [[a.biCls[k],"var(--pill)",-bw-gap/2],[a.faCls[k],"var(--sU)",gap/2]].forEach(([v,fill,off])=>{
-      const hpx=v/maxV*plotH,y=pad.t+plotH-hpx,x=cx+off;
-      if(v>0)g.appendChild(svgEl("path",{d:topRoundRect(x,y,bw,hpx,4),style:"fill:"+fill}));
-      const t=svgEl("text",{x:x+bw/2,y:y-3,class:"dlab","text-anchor":"middle"});t.textContent=v;g.appendChild(t);
-    });
-    const t=svgEl("text",{x:cx,y:pad.t+plotH+14,class:"axis","text-anchor":"middle"});t.textContent=nm;g.appendChild(t);
-  });
+/* ---- ĐỐI CHIẾU HOT SMAX ↔ SALESFORCE THEO NGÀY (user 2026-09-22) ----------
+   Thay biểu đồ "AAA vs FA". Mỗi ngày một khối: Hot bên SMAX (ngày gắn tag Hot
+   Lead) và Hot bên Salesforce (ngày tạo lead), lệch mấy người và VÌ SAO — SF tạo
+   sớm/muộn hơn ngày gắn tag, SMAX chưa gắn tag Hot, chưa có lead SF, hay người
+   chỉ có bên SF. Cùng luật khoá với ô Hot (K62/F4) và cùng khoảng ngày với các
+   biểu đồ. Tài khoản SMAX trùng (`gp`) tính một lần. */
+function doiChieu(){
+  const box=$("doiChieu"); if(!box)return;
+  const span=fixedDays()||spanDays(),coNgay=new Set(span),run=runningCodes(),d=x=>x?fmtD(x):"?";
+  const ok=l=>leadPass(l)&&hotPass(l,run);
+  // Lead SF theo dòng SMAX cùng người (qua `sm`) — lấy lead SF sớm nhất.
+  const sfCua=new Map();
+  for(const l of DATA.leads)if(l.sf&&l.ha&&l.sm!=null&&ok(l)){
+    const m=DATA.leads[l.sm];if(!sfCua.has(m)||l.ha<sfCua.get(m).ha)sfCua.set(m,l)}
+  const ngay=new Map(),o=k=>{if(!ngay.has(k))ngay.set(k,{smax:[],sf:[],khop:[],lech:[]});return ngay.get(k)};
+  for(const l of DATA.leads){
+    if(l.sf||!l.hs||l.gp!=null||!coNgay.has(l.hs)||!ok(l))continue;
+    const f=sfCua.get(l),g=o(l.hs);g.smax.push(l);
+    if(f&&f.ha===l.hs){g.khop.push(f.n);continue}
+    g.lech.push(escH(l.n)+" — SMAX gắn Hot "+d(l.hs)+", "+(!f?"<em>chưa có lead Salesforce</em>"
+      :"<em>Salesforce tạo "+(f.ha<l.hs?"trước":"sau")+", ngày "+d(f.ha)+"</em>"));
+  }
+  for(const l of DATA.leads){
+    if(!l.sf||!l.ha||!coNgay.has(l.ha)||!ok(l))continue;
+    const g=o(l.ha);g.sf.push(l);
+    const m=l.sm!=null?DATA.leads[l.sm]:null;
+    // Đã tính là khớp ở vòng SMAX phía trên (cùng người, cùng ngày) → bỏ qua.
+    if(m&&m.gp==null&&ok(m)&&m.hs===l.ha&&sfCua.get(m)===l)continue;
+    const ly=!m?"<em>không thấy trên SMAX gần đây</em> (form web, Sales nhập tay, hoặc khách chat từ lâu)"
+      :!m.hs?"<em>SMAX chưa gắn tag Hot</em>"
+      :"<em>SMAX gắn Hot "+(m.hs<l.ha?"trước":"sau")+", ngày "+d(m.hs)+"</em>";
+    g.lech.push(escH(l.n)+" — lên Salesforce "+d(l.ha)+", "+ly+(l.re?" · khách cũ":""));
+  }
+  const ds=[...ngay.entries()].sort((a,b)=>b[0].localeCompare(a[0]));
+  const nLech=ds.filter(([,g])=>g.lech.length).length;
+  $("subDc").textContent=ds.length?nLech+"/"+ds.length+" ngày có người không khớp · mới nhất trên cùng":"";
+  box.innerHTML="<div class='dch'><span>Ngày</span><span></span><span style='text-align:center'>SMAX</span><span style='text-align:center'>SF</span><span style='text-align:center'>Không khớp</span></div>"
+    +(ds.length?ds.map(([k,g])=>"<div class='dday'><div class='dtop'><b>"+fmtD(k)+"</b><span></span>"
+        +"<span class='n'>"+g.smax.length+"</span><span class='n'>"+g.sf.length+"</span>"
+        +(g.lech.length?"<span class='lech'>"+g.lech.length+"</span>":"<span class='khop'>✓</span>")+"</div>"
+        +(g.khop.length?"<div class='ok'>Khớp: "+g.khop.map(escH).join(", ")+"</div>":"")
+        +g.lech.map(t=>"<div class='miss'>• "+t+"</div>").join("")+"</div>").join("")
+      :"<div class='empty'>Không có Hot nào trong khoảng này.</div>");
 }
 function chartChan(a){
   const svg=$("cChan"),{W,H}=dims(svg,300,160);
@@ -1234,14 +1275,14 @@ function renderAll(){
     const fd=fixedDays();
     const F=fd?agg(fd):A;          // cố định từ ngày mở khoá → 5 biểu đồ
     kpis(A);tableCard(A);
-    chartStack(F);mixBar(F);chartHot(F.days,F.lab);chartMixDay(F);feedCard();chartGrp(F);chartChan(F);
+    chartStack(F);mixBar(F);chartHot(F.days,F.lab);chartMixDay(F);feedCard();doiChieu();chartChan(F);
     // Phụ đề: card rộng nhất ghi đủ chữ "từ ngày mở"; mấy card hẹp chỉ ghi
     // "K62 · 15/08 → 07/09" cho khỏi xuống dòng đè lên biểu đồ.
     const dai=fd?fixedNote():"", ngan=fd?fixedNote(true):"";
     for(const [id,txt,full] of [["subStack","thanh = cơ cấu tag SMAX cả kỳ · cột = lead mới theo ngày",0],
                                 ["subMix","số cam = ngày dưới 5 lead, tỉ lệ % chỉ tham khảo",0],
                                 ["subFeed",($("subFeed").dataset.n||0)+" ca",0],
-                                ["subChan","lead mới",0],["subGrp","",0]]){
+                                ["subChan","lead mới",0]]){
       const el=$(id); if(!el)continue;
       const note=full?dai:ngan;
       el.textContent=note?(txt?txt+" · "+note:note):txt;
