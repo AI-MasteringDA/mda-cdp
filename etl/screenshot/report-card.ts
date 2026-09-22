@@ -29,7 +29,7 @@ function section(name: string, icon: string, k: Kpi, c: Course): El[] {
     { tag: "div", fields: [
       short("Lead mới / tổng", g("Lead mới")),
       short("🔥 Hot mới / tổng", g("Hot mới")),
-      short("Cold · Warm · Prospect (mới / tổng)", `${g("Cold")} · ${g("Warm")} · ${g("Prospect")}`),
+      short("Cold · Warm · Prospect", `${g("Cold")} · ${g("Warm")} · ${g("Prospect")}`),
       short("Chưa phản hồi", g("Chưa phản hồi")),
     ] },
     // Số dạng "1 / 3" từ 2026-09-22 (user: "sếp đọc vào biết hot mới là 1, total là 3").

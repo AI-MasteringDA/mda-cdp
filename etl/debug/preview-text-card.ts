@@ -26,7 +26,7 @@ const WIN = process.argv[2] || "1";   // "1" = Hôm qua, đúng kỳ bot đang b
     // textContent chứ KHÔNG innerText: CSS có text-transform:uppercase nên
     // innerText trả "LEAD MỚI", không khớp chuỗi so sánh.
     const rows = await p.$$eval("#kpis .kpi", els => els.map(e => ({
-      k: (e.querySelector(".lbl") as HTMLElement)?.textContent?.trim() || "",
+      k: e.getAttribute("data-k") || (e.querySelector(".lbl") as HTMLElement)?.textContent?.trim() || "",
       v: (e.querySelector(".v") as HTMLElement)?.textContent?.trim() || "",
       d: [...e.querySelectorAll(".delta")].map(x => (x as HTMLElement).textContent?.trim() || ""),
     })));
