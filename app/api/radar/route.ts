@@ -201,7 +201,11 @@ type Lead = { n: string; n2?: string; d: string | null; ha: string | null; hs?: 
   /** SMAX: tag gắn sớm nhất. SF: tag đầu tiên của người này bên SMAX. */
   c0?: string;
   /** SF: ngày chat đầu của chính người này bên SMAX (nối qua SĐT/email). */
-  d0?: string };
+  d0?: string;
+  /** SMAX: ngày chat đầu THẬT khi `d` đã bị kéo sớm về ngày lên Salesforce. */
+  dc?: string;
+  /** SMAX: ngày người này có lead trên Salesforce (lead sớm nhất). */
+  sd?: string };
 
 export async function GET(req: Request) {
   // Cửa sổ dữ liệu tính bằng ngày. Mặc định 40 cho nhanh (~2,6s); dashboard tự
@@ -353,6 +357,96 @@ export async function GET(req: Request) {
     if (!best) continue;
     l.d0 = best.d as string; l.c0 = best.c0 || "";
     if (best.n !== l.n) l.n2 = best.n;   // bảng chi tiết hiện "SMAX: <tên>"
+  }
+
+  // NGÀY VÀO = LẦN CHẠM ĐẦU TIÊN (user chốt 2026-09-22, ca anh Nguyễn Văn Hai:
+  // điền form website 20/09 → Wix tạo lead SF lúc 06:38, tới 21/09 mới nhắn
+  // Zalo). Trước đây "Lead mới" chỉ nhìn tin nhắn SMAX nên anh Hai rơi sang
+  // 21/09, còn ngày 20/09 có Hot mà không có lead mới tương ứng. Giờ:
+  //   · dòng SMAX: d/dMs = mốc SỚM HƠN giữa chat đầu và lead SF của cùng người;
+  //     ngày chat thật giữ ở `dc` để bảng chi tiết vẫn hiện đúng.
+  //   · dòng SF mà người đó chưa từng chat SMAX: chính dòng SF là lần chạm đầu
+  //     → mang d = ngày tạo và được đếm vào Lead mới (phần Hot).
+  // Mỗi người vẫn chỉ đếm MỘT lần: dòng SF của người đã có bên SMAX thì không
+  // mang `d`. Đo 22/09 trên 102 lead K62: 10 người lên SF trước rồi mới chat,
+  // 12 người chỉ có bên SF. Chỉ tính lại NGÀY, không gộp dòng nào.
+  const sfFirst = new Map<string, Lead>();
+  for (const l of leads) if (l.sf && l.haMs != null) for (const k of l.ky) {
+    const o = sfFirst.get(k); if (!o || l.haMs < (o.haMs as number)) sfFirst.set(k, l);
+  }
+  const smaxKeys = new Set<string>();
+  for (const l of leads) if (!l.sf) {
+    for (const k of l.ky) smaxKeys.add(k);
+    if (!l.d) continue;
+    let s2: Lead | undefined;
+    for (const k of l.ky) {
+      const o = sfFirst.get(k);
+      if (o && (!s2 || (o.haMs as number) < (s2.haMs as number))) s2 = o;
+    }
+    if (!s2) continue;
+    l.sd = s2.ha as string;
+    // So theo GIỜ khi có: lên SF 06:38 mà 11:00 mới chat cùng ngày thì mốc vào
+    // là 06:38 — quan trọng cho báo cáo Sáng/Chiều. Lead cũ không có giờ chat
+    // thì so theo ngày.
+    const myMs = l.dMs ?? Date.parse(l.d + "T00:00:00+07:00");
+    if ((s2.haMs as number) < myMs && (s2.ha as string) <= l.d) {
+      if (s2.ha !== l.d) l.dc = l.d;
+      l.d = s2.ha; l.dMs = s2.haMs;
+    }
+  }
+  // Dòng SF không khớp ai bên SMAX trong cửa sổ đang tải: có thể người đó đã
+  // chat từ TRƯỚC cửa sổ (khách cũ) — tra riêng những SĐT/email đó trên bảng
+  // SMAX để khỏi đếm nhầm họ thành lead mới. Kỳ "Tất cả" đã tải đủ nên bỏ qua.
+  const sfOnly = leads.filter(l => l.sf && !l.ky.some(k => smaxKeys.has(k)));
+  const older = days >= 3000 ? new Map<string, string>()
+    : await olderSmaxChats([...new Set(sfOnly.flatMap(l => l.ky))]);
+  for (const l of sfOnly) {
+    const od = l.ky.map(k => older.get(k)).filter((x): x is string => !!x).sort()[0];
+    if (od) l.d0 = od;
+    if (od && od <= (l.ha as string)) continue;   // đã chat trước khi lên SF
+    // Cùng người có nhiều lead SF (VD K62 + KH62): chỉ lead tạo sớm nhất mang d.
+    if (l.ky.some(k => sfFirst.get(k) !== l)) continue;
+    l.d = l.ha; l.dMs = l.haMs;
+  }
+
+  /** Ngày chat đầu SỚM NHẤT bên SMAX của từng khoá SĐT/email, tra thẳng trên
+   * bảng (không giới hạn cửa sổ). Bỏ spam/block và comment chưa gắn tag — cùng
+   * luật với toLead(). Hỏng thì trả rỗng: tệ nhất là đếm dư vài lead, không vỡ. */
+  async function olderSmaxChats(keys: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const conds = keys.map(k => k.startsWith("p:")
+      ? { field_name: "Phone", operator: "contains", value: [k.slice(2)] }
+      : { field_name: "Email", operator: "contains", value: [k.slice(2)] });
+    try {
+      for (let i = 0; i < conds.length; i += 20) {
+        let pt: string | undefined;
+        for (let pg = 0; pg < 5; pg++) {
+          const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${db}/records/search`);
+          url.searchParams.set("page_size", "500"); if (pt) url.searchParams.set("page_token", pt);
+          const d = await fetch(url.toString(), {
+            method: "POST", headers: H, cache: "no-store",
+            body: JSON.stringify({
+              field_names: ["Báo cáo ngày", "Phone", "Email", "Tag SMAX", "Communication Channels"],
+              filter: { conjunction: "or", conditions: conds.slice(i, i + 20) },
+            }),
+          }).then(r => r.json());
+          if (d.code !== 0) break;
+          for (const r of (d.data?.items ?? []) as LarkRecord[]) {
+            const f = r.fields ?? {};
+            const tags = g(f["Tag SMAX"]);
+            if (tags.some(t => norm(t) === "spam" || norm(t).includes("block"))) continue;
+            if (!tags.length && g(f["Communication Channels"]).includes(COMMENT_ONLY)) continue;
+            const bc = vnDate(f["Báo cáo ngày"]); if (!bc) continue;
+            for (const k of keysOf(gs(f["Phone"]), gs(f["Email"]))) {
+              const o = out.get(k); if (!o || bc < o) out.set(k, bc);
+            }
+          }
+          if (!d.data?.has_more) break;
+          pt = d.data.page_token;
+        }
+      }
+    } catch { /* xem ghi chú đầu hàm */ }
+    return out;
   }
 
   // Dán nhãn reMKT cho MỌI lead (cả SMAX lẫn SF) khớp người đã học khoá trước.

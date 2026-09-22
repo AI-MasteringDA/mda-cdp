@@ -141,15 +141,18 @@ button:focus-visible,.chip:focus-visible{outline:2px solid var(--ink);outline-of
 .mixlab span{font-size:10px;color:var(--ink2);text-align:center;overflow:hidden;white-space:nowrap}
 .plot{flex:1;min-height:0}
 .feed{flex:1;min-height:0;overflow:auto;margin-top:6px;scrollbar-width:thin}
-.fd{display:grid;grid-template-columns:38px 1fr;gap:0 8px;padding:5px 2px;border-top:1px solid var(--line);font-size:11.5px;line-height:1.35}
-.fd:first-child{border-top:0}
-.fd .t{color:var(--ink3);font-size:11px;font-variant-numeric:tabular-nums;padding-top:1px}
-.fd .l1{display:flex;align-items:baseline;gap:8px;min-width:0}
-.fd .l1 b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fd .tr{margin-left:auto;flex:none;color:var(--ink2);font-size:10.5px;white-space:nowrap}
+.fd,.fh{display:grid;grid-template-columns:56px 1fr auto;gap:0 10px;padding:5px 2px;font-size:11.5px;line-height:1.35}
+.fh{position:sticky;top:0;z-index:1;background:var(--card);color:var(--ink3);font-size:10px;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;padding-top:0;border-bottom:1px solid var(--line)}
+.fd{border-top:1px solid var(--line)}
+.fd.g{border-top:1.5px solid var(--ink3)}
+.fh+.fd{border-top:0}
+.fd .t{color:var(--ink);font-weight:600;font-size:11px;font-variant-numeric:tabular-nums;padding-top:1px}
+.fd .t small{display:block;font-weight:400;color:var(--ink3);font-size:10px}
+.fd b{font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fd .w{color:var(--ink3);font-size:10.5px}
+.fd .tr{align-self:center;color:var(--ink2);font-size:10.5px;white-space:nowrap}
 .fd .tr i{display:inline-block;width:8px;height:8px;border-radius:2px;margin:0 3px 0 1px;vertical-align:0}
 .fd .tr em{font-style:normal;font-weight:600;color:var(--ink)}
-.fd .w{color:var(--ink3);font-size:10.5px}
 .feed .empty{color:var(--ink3);font-size:11.5px;padding:10px 2px}
 svg{display:block;width:100%;height:100%}
 svg text{font-family:inherit}
@@ -294,7 +297,7 @@ body[data-loading] #mask{display:flex}
            mới lên Hot thì ngày 20 thiếu, ngày 21 thừa mà không rõ từ đâu. Thẻ này
            kể từng ca đổi trạng thái SAU ngày vào để đối chiếu được. -->
       <div class="card">
-        <div class="hd"><h3>Cập nhật trạng thái</h3><span class="sub" id="subFeed">đổi trạng thái sau ngày chat đầu</span></div>
+        <div class="hd"><h3>Cập nhật trạng thái</h3><span class="sub" id="subFeed">đổi trạng thái sau ngày vào</span></div>
         <div class="feed" id="feed"></div>
       </div>
       <div class="card">
@@ -497,7 +500,11 @@ function aggCustom(cw){
         if(inCur(l.haMs)&&hotPass(l,run)){r.hotLeads.push(l);bumpH(l)}}
       continue;
     }
-    if(inCur(l.dMs)){
+    // Dòng Salesforce chỉ mang `d` khi đó là LẦN CHẠM ĐẦU của người này (xem
+    // /api/radar). Được tính vào Lead mới theo đúng luật khoá của ô Hot: KH62 bên
+    // SF là sản phẩm riêng, không tính (user chốt 2026-09-21/22).
+    const nw=!l.sf||hotPass(l,run);
+    if(nw&&inCur(l.dMs)){
       r.moi[0]++;
       const c=has("P")?"P":(has("W")?"W":(has("C")?"C":(has("H")?"H":"U")));
       if(c==="H")r.Hc[0]++;else if(c==="U")r.U[0]++;else r[c][0]++;
@@ -506,7 +513,7 @@ function aggCustom(cw){
       for(const ch2 of l.ch)if(ch2 in r.chCount)r.chCount[ch2]++;
       r.newWin.push(l);
       if(l.cph){r.cphWin++;r.byCls.cph.push(l)}
-    }else if(inPrev(l.dMs)){
+    }else if(nw&&inPrev(l.dMs)){
       r.prev.moi++;
       if(has("P"))r.prev.P++;else if(has("W"))r.prev.W++;else if(has("C"))r.prev.C++;
     }
@@ -552,7 +559,11 @@ function agg(spanArg){
     //     là một sự kiện có thời điểm rõ ràng, khác với việc phân loại ban đầu.
     // Danh sách chi tiết dựng NGAY TẠI CHỖ ĐẾM → số dòng trong bảng LUÔN bằng KPI
     // (trước đây bảng lọc riêng nên lệch: KPI 4 Cold mà bảng hiện 5).
-    if(l.d&&idx[l.d]!=null){
+    // Dòng Salesforce chỉ mang `d` khi đó là LẦN CHẠM ĐẦU của người này (xem
+    // /api/radar). Được tính vào Lead mới theo đúng luật khoá của ô Hot: KH62 bên
+    // SF là sản phẩm riêng, không tính (user chốt 2026-09-21/22).
+    const nw=!l.sf||hotPass(l,run);
+    if(nw&&l.d&&idx[l.d]!=null){
       const i=idx[l.d];r.moi[i]++;
       // mỗi lead rơi vào ĐÚNG 1 nhóm → tổng các nhóm = "Lead mới"
       const c=has("P")?"P":(has("W")?"W":(has("C")?"C":(has("H")?"H":"U")));
@@ -562,7 +573,7 @@ function agg(spanArg){
       for(const ch2 of l.ch)if(ch2 in r.chCount)r.chCount[ch2]++;
       r.newWin.push(l);
       if(l.cph){r.cphWin++;r.byCls.cph.push(l)}
-    }else if(l.d&&prevSet.has(l.d)){
+    }else if(nw&&l.d&&prevSet.has(l.d)){
       r.prev.moi++;
       if(has("P"))r.prev.P++;else if(has("W"))r.prev.W++;else if(has("C"))r.prev.C++;
     }
@@ -783,56 +794,56 @@ function chartHot(days,lab){
   xLabels(g,lab,pad,plotH,band,Math.ceil(days.length/6));
 }
 /* ---- CẬP NHẬT TRẠNG THÁI -----------------------------------------------------
-   Mỗi dòng = một lead ĐỔI trạng thái vào một ngày SAU ngày chat đầu:
+   Mỗi dòng = một lead ĐỔI trạng thái vào một ngày SAU ngày vào:
      · lên Salesforce (= Hot) — dòng SF có d0 (ngày chat đầu bên SMAX, API nối
        qua SĐT/email) sớm hơn ngày tạo lead. Cùng quy tắc khoá với ô Hot.
      · gắn Prospect/Cold/Warm trên SMAX — tg (API chỉ trả tag gắn SAU ngày chat
        đầu). Không lấy tag Hot bên SMAX: Hot giờ tính theo Salesforce.
-   Lên Hot cùng ngày chat đầu thì không phải "cập nhật" — đã nằm trong số của
-   chính ngày đó. Khoảng ngày = khoảng của các biểu đồ (từ ngày mở khoá). */
+   Lên Hot cùng ngày vào thì không phải "cập nhật" — đã nằm trong số của chính
+   ngày đó. Chỉ lấy lead có NGÀY VÀO trong khoảng của các biểu đồ (từ ngày mở
+   khoá), xếp theo ngày vào mới nhất trên cùng. */
 const CLS_NM={P:"Prospect",C:"Cold",W:"Warm",H:"Hot","":"chưa tag"};
 const CLS_VAR={P:"--sP",C:"--sC",W:"--sW",H:"--sH","":"--sU"};
-// Ngày chat đầu có khi từ năm trước (khách cũ quay lại) → ghi kèm năm cho khỏi nhầm.
-const fmtDY=d=>fmtD(d)+(d.slice(0,4)!==asofDate.slice(0,4)?"/"+d.slice(2,4):"");
 const escH=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
 function feedEvents(from,to){
+  // Nhóm theo NGÀY VÀO (ngày lead được đếm vào "Lead mới") — user 2026-09-22:
+  // "cần xem ngày 20 có ai đổi trạng thái thì cuộn cột đầu tìm ngày 20".
   const run=runningCodes(),ev=[];
   for(const l of DATA.leads){
     if(l.sf){
-      if(!l.d0||!l.ha||l.d0>=l.ha||l.ha<from||l.ha>to)continue;
+      // Chat trước, lên Salesforce sau → ngày vào là ngày chat (d0).
+      if(!l.d0||!l.ha||l.d0>=l.ha||l.d0<from||l.d0>to)continue;
       if(S.grp==="bi"&&!l.bi)continue;
       if(S.grp==="fa"&&!l.fa)continue;
       if(S.co.size?!(l.co||[]).some(c=>S.co.has(c)):!hotPass(l,run))continue;
-      ev.push({at:l.ha,ms:l.haMs||0,n:l.n,from:l.c0||"",to:"H",vao:l.d0,sf:true,re:l.re});
+      ev.push({vao:l.d0,at:l.ha,ms:l.haMs||0,n:l.n,from:l.c0||"",to:"H",sf:true,re:l.re});
     }else{
       // Đi đúng bộ lọc của "Lead mới" (mảng / kênh / khoá) và cũng bỏ reMKT như ở đó.
-      if(!l.tg||l.re||!leadPass(l))continue;
+      if(!l.tg||l.re||!l.d||l.d<from||l.d>to||!leadPass(l))continue;
       const moc=Object.entries(l.tg).sort((a,b)=>a[1].localeCompare(b[1]));
       // Tag gắn ngay ngày chat đầu không có trong tg → coi là trạng thái ban đầu.
       const dau=["P","W","C"].find(k=>l.cls.includes(k)&&!l.tg[k])||"";
-      moc.forEach(([k,at],i)=>{
-        if(at<from||at>to)return;
-        ev.push({at,ms:0,n:l.n,from:i?moc[i-1][0]:dau,to:k,vao:l.d,sf:false});
-      });
+      moc.forEach(([k,at],i)=>ev.push({vao:l.d,at,ms:0,n:l.n,from:i?moc[i-1][0]:dau,to:k,sf:false}));
     }
   }
-  return ev.sort((a,b)=>b.at.localeCompare(a.at)||b.ms-a.ms);
+  return ev.sort((a,b)=>b.vao.localeCompare(a.vao)||b.at.localeCompare(a.at)||b.ms-a.ms);
 }
 function feedCard(){
   const box=$("feed"); if(!box)return;
   const span=fixedDays()||spanDays();
   const ev=feedEvents(span[0],span[span.length-1]);
   $("subFeed").dataset.n=ev.length;
-  if(!ev.length){box.innerHTML="<div class='empty'>Chưa có lead nào đổi trạng thái sau ngày chat đầu.</div>";return}
+  if(!ev.length){box.innerHTML="<div class='empty'>Chưa có lead nào đổi trạng thái sau ngày vào.</div>";return}
+  const nNgay={};for(const e of ev)nNgay[e.vao]=(nNgay[e.vao]||0)+1;
   let prev="";
-  box.innerHTML=ev.map(e=>{
-    const t=e.at===prev?"":fmtD(e.at); prev=e.at;
-    return "<div class='fd'><span class='t'>"+t+"</span><div>"
-      +"<div class='l1'><b>"+escH(e.n)+"</b><span class='tr'>"+CLS_NM[e.from]+" →"
-      +"<i style='background:var("+CLS_VAR[e.to]+")'></i><em>"+CLS_NM[e.to]+"</em></span></div>"
-      +"<div class='w'>chat đầu "+fmtDY(e.vao)+" · "+(e.sf?"tạo lead trên Salesforce":"gắn tag trên SMAX")
-      +(e.re?" · ⟲ khách cũ":"")+"</div></div></div>";
-  }).join("");
+  box.innerHTML="<div class='fh'><span>Ngày vào</span><span>Lead · cập nhật</span><span>Trạng thái</span></div>"
+    +ev.map(e=>{
+      const moi=e.vao!==prev; prev=e.vao;
+      return "<div class='fd"+(moi?" g":"")+"'><span class='t'>"+(moi?fmtD(e.vao)+"<small>"+nNgay[e.vao]+" ca</small>":"")+"</span>"
+        +"<div><b>"+escH(e.n)+"</b><div class='w'>"+(e.sf?"tạo lead trên Salesforce ":"gắn tag trên SMAX ")+fmtD(e.at)
+        +(e.re?" · ⟲ khách cũ":"")+"</div></div>"
+        +"<span class='tr'>"+CLS_NM[e.from]+" →<i style='background:var("+CLS_VAR[e.to]+")'></i><em>"+CLS_NM[e.to]+"</em></span></div>";
+    }).join("");
 }
 function chartGrp(a){
   const svg=$("cGrp"),{W,H}=dims(svg,300,160),pad={t:12,b:22,l:26,r:6};
@@ -916,8 +927,9 @@ const EXP_COLS=[
   ["Tên",             l=>l.n],
   ["Tên bên SMAX",    l=>l.n2||""],
   ["Nguồn",           l=>l.sf?"Salesforce":"SMAX"],
-  ["Ngày chat đầu",   l=>l.d||""],
-  ["Ngày vào Salesforce", l=>l.ha||""],
+  ["Ngày vào (tính lead mới)", l=>l.d||""],
+  ["Ngày chat đầu",   l=>(l.sf?l.d0:(l.dc||l.d))||""],
+  ["Ngày vào Salesforce", l=>l.ha||l.sd||""],
   ["SMAX gắn Hot lúc",    l=>l.hs||""],
   ["Rating (SF)",         l=>({H:"Hot",C:"Cold",W:"Warm"})[l.sfR]||""],
   ["Đã chốt (SF)",        l=>l.sfConv?"x":""],
@@ -1018,7 +1030,7 @@ function tableCard(a){
     (rows.length?rows.map((l,i)=>{
       const c=exCls(l)||(l.cls.includes("H")?"H":null);
       const mang=(l.bi?"AAA":"")+(l.bi&&l.fa?" + ":"")+(l.fa?"FA":"")||"—";
-      return "<tr"+(l.re?" class='remkt'":"")+"><td class='num' style='color:var(--ink3)'>"+(i+1)+"</td><td><b>"+l.n+"</b>"+(l.re?" <span class='badge re' title='Đã là lead/học viên khoá trước — không tính lead mới'>⟲ reMKT</span><div style='font-size:10.5px;color:var(--sW)'>khoá cũ: "+l.re+"</div>":"")+(l.up?" <span class='badge up' title='Đã gắn Cold/Warm/Prospect trước đó — lên Hot là nâng hạng, không tính Hot mới'>↑ nâng hạng</span><div style='font-size:10.5px;color:var(--ink3)'>đã gắn tag từ "+fmtD(l.upFrom)+"</div>":"")+(l.n2?"<div style='font-size:10.5px;color:var(--ink3)'>SMAX: "+l.n2+"</div>":"")+"</td><td>"+(l.sf?"<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>":"<span class='badge'>SMAX</span>")+"</td><td>"+(l.d?fmtD(l.d):"—")+"</td><td>"+(l.ha?fmtD(l.ha):"—")+"</td><td>"
+      return "<tr"+(l.re?" class='remkt'":"")+"><td class='num' style='color:var(--ink3)'>"+(i+1)+"</td><td><b>"+l.n+"</b>"+(l.re?" <span class='badge re' title='Đã là lead/học viên khoá trước — không tính lead mới'>⟲ reMKT</span><div style='font-size:10.5px;color:var(--sW)'>khoá cũ: "+l.re+"</div>":"")+(l.up?" <span class='badge up' title='Đã gắn Cold/Warm/Prospect trước đó — lên Hot là nâng hạng, không tính Hot mới'>↑ nâng hạng</span><div style='font-size:10.5px;color:var(--ink3)'>đã gắn tag từ "+fmtD(l.upFrom)+"</div>":"")+(l.n2?"<div style='font-size:10.5px;color:var(--ink3)'>SMAX: "+l.n2+"</div>":"")+"</td><td>"+(l.sf?"<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>":"<span class='badge'>SMAX</span>")+"</td><td>"+((l.sf?l.d0:(l.dc||l.d))?fmtD(l.sf?l.d0:(l.dc||l.d)):"—")+"</td><td>"+((l.ha||l.sd)?fmtD(l.ha||l.sd):"—")+"</td><td>"
         +(l.cls.includes("H")?clsChip("H")+" ":"")+(c&&c!=="H"?clsChip(c):(!l.cls.length?"<span class='badge'>chưa tag</span>":""))
         +"</td><td>"+mang+"</td><td>"+(l.ch.join(", ")||"—")+"</td><td>"+(l.ph||"—")+"</td><td>"
         +(l.cph?"<span class='badge alert'>chưa phản hồi</span>":"")+"</td></tr>"}).join("")
@@ -1096,7 +1108,7 @@ function renderAll(){
     // Phụ đề: card rộng nhất ghi đủ chữ "từ ngày mở"; mấy card hẹp chỉ ghi
     // "K62 · 15/08 → 07/09" cho khỏi xuống dòng đè lên biểu đồ.
     const dai=fd?fixedNote():"", ngan=fd?fixedNote(true):"";
-    for(const [id,txt,full] of [["subStack","thanh = cơ cấu tag SMAX cả kỳ · cột = lead mới theo ngày",0],
+    for(const [id,txt,full] of [["subStack","thanh = cơ cấu cả kỳ · cột = lead mới theo ngày vào",0],
                                 ["subMix","số cam = ngày dưới 5 lead, tỉ lệ % chỉ tham khảo",0],
                                 ["subFeed",($("subFeed").dataset.n||0)+" ca",0],
                                 ["subChan","lead mới",0],["subGrp","",0]]){
