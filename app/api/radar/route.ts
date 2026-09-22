@@ -205,7 +205,10 @@ type Lead = { n: string; n2?: string; d: string | null; ha: string | null; hs?: 
   /** SMAX: ngày chat đầu THẬT khi `d` đã bị kéo sớm về ngày lên Salesforce. */
   dc?: string;
   /** SMAX: ngày người này có lead trên Salesforce (lead sớm nhất). */
-  sd?: string };
+  sd?: string;
+  /** SF: vị trí (trong mảng `leads` trả về) của dòng SMAX cùng người — để bảng
+   * chi tiết không hiện một người thành hai dòng. */
+  sm?: number };
 
 export async function GET(req: Request) {
   // Cửa sổ dữ liệu tính bằng ngày. Mặc định 40 cho nhanh (~2,6s); dashboard tự
@@ -344,6 +347,7 @@ export async function GET(req: Request) {
   // bên SF đã lọc liên hệ công ty nên không dính số hotline. Đo 22/09: 75/102
   // lead K62 nối được, 25 người lên Salesforce SAU ngày chat đầu.
   // Chỉ GẮN THÊM thông tin, không gộp hay xoá dòng nào (feedback_no_auto_merge).
+  const viTri = new Map<Lead, number>(leads.map((l, i) => [l, i]));
   const firstChat = new Map<string, Lead>();
   for (const l of leads) if (!l.sf && l.d) for (const k of l.ky) {
     const o = firstChat.get(k); if (!o || l.d < (o.d as string)) firstChat.set(k, l);
@@ -355,7 +359,7 @@ export async function GET(req: Request) {
       if (o && (!best || (o.d as string) < (best.d as string))) best = o;
     }
     if (!best) continue;
-    l.d0 = best.d as string; l.c0 = best.c0 || "";
+    l.d0 = best.d as string; l.c0 = best.c0 || ""; l.sm = viTri.get(best);
     if (best.n !== l.n) l.n2 = best.n;   // bảng chi tiết hiện "SMAX: <tên>"
   }
 

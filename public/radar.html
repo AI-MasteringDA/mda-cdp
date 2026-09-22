@@ -1014,24 +1014,43 @@ function expXlsx(){
   ];
   dl(zipStore(files),expName("xlsx"));
 }
+const SFB="<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>";
 function tableCard(a){
-  const T={all:"Tất cả lead mới",hot:"🔥 Hot mới (lead tạo trên Salesforce)",P:"Prospect",C:"Cold",W:"Warm",U:"Chưa gắn tag",cph:"Chưa phản hồi"};
+  const T={all:"Tất cả lead",hot:"🔥 Hot mới (lead tạo trên Salesforce)",P:"Prospect",C:"Cold",W:"Warm",U:"Chưa gắn tag",cph:"Chưa phản hồi"};
   $("tblTitle").textContent=T[S.tbl]+" trong kỳ";
   const exCls=l=>l.cls.includes("P")?"P":(l.cls.includes("W")?"W":(l.cls.includes("C")?"C":null));
-  // Lấy đúng danh sách đã dựng lúc ĐẾM → số dòng luôn khớp KPI
-  const rows=S.tbl==="hot"?a.hotLeads:(S.tbl==="all"?a.newWin:(a.byCls[S.tbl]||[]));
-  // Danh sách hiện cả người bị loại khỏi phép đếm (reMKT / nâng hạng) nên phải
-  // nói rõ, không thì thấy "6 người" mà KPI ghi 4 lại tưởng sai.
-  const nRe=rows.filter(l=>l.re).length, nUp=rows.filter(l=>l.up&&!l.re).length;
-  const ghi=[nRe?nRe+" reMKT":"", nUp?nUp+" nâng hạng":""].filter(Boolean).join(" · ");
-  $("tblSub").textContent=rows.length+" người"+(ghi?" (gồm "+ghi+" — không tính vào KPI)":"");
+  // Lấy đúng danh sách đã dựng lúc ĐẾM → số dòng luôn khớp KPI.
+  // Tab "Tất cả" = MỌI người có mặt ở các tab khác (user 2026-09-22: "tất cả k
+  // hiện mà hot mới lại hiện, confusing"). Lead mới trong kỳ + người lên Hot
+  // trong kỳ nhưng VÀO TỪ TRƯỚC kỳ. Dòng SF của người đã có dòng SMAX trong
+  // danh sách (nối qua `sm`) thì bỏ — một người một dòng.
+  const truoc=new Set();
+  let rows=S.tbl==="hot"?a.hotLeads:(S.tbl==="all"?a.newWin:(a.byCls[S.tbl]||[]));
+  if(S.tbl==="all"){
+    const co=new Set(a.newWin);
+    for(const l of a.hotLeads)
+      if(!co.has(l)&&!(l.sm!=null&&co.has(DATA.leads[l.sm])))truoc.add(l);
+    rows=[...a.newWin,...truoc];
+  }
+  // Danh sách hiện cả người bị loại khỏi phép đếm (reMKT / nâng hạng / vào từ
+  // trước kỳ) nên phải nói rõ, không thì thấy "6 người" mà KPI ghi 4 lại tưởng sai.
+  const nRe=rows.filter(l=>l.re&&!truoc.has(l)).length, nUp=rows.filter(l=>l.up&&!l.re).length;
+  const ghi=[nRe?nRe+" reMKT":"", nUp?nUp+" nâng hạng":"",
+             truoc.size?truoc.size+" lên Hot trong kỳ nhưng vào từ trước":""].filter(Boolean).join(" · ");
+  $("tblSub").textContent=rows.length+" người"+(ghi?" (gồm "+ghi+" — không tính vào Lead mới)":"");
   EXP.rows=rows;EXP.title=T[S.tbl];   // giữ lại đúng danh sách đang hiện để export
+  // Dòng SMAX của người ĐÃ có lead Salesforce: hiện tên + ngày bên SF và nhãn
+  // Hot ngay trên dòng đó (user 2026-09-22: "tất cả phải hiện luôn SF").
+  const sfOf=new Map();
+  for(const x of DATA.leads)if(x.sf&&x.sm!=null){const m=DATA.leads[x.sm];
+    if(m&&(!sfOf.has(m)||x.haMs<sfOf.get(m).haMs))sfOf.set(m,x)}
   $("tbl").innerHTML="<tr><th class='num' style='width:40px'>#</th><th>Tên</th><th>Nguồn</th><th>Chat đầu</th><th>Vào Salesforce</th><th>Phân loại</th><th>Mảng</th><th>Kênh</th><th>SĐT</th><th></th></tr>"+
     (rows.length?rows.map((l,i)=>{
       const c=exCls(l)||(l.cls.includes("H")?"H":null);
       const mang=(l.bi?"AAA":"")+(l.bi&&l.fa?" + ":"")+(l.fa?"FA":"")||"—";
-      return "<tr"+(l.re?" class='remkt'":"")+"><td class='num' style='color:var(--ink3)'>"+(i+1)+"</td><td><b>"+l.n+"</b>"+(l.re?" <span class='badge re' title='Đã là lead/học viên khoá trước — không tính lead mới'>⟲ reMKT</span><div style='font-size:10.5px;color:var(--sW)'>khoá cũ: "+l.re+"</div>":"")+(l.up?" <span class='badge up' title='Đã gắn Cold/Warm/Prospect trước đó — lên Hot là nâng hạng, không tính Hot mới'>↑ nâng hạng</span><div style='font-size:10.5px;color:var(--ink3)'>đã gắn tag từ "+fmtD(l.upFrom)+"</div>":"")+(l.n2?"<div style='font-size:10.5px;color:var(--ink3)'>SMAX: "+l.n2+"</div>":"")+"</td><td>"+(l.sf?"<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>":"<span class='badge'>SMAX</span>")+"</td><td>"+((l.sf?l.d0:(l.dc||l.d))?fmtD(l.sf?l.d0:(l.dc||l.d)):"—")+"</td><td>"+((l.ha||l.sd)?fmtD(l.ha||l.sd):"—")+"</td><td>"
-        +(l.cls.includes("H")?clsChip("H")+" ":"")+(c&&c!=="H"?clsChip(c):(!l.cls.length?"<span class='badge'>chưa tag</span>":""))
+      const sf=l.sf?null:sfOf.get(l);
+      return "<tr"+(l.re?" class='remkt'":"")+"><td class='num' style='color:var(--ink3)'>"+(i+1)+"</td><td><b>"+escH(sf?sf.n:l.n)+"</b>"+(l.re?" <span class='badge re' title='Đã là lead/học viên khoá trước — không tính lead mới'>⟲ reMKT</span><div style='font-size:10.5px;color:var(--sW)'>khoá cũ: "+l.re+"</div>":"")+(l.up?" <span class='badge up' title='Đã gắn Cold/Warm/Prospect trước đó — lên Hot là nâng hạng, không tính Hot mới'>↑ nâng hạng</span><div style='font-size:10.5px;color:var(--ink3)'>đã gắn tag từ "+fmtD(l.upFrom)+"</div>":"")+((sf||l.n2)?"<div style='font-size:10.5px;color:var(--ink3)'>SMAX: "+escH(sf?l.n:l.n2)+"</div>":"")+(truoc.has(l)?"<div style='font-size:10.5px;color:var(--ink3)'>vào từ "+(l.d0?fmtD(l.d0):"trước kỳ")+" · chỉ tính Hot, không tính Lead mới</div>":"")+"</td><td>"+(l.sf?SFB:(sf?"<span class='badge'>SMAX</span> "+SFB:"<span class='badge'>SMAX</span>"))+"</td><td>"+((l.sf?l.d0:(l.dc||l.d))?fmtD(l.sf?l.d0:(l.dc||l.d)):"—")+"</td><td>"+((l.ha||(sf&&sf.ha)||l.sd)?fmtD(l.ha||(sf&&sf.ha)||l.sd):"—")+"</td><td>"
+        +((l.cls.includes("H")||sf)?clsChip("H")+" ":"")+(c&&c!=="H"?clsChip(c):(!l.cls.length?"<span class='badge'>chưa tag</span>":""))
         +"</td><td>"+mang+"</td><td>"+(l.ch.join(", ")||"—")+"</td><td>"+(l.ph||"—")+"</td><td>"
         +(l.cph?"<span class='badge alert'>chưa phản hồi</span>":"")+"</td></tr>"}).join("")
     :"<tr><td colspan='10' style='color:var(--ink3)'>Không có lead nào với bộ lọc hiện tại</td></tr>");
