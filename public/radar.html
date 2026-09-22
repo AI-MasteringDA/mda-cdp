@@ -325,7 +325,7 @@ body[data-loading] #mask{display:flex}
       <div class="card" id="cardTbl" style="height:100%">
         <div class="hd"><h3 id="tblTitle">Chi tiết lead trong kỳ</h3><span class="sub" id="tblSub"></span>
           <div class="mini" id="tblTabs" style="flex-wrap:wrap">
-            <button data-v="all" class="on">Tất cả</button><button data-v="moi">Lead mới</button><button data-v="hot">🔥 Hot</button><button data-v="sf">Hot lead SF</button><button data-v="P">Prospect</button><button data-v="C">Cold</button><button data-v="W">Warm</button><button data-v="U">Chưa phân loại</button><button data-v="cph">Chưa phản hồi</button>
+            <button data-v="all" class="on">Tất cả</button><button data-v="moi">Lead mới</button><button data-v="hot">🔥 Hot</button><button data-v="sf">Hot lead SF</button><button data-v="P">Prospect</button><button data-v="C">Cold</button><button data-v="W">Warm</button><button data-v="U">Chưa phân loại</button><button data-v="untag">Chưa gắn tag</button>
           </div>
           <div class="exp"><button class="expbtn" id="expXlsx" title="Tải danh sách đang hiện ra Excel">⬇ Excel</button><button class="expbtn" id="expCsv" title="Tải danh sách đang hiện ra CSV">⬇ CSV</button></div>
           </div>
@@ -528,7 +528,7 @@ function tagChain(l){
 /** @param cur,prv {has(d,ms): trong kỳ?, end(d,ms): không muộn hơn cuối kỳ?} */
 function moiTong(cur,prv){
   const run=runningCodes();
-  const z=()=>({moi:0,tong:0,m:{H:0,P:0,C:0,W:0,U:0},t:{H:0,P:0,C:0,W:0,U:0},cph:0});
+  const z=()=>({moi:0,tong:0,m:{H:0,P:0,C:0,W:0,U:0},t:{H:0,P:0,C:0,W:0,U:0},chuaTag:0});
   const o={cur:z(),prev:z(),list:[]};
   // NGƯỜI = dòng SMAX + các lead SF nối về nó (qua `sm`). Lead SF không nối được
   // dòng SMAX nào tự là một người — gộp theo SĐT để lead K62 + F4 của cùng một
@@ -563,12 +563,16 @@ function moiTong(cur,prv){
       // có bên Salesforce không vào Lead mới — chỉ vào tổng (Hot).
       const moi=vaoIn&&!x.re&&!x.rep.sf;
       w.tong++;w.t[st]++;
-      if(moi){w.moi++;w.m[st]++;if(x.rep.cph)w.cph++}
+      // CHƯA GẮN TAG (user 2026-09-22, thay ô "Chưa phản hồi"): lead mới của kỳ
+      // mà GIỜ vẫn chưa mang tag Prospect/Cold/Warm/Hot nào và chưa có lead SF —
+      // danh sách để team lên SMAX gắn. Xét tag HIỆN TẠI, không phải tag lúc đó.
+      const chuaTag=moi&&!x.sf.length&&!x.rep.sd&&!x.rep.cls.some(c=>"PCWH".includes(c));
+      if(moi){w.moi++;w.m[st]++;if(chuaTag)w.chuaTag++}
       if(!laCur)continue;
       let note="";
       if(!moi&&!x.re)note=(x.rep.sf&&!x.rep.d0?"chỉ có trên Salesforce":"vào "+fmtD(x.vao.d))+" · "
         +(sfIn?"lên Hot "+fmtD(sfIn.ha):"đổi sang "+CLS_NM[st]+" "+fmtD(doiIn[doiIn.length-1].at));
-      o.list.push({l:x.rep,st,moi,note,re:x.re});
+      o.list.push({l:x.rep,st,moi,note,re:x.re,chuaTag});
     }
   }
   o.list.sort((a,b)=>(b.l.d||b.l.ha||"").localeCompare(a.l.d||a.l.ha||""));
@@ -1013,8 +1017,8 @@ function kpis(a){
       +(k==="moi"&&(C.m.U||C.t.U)?"<div class='delta'>gồm "+C.m.U+" / "+C.t.U+" chưa phân loại</div>":"")
       +"<button class='vd' data-tab='"+tab+"'>Xem chi tiết →</button></div>";
   }
-  h+="<div class='kpi alert' data-k='Chưa phản hồi'><span class='lbl'>Chưa phản hồi</span><div class='v'>"+C.cph+"</div><span class='tag' style='background:var(--sW)'></span>"
-    +"<div class='delta'>trong "+C.moi+" lead mới</div><button class='vd' data-tab='cph'>Xem chi tiết →</button></div>";
+  h+="<div class='kpi alert' data-k='Chưa gắn tag'><span class='lbl' title='Lead mới của kỳ mà giờ vẫn chưa được gắn tag Prospect / Cold / Warm / Hot trên SMAX (và chưa có lead Salesforce)'>Chưa gắn tag</span><div class='v'>"+C.chuaTag+"</div><span class='tag' style='background:var(--sU)'></span>"
+    +"<div class='delta'>trong "+C.moi+" lead mới · lên SMAX gắn tag</div><button class='vd' data-tab='untag'>Xem chi tiết →</button></div>";
   $("kpis").innerHTML=h;
 }
 // Bấm "Xem chi tiết" ở KPI → sang trang Danh sách lead, chọn đúng tab tương ứng
@@ -1126,7 +1130,7 @@ function expXlsx(){
 }
 const SFB="<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>";
 function tableCard(a){
-  const T={all:"Tất cả lead",moi:"Lead mới",hot:"🔥 Hot",sf:"Hot lead SF (lead tạo trên Salesforce)",P:"Prospect",C:"Cold",W:"Warm",U:"Chưa phân loại",cph:"Chưa phản hồi"};
+  const T={all:"Tất cả lead",moi:"Lead mới",hot:"🔥 Hot",sf:"Hot lead SF (lead tạo trên Salesforce)",P:"Prospect",C:"Cold",W:"Warm",U:"Chưa phân loại",untag:"Chưa gắn tag"};
   $("tblTitle").textContent=T[S.tbl]+" trong kỳ";
   const exCls=l=>l.cls.includes("P")?"P":(l.cls.includes("W")?"W":(l.cls.includes("C")?"C":null));
   // Mỗi tab = đúng tập người của ô KPI tương ứng (cột TỔNG), lấy thẳng từ
@@ -1139,11 +1143,11 @@ function tableCard(a){
   const chon=S.tbl==="sf"?a.hotLeads.map(l=>{const v=vaoOf(l),moi=!l.re&&v.d===l.ha;
       return {l,st:"H",moi,re:!!l.re,note:moi||l.re?"":(l.d0?"vào "+fmtD(v.d)+" · lên Hot "+fmtD(l.ha):"chỉ có trên Salesforce")}})
     :S.tbl==="all"?kt.list:S.tbl==="moi"?kt.list.filter(e=>e.moi)
-    :S.tbl==="cph"?kt.list.filter(e=>e.moi&&e.l.cph):kt.list.filter(e=>e.st===(S.tbl==="hot"?"H":S.tbl));
+    :S.tbl==="untag"?kt.list.filter(e=>e.chuaTag):kt.list.filter(e=>e.st===(S.tbl==="hot"?"H":S.tbl));
   for(const e of chon)if(e.note)ghiChu.set(e.l,e.note);
   const rows=chon.map(e=>e.l);
   const nRe=chon.filter(e=>!e.moi&&e.re).length,nDoi=chon.filter(e=>!e.moi&&!e.re).length;
-  const ghi=S.tbl==="cph"?"":[chon.length-nRe-nDoi+" mới",nDoi?nDoi+" đổi trạng thái":"",nRe?nRe+" khách cũ (reMKT)":""].filter(Boolean).join(" · ");
+  const ghi=S.tbl==="untag"?"":[chon.length-nRe-nDoi+" mới",nDoi?nDoi+" đổi trạng thái":"",nRe?nRe+" khách cũ (reMKT)":""].filter(Boolean).join(" · ");
   $("tblSub").textContent=rows.length+" người"+(ghi?" · "+ghi:"");
   EXP.rows=rows;EXP.title=T[S.tbl];EXP.note=ghiChu;   // giữ lại đúng danh sách đang hiện để export
   // Dòng SMAX của người ĐÃ có lead Salesforce: hiện tên + ngày bên SF và nhãn
