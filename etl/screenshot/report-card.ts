@@ -27,11 +27,13 @@ function section(name: string, icon: string, k: Kpi, c: Course): El[] {
   const out: El[] = [
     { tag: "div", text: { tag: "lark_md", content: c ? `**${icon} ${name}** · đang tuyển sinh **${c.code}** — ngày thứ ${c.days}` : `**${icon} ${name}**` } },
     { tag: "div", fields: [
-      short("Lead mới", g("Lead mới")),
-      short("🔥 Hot mới", g("Hot mới")),
-      short("Cold · Warm · Prospect", `${g("Cold")} · ${g("Warm")} · ${g("Prospect")}`),
+      short("Lead mới / tổng", g("Lead mới")),
+      short("🔥 Hot mới / tổng", g("Hot mới")),
+      short("Cold · Warm · Prospect (mới / tổng)", `${g("Cold")} · ${g("Warm")} · ${g("Prospect")}`),
       short("Chưa phản hồi", g("Chưa phản hồi")),
     ] },
+    // Số dạng "1 / 3" từ 2026-09-22 (user: "sếp đọc vào biết hot mới là 1, total là 3").
+    { tag: "note", elements: [{ tag: "lark_md", content: "mới = khách vào trong ngày · tổng = thêm khách cũ và lead vào từ trước mà đổi sang trạng thái đó trong ngày" }] },
   ];
   if (src) out.push({ tag: "note", elements: [{ tag: "lark_md", content: `🔥 Hot mới — ${src}` }] });
   if (c) {

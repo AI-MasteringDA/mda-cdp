@@ -156,7 +156,9 @@ async function readKpis(page: import("playwright").Page, win: string, grp: strin
   // textContent chứ KHÔNG innerText: CSS có text-transform:uppercase nên
   // innerText trả "LEAD MỚI", không khớp tên mục khi tra cứu.
   const rows = await page.$$eval("#kpis .kpi", els => els.map(e => ({
-    k: (e.querySelector(".lbl") as HTMLElement)?.textContent?.trim() || "",
+    // data-k = tên gốc của ô ("Hot mới", "Cold"…). Từ 2026-09-22 nhãn hiển thị
+    // thành "Hot mới / Tổng" nên không so theo chữ trên nhãn được nữa.
+    k: e.getAttribute("data-k") || (e.querySelector(".lbl") as HTMLElement)?.textContent?.trim() || "",
     v: (e.querySelector(".v") as HTMLElement)?.textContent?.trim() || "",
     d: [...e.querySelectorAll(".delta")].map(x => (x as HTMLElement).textContent?.trim() || ""),
   })));
