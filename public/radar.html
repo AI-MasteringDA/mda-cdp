@@ -317,7 +317,7 @@ body[data-loading] #mask{display:flex}
       <div class="card" id="cardTbl" style="height:100%">
         <div class="hd"><h3 id="tblTitle">Chi tiết lead trong kỳ</h3><span class="sub" id="tblSub"></span>
           <div class="mini" id="tblTabs" style="flex-wrap:wrap">
-            <button data-v="all" class="on">Tất cả</button><button data-v="moi">Lead mới</button><button data-v="hot">🔥 Hot</button><button data-v="P">Prospect</button><button data-v="C">Cold</button><button data-v="W">Warm</button><button data-v="U">Chưa tag</button><button data-v="cph">Chưa phản hồi</button>
+            <button data-v="all" class="on">Tất cả</button><button data-v="moi">Lead mới</button><button data-v="hot">🔥 Hot</button><button data-v="P">Prospect</button><button data-v="C">Cold</button><button data-v="W">Warm</button><button data-v="U">Chưa phân loại</button><button data-v="cph">Chưa phản hồi</button>
           </div>
           <div class="exp"><button class="expbtn" id="expXlsx" title="Tải danh sách đang hiện ra Excel">⬇ Excel</button><button class="expbtn" id="expCsv" title="Tải danh sách đang hiện ra CSV">⬇ CSV</button></div>
           </div>
@@ -485,16 +485,20 @@ function bucketize(span){
 // nâng hạng, mỗi lead 1 nhóm — sửa 1 chỗ ở đây thì nhớ soi lại agg() và ngược
 // lại, 2 hàm phải luôn khớp quy tắc.
 /* ---- MỚI / TỔNG cho hàng KPI (user chốt 2026-09-22) ------------------------
-   "1/3 thì sếp đọc vào biết Hot mới là 1, còn total là 3, tương tự Warm,
-   Prospect, Cold".
-     · mới  = như trước giờ: lead VÀO trong kỳ (lần chạm đầu), không tính khách
-       cũ. Hot mới = người vào trong kỳ VÀ lên Salesforce trong kỳ.
-     · tổng = mới + khách cũ (reMKT) + lead vào TỪ TRƯỚC mà đổi sang trạng thái
-       đó trong kỳ. Tổng Hot = mọi lead tạo trên Salesforce trong kỳ — khớp 1:1
-       số Sales đọc bên SF.
+   Mỗi ô "X mới / tổng". CẢ HAI CỘT ĐỀU LÀ PHÉP CHIA: mỗi người nằm đúng MỘT ô,
+   nên Hot + Cold + Prospect + Warm (+ chưa phân loại) = Lead ở cả cột mới lẫn
+   cột tổng (user: "hot 3 + 2 + 8 + 2 = 15 mà tổng 14, confusing quá").
+     · mới  = người VÀO trong kỳ (lần chạm đầu), không phải khách cũ.
+     · tổng = mới + khách cũ quay lại trong kỳ + người vào TỪ TRƯỚC có đổi trạng
+       thái THẬT trong kỳ (lên Salesforce, hoặc Prospect/Cold/Warm đổi qua lại).
+   Trạng thái của một người TRONG KỲ: lên Salesforce trong kỳ → Hot; không thì
+   tag của họ tính tới cuối kỳ; chưa có tag → "chưa phân loại".
+   Người vào 17/09 rồi 18/09 lên Hot: "mới" ở 17/09, nằm trong Hot tổng ở 18/09
+   — user chọn "cách 1": số lead mới của ngày cũ không đổi về sau. Khách cũ đi
+   cùng luật (anh Khoa: tổng 20/09 lúc quay lại, Hot tổng 21/09).
+   Gắn tag LẦN ĐẦU muộn không phải đổi trạng thái — coi như tag từ ngày vào.
    Kỳ theo khung giờ (Sáng/Chiều): ngày gắn tag không có giờ → coi là 12:00. */
 const noonMs=d=>Date.parse(d+"T12:00:00+07:00");
-const clsOf=l=>l.cls.includes("P")?"P":(l.cls.includes("W")?"W":(l.cls.includes("C")?"C":(l.cls.includes("H")?"H":"U")));
 /** Ngày + mốc giờ VÀO của người đứng sau dòng này (dòng SF thì lấy qua dòng SMAX cùng người). */
 function vaoOf(l){
   if(l.d)return {d:l.d,ms:l.dMs};
@@ -503,46 +507,58 @@ function vaoOf(l){
   if(l.d0)return {d:l.d0,ms:null};
   return {d:l.ha,ms:l.haMs};
 }
+/** Chuỗi tag Prospect/Cold/Warm theo thời gian của một dòng SMAX. Phần tử đầu
+ *  mang ngày VÀO (tag gắn lần đầu, dù gắn muộn); các phần tử sau là đổi thật. */
+function tagChain(l){
+  const moc=Object.entries(l.tg||{}).sort((x,y)=>x[1].localeCompare(y[1])).map(([k,at])=>({k,at}));
+  // Tag đầu tiên: ưu tiên `c0` từ API (đọc cột "<tag> lúc", còn cả khi tag đã
+  // bị gỡ), rồi tới tag hiện có từ ngày chat, rồi tới lần gắn muộn đầu tiên.
+  const dau=l.c0||["P","W","C"].find(k=>l.cls.includes(k)&&!(l.tg&&l.tg[k]))||(moc[0]&&moc[0].k);
+  if(!dau)return [];
+  return [{k:dau,at:l.d},...moc.filter((e,i)=>!(i===0&&e.k===dau))];
+}
+/** @param cur,prv {has(d,ms): trong kỳ?, end(d,ms): không muộn hơn cuối kỳ?} */
 function moiTong(cur,prv){
   const run=runningCodes();
-  const z=()=>({moi:0,Hn:0,H:0,P:0,C:0,W:0});
-  const o={cur:z(),prev:z(),hotNew:new Set(),them:{P:[],C:[],W:[]},ly:new Map(),vao:[]};
-  const ky=[[o.cur,cur,true],[o.prev,prv,false]];
+  const z=()=>({moi:0,tong:0,m:{H:0,P:0,C:0,W:0,U:0},t:{H:0,P:0,C:0,W:0,U:0},cph:0});
+  const o={cur:z(),prev:z(),list:[]};
+  // NGƯỜI = dòng SMAX + các lead SF nối về nó (qua `sm`). Lead SF không nối được
+  // dòng SMAX nào tự là một người — gộp theo SĐT để lead K62 + F4 của cùng một
+  // người (xem "Tất cả" mảng) chỉ tính một.
+  const sfBy=new Map(),le=[];
   for(const l of DATA.leads){
-    if(!leadPass(l))continue;
-    if(l.sf){
-      if(!hotPass(l,run))continue;
-      const v=vaoOf(l);
-      for(const [w,f,laCur] of ky){
-        if(l.d&&f(l.d,l.dMs)){w.moi++;if(laCur)o.vao.push(l)}   // chỉ có bên SF → lần chạm đầu
-        if(!l.ha||!f(l.ha,l.haMs))continue;
-        w.H++;
-        if(!l.re&&f(v.d,v.ms)){w.Hn++;if(laCur)o.hotNew.add(l)}
-      }
-      continue;
-    }
-    const c=clsOf(l);
-    for(const [w,f,laCur] of ky){
-      const vao=!!l.d&&f(l.d,l.dMs);
-      if(vao){
-        w.moi++;if(laCur)o.vao.push(l);
-        if(c==="P"||c==="C"||c==="W"){w[c]++;if(laCur&&l.re)o.them[c].push(l)}
-      }
-      // CHỈ ĐỔI TỪ TRẠNG THÁI NÀY SANG TRẠNG THÁI KHÁC (Prospect → Warm…).
-      // Gắn tag LẦN ĐẦU muộn vài ngày ("chưa tag → Prospect") KHÔNG tính: người
-      // đó đã được đếm vào ngày vào theo tag hiện tại — tính thêm là đếm hai lần
-      // (user 2026-09-22, ca Anh Nguyen / Bich Tram Le / Nora Huynh bị đưa nhầm
-      // sang 21/09).
-      const moc=Object.entries(l.tg||{}).sort((x,y)=>x[1].localeCompare(y[1]));
-      const dau=["P","W","C"].find(k=>l.cls.includes(k)&&!(l.tg&&l.tg[k]))||"";
-      for(const [i,[k,at]] of moc.entries()){
-        if(!(i?moc[i-1][0]:dau))continue;
-        if(!f(at,null)||(vao&&c===k))continue;
-        w[k]++;
-        if(laCur){o.them[k].push(l);if(!o.ly.has(l))o.ly.set(l,[]);o.ly.get(l).push({k,at})}
-      }
+    if(!l.sf||!l.ha||!leadPass(l)||!hotPass(l,run))continue;
+    const m=l.sm!=null?DATA.leads[l.sm]:null;
+    if(m&&leadPass(m)){if(!sfBy.has(m))sfBy.set(m,[]);sfBy.get(m).push(l)}else le.push(l);
+  }
+  const nguoi=[];
+  for(const l of DATA.leads)if(!l.sf&&l.d&&leadPass(l))
+    nguoi.push({rep:l,sf:sfBy.get(l)||[],vao:{d:l.d,ms:l.dMs},re:!!l.re,ch:tagChain(l)});
+  const theoSdt=new Map();
+  for(const l of le){
+    const p=ph9(l.ph),g=p&&theoSdt.get(p);
+    if(g){g.sf.push(l);g.re=g.re&&!!l.re;continue}
+    const x={rep:l,sf:[l],vao:vaoOf(l),re:!!l.re,ch:[]};nguoi.push(x);if(p)theoSdt.set(p,x);
+  }
+  for(const x of nguoi){
+    const doi=x.ch.slice(1);                 // đổi trạng thái THẬT
+    for(const [w,k,laCur] of [[o.cur,cur,true],[o.prev,prv,false]]){
+      const vaoIn=!!x.vao.d&&k.has(x.vao.d,x.vao.ms);
+      const sfIn=x.sf.find(s=>k.has(s.ha,s.haMs));
+      const doiIn=doi.filter(e=>k.has(e.at,null));
+      if(!vaoIn&&!sfIn&&!doiIn.length)continue;
+      const tag=x.ch.filter(e=>k.end(e.at,null)).pop();
+      const st=sfIn?"H":(tag?tag.k:"U");
+      const moi=vaoIn&&!x.re;
+      w.tong++;w.t[st]++;
+      if(moi){w.moi++;w.m[st]++;if(x.rep.cph)w.cph++}
+      if(!laCur)continue;
+      let note="";
+      if(!vaoIn)note="vào "+fmtD(x.vao.d)+" · "+(sfIn?"lên Hot "+fmtD(sfIn.ha):"đổi sang "+CLS_NM[st]+" "+fmtD(doiIn[doiIn.length-1].at));
+      o.list.push({l:x.rep,st,moi,note,re:x.re});
     }
   }
+  o.list.sort((a,b)=>(b.l.d||b.l.ha||"").localeCompare(a.l.d||a.l.ha||""));
   return o;
 }
 function aggCustom(cw){
@@ -584,7 +600,8 @@ function aggCustom(cw){
   }
   r.hotLeads.sort((a,b)=>(b.ha||"").localeCompare(a.ha||""));
   r.newWin.sort((a,b)=>(b.d||"").localeCompare(a.d||""));
-  r.kt=moiTong((d,ms)=>inCur(ms??noonMs(d)),(d,ms)=>inPrev(ms??noonMs(d)));
+  r.kt=moiTong({has:(d,ms)=>inCur(ms??noonMs(d)),end:(d,ms)=>(ms??noonMs(d))<cw.to},
+               {has:(d,ms)=>inPrev(ms??noonMs(d)),end:(d,ms)=>(ms??noonMs(d))<cw.pTo});
   return r;
 }
 function agg(spanArg){
@@ -655,8 +672,8 @@ function agg(spanArg){
   }
   r.hotLeads.sort((a,b)=>(b.ha||"").localeCompare(a.ha||""));
   r.newWin.sort((a,b)=>(b.d||"").localeCompare(a.d||""));
-  const spanSet=new Set(span);
-  r.kt=moiTong(d=>spanSet.has(d),d=>prevSet.has(d));
+  const spanSet=new Set(span),het=span[span.length-1],hetTruoc=addDays(het,-span.length);
+  r.kt=moiTong({has:d=>spanSet.has(d),end:d=>d<=het},{has:d=>prevSet.has(d),end:d=>d<=hetTruoc});
   return r;
 }
 /* ---- svg helpers ---- */
@@ -888,10 +905,11 @@ function feedEvents(from,to){
     }else{
       // Đi đúng bộ lọc của "Lead mới" (mảng / kênh / khoá) và cũng bỏ reMKT như ở đó.
       if(!l.tg||l.re||!l.d||l.d<from||l.d>to||!leadPass(l))continue;
-      const moc=Object.entries(l.tg).sort((a,b)=>a[1].localeCompare(b[1]));
-      // Tag gắn ngay ngày chat đầu không có trong tg → coi là trạng thái ban đầu.
-      const dau=["P","W","C"].find(k=>l.cls.includes(k)&&!l.tg[k])||"";
-      moc.forEach(([k,at],i)=>ev.push({vao:l.d,at,ms:0,n:l.n,from:i?moc[i-1][0]:dau,to:k,sf:false}));
+      // Cùng lịch sử tag với hàng KPI (tagChain): tag đầu gắn muộn → "chưa tag →
+      // X" vào ngày gắn; các lần sau → đổi thật từ tag trước đó.
+      const ch=tagChain(l);
+      if(ch.length&&l.tg[ch[0].k])ev.push({vao:l.d,at:l.tg[ch[0].k],ms:0,n:l.n,from:"",to:ch[0].k,sf:false});
+      ch.slice(1).forEach((e,i)=>ev.push({vao:l.d,at:e.at,ms:0,n:l.n,from:ch[i].k,to:e.k,sf:false}));
     }
   }
   return ev.sort((a,b)=>b.vao.localeCompare(a.vao)||b.at.localeCompare(a.at)||b.ms-a.ms);
@@ -959,11 +977,11 @@ function kpis(a){
   // (etl/screenshot/radar-snapshot.ts), nhãn hiển thị thì ghi rõ "mới / tổng".
   const items=[["Lead mới","Lead mới / Tổng","moi","--pill","moi"],["Hot mới","Hot mới / Tổng","H","--sH","hot"],
                ["Cold","Cold mới / Tổng","C","--sC","C"],["Prospect","Prospect mới / Tổng","P","--sP","P"],["Warm","Warm mới / Tổng","W","--sW","W"]];
-  const kt=a.kt;
+  const kt=a.kt,C=kt.cur,Pv=kt.prev;
   let h="";
   for(const [dk,nm,k,cvar,tab] of items){
-    const v=k==="H"?kt.cur.Hn:sum(k),base=k==="H"?kt.prev.Hn:a.prev[k],diff=v-base;
-    const tong=kt.cur[k],tongTruoc=kt.prev[k];
+    const v=k==="moi"?C.moi:C.m[k],base=k==="moi"?Pv.moi:Pv.m[k],diff=v-base;
+    const tong=k==="moi"?C.tong:C.t[k],tongTruoc=k==="moi"?Pv.tong:Pv.t[k];
     const cls=diff>0?"up":(diff<0?"down":"");
     const arrow=diff>0?"▲":(diff<0?"▼":"–");
     // Hot lấy 100% từ Salesforce. Ghi rõ nguồn ngay dưới số, kèm số ca SMAX đã
@@ -975,10 +993,12 @@ function kpis(a){
     h+="<div class='kpi' data-k='"+dk+"'><span class='lbl' title='mới = vào trong kỳ · tổng = thêm khách cũ (reMKT) và lead vào từ trước mà đổi sang trạng thái này trong kỳ'>"+nm+"</span>"
       +"<div class='v'>"+v+"<span class='vt'> / "+tong+"</span></div><span class='tag' style='background:var("+cvar+")'></span>"
       +"<div class='delta'><span class='"+cls+"'>"+arrow+" "+Math.abs(diff)+"</span> so kỳ trước ("+base+" / "+tongTruoc+")</div>"+srcSub
+      // Phần còn lại của phép chia — không có thì các ô cộng không ra số Lead.
+      +(k==="moi"&&(C.m.U||C.t.U)?"<div class='delta'>gồm "+C.m.U+" / "+C.t.U+" chưa phân loại</div>":"")
       +"<button class='vd' data-tab='"+tab+"'>Xem chi tiết →</button></div>";
   }
-  h+="<div class='kpi' data-k='Chưa phản hồi'><span class='lbl'>Chưa phản hồi</span><div class='v'>"+a.cphWin+"</div><span class='tag' style='background:var(--sW)'></span>"
-    +"<div class='delta'>trong "+sum("moi")+" lead mới</div><button class='vd' data-tab='cph'>Xem chi tiết →</button></div>";
+  h+="<div class='kpi' data-k='Chưa phản hồi'><span class='lbl'>Chưa phản hồi</span><div class='v'>"+C.cph+"</div><span class='tag' style='background:var(--sW)'></span>"
+    +"<div class='delta'>trong "+C.moi+" lead mới</div><button class='vd' data-tab='cph'>Xem chi tiết →</button></div>";
   $("kpis").innerHTML=h;
 }
 // Bấm "Xem chi tiết" ở KPI → sang trang Danh sách lead, chọn đúng tab tương ứng
@@ -1091,35 +1111,20 @@ function expXlsx(){
 }
 const SFB="<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>";
 function tableCard(a){
-  const T={all:"Tất cả lead",moi:"Lead mới",hot:"🔥 Hot (lead tạo trên Salesforce)",P:"Prospect",C:"Cold",W:"Warm",U:"Chưa gắn tag",cph:"Chưa phản hồi"};
+  const T={all:"Tất cả lead",moi:"Lead mới",hot:"🔥 Hot (lead tạo trên Salesforce)",P:"Prospect",C:"Cold",W:"Warm",U:"Chưa phân loại",cph:"Chưa phản hồi"};
   $("tblTitle").textContent=T[S.tbl]+" trong kỳ";
   const exCls=l=>l.cls.includes("P")?"P":(l.cls.includes("W")?"W":(l.cls.includes("C")?"C":null));
-  // Mỗi tab = TỔNG của ô KPI tương ứng: người "mới" + khách cũ + lead vào từ
-  // trước mà đổi trạng thái trong kỳ (xem moiTong). Dòng không phải "mới" có
-  // chú thích ngay dưới tên. Tab "Tất cả" = mọi người có mặt ở các tab khác
-  // (user 2026-09-22: "tất cả phải hiện luôn SF"). Một người một dòng: dòng SF
-  // của người đã có dòng SMAX trong danh sách (nối qua `sm`) thì bỏ.
-  const kt=a.kt, ghiChu=new Map();
-  const vaoTxt=l=>{const v=vaoOf(l);return "vào "+(v.d?fmtD(v.d):"từ trước")};
-  const doiTxt=(l,k)=>{const ev=(kt.ly.get(l)||[]).find(e=>e.k===k);return ev?vaoTxt(l)+" · đổi sang "+CLS_NM[k]+" "+fmtD(ev.at):""};
-  let rows;
-  if(S.tbl==="hot"){
-    rows=a.hotLeads;
-    for(const l of rows)if(!kt.hotNew.has(l)&&!l.re)ghiChu.set(l,vaoTxt(l)+" · lên Hot "+fmtD(l.ha));
-  }else if(S.tbl==="P"||S.tbl==="C"||S.tbl==="W"){
-    const k=S.tbl,co=new Set(a.byCls[k]);rows=[...a.byCls[k]];
-    for(const l of kt.them[k])if(!co.has(l)){co.add(l);rows.push(l);const t=doiTxt(l,k);if(t)ghiChu.set(l,t)}
-  }else if(S.tbl==="moi"){
-    // Đúng tập đếm ra ô "Lead mới / Tổng": người VÀO trong kỳ, kể cả khách cũ.
-    rows=[...kt.vao].sort((x,y)=>(y.d||"").localeCompare(x.d||""));
-  }else if(S.tbl==="all"){
-    const co=new Set(a.newWin);rows=[...a.newWin];
-    const add=(l,t)=>{if(co.has(l))return;co.add(l);rows.push(l);if(t)ghiChu.set(l,t)};
-    for(const l of a.hotLeads)if(!(l.sm!=null&&co.has(DATA.leads[l.sm])))add(l,l.re?"":vaoTxt(l)+" · lên Hot "+fmtD(l.ha));
-    for(const k of ["P","C","W"])for(const l of kt.them[k])add(l,doiTxt(l,k));
-  }else rows=a.byCls[S.tbl]||[];
-  const nRe=rows.filter(l=>l.re).length, nDoi=rows.filter(l=>ghiChu.has(l)&&!l.re).length;
-  const ghi=S.tbl==="U"||S.tbl==="cph"?"":[rows.length-nRe-nDoi+" mới",nDoi?nDoi+" đổi trạng thái":"",nRe?nRe+" khách cũ (reMKT)":""].filter(Boolean).join(" · ");
+  // Mỗi tab = đúng tập người của ô KPI tương ứng (cột TỔNG), lấy thẳng từ
+  // moiTong() nên số dòng luôn bằng số trên ô. "Tất cả" = tổng Lead; "Lead
+  // mới" = cột mới; "Chưa phản hồi" trong số lead mới. Dòng không phải "mới"
+  // có chú thích ngay dưới tên.
+  const kt=a.kt,ghiChu=new Map();
+  const chon=S.tbl==="all"?kt.list:S.tbl==="moi"?kt.list.filter(e=>e.moi)
+    :S.tbl==="cph"?kt.list.filter(e=>e.moi&&e.l.cph):kt.list.filter(e=>e.st===(S.tbl==="hot"?"H":S.tbl));
+  for(const e of chon)if(e.note)ghiChu.set(e.l,e.note);
+  const rows=chon.map(e=>e.l);
+  const nRe=chon.filter(e=>!e.moi&&e.re).length,nDoi=chon.filter(e=>!e.moi&&!e.re).length;
+  const ghi=S.tbl==="cph"?"":[chon.length-nRe-nDoi+" mới",nDoi?nDoi+" đổi trạng thái":"",nRe?nRe+" khách cũ (reMKT)":""].filter(Boolean).join(" · ");
   $("tblSub").textContent=rows.length+" người"+(ghi?" · "+ghi:"");
   EXP.rows=rows;EXP.title=T[S.tbl];EXP.note=ghiChu;   // giữ lại đúng danh sách đang hiện để export
   // Dòng SMAX của người ĐÃ có lead Salesforce: hiện tên + ngày bên SF và nhãn

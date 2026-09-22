@@ -519,10 +519,12 @@ export async function GET(req: Request) {
   // (kỳ "Tất cả" ~8.3k lead: 1,46 MB → 1,33 MB).
   // `ky` chỉ dùng để ghép reMKT ở trên; `cd` (mốc gắn từng tag) không trang nào
   // đọc — bỏ cả hai cho nhẹ đường truyền.
-  // `c0` của dòng SMAX chỉ dùng để nối sang dòng SF ở trên → cũng bỏ.
+  // `c0` (tag gắn đầu tiên) giữ lại cho cả dòng SMAX: trang dùng nó dựng trạng
+  // thái của NGÀY VÀO khi tag đó đã bị gỡ (ca MinhTri: Prospect 17/09, lên Hot
+  // 18/09 thì Sales gỡ Prospect — không có c0 là ngày 17/09 thành "chưa phân loại").
   const out = leads.map(({ ky, cd, c0, ...rest }) => {
     void ky; void cd;
-    return rest.sf && c0 ? { ...rest, c0 } : rest;
+    return c0 ? { ...rest, c0 } : rest;
   });
 
   const asOf = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 16).replace("T", " ");
