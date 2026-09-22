@@ -64,6 +64,29 @@ const idKeysOf = (phone: string, email: string): string[] =>
  * ⚠ Trên các khoá cũ chênh này KHÔNG nhỏ — KH58 có 107 lead trong khi K58 có
  * 98; nếu sau này BU xác nhận KH## chính là K## thì đổi hàm này thành coCode().
  */
+/**
+ * Mã khoá nhắc tới trong một chuỗi ("K53 - OFF - 2025 - Relearn" → K 53).
+ *
+ * DÙNG ĐỂ ĐỌC "Relevant Leads" CHO ĐÚNG (user chốt 2026-09-22). Luật cũ "có
+ * Relevant Leads là khách cũ" gắn nhầm ca chị Ai Lam Tran: chat 17/09, sáng
+ * 18/09 Sales tạo lead K62 lúc 10:04 rồi lead F4 lúc 10:11 vì chị quan tâm cả
+ * hai khoá — Salesforce tự nối hai lead nên lead F4 mang "K62 - 2026", thế là
+ * chị mất khỏi Lead mới và Hot mới. Đo cùng ngày: 10/19 người mang nhãn reMKT
+ * từ 15/08 bị nhầm đúng kiểu này. Nay:
+ *   · mục thuộc khoá CŨ HƠN (cùng mảng: cũ hơn khoá của chính lead đó; khác
+ *     mảng: cũ hơn khoá đang chạy của mảng kia) → khách cũ, như trước;
+ *   · mục thuộc khoá KHÁC đang chạy (lead F4 chỉ tới K62) → không phải khách
+ *     cũ, tính cả hai lead ("phải count 2 lead của 2 khoá luôn");
+ *   · mục TRÙNG khoá của chính lead đó → lead đăng ký lại, chỉ lead đó là reMKT
+ *     ("cùng 1 khoá thì count 1 lead, là reMKT thôi").
+ * KH62 và K62 coi là cùng khoá ở đây (cùng số, cùng mảng).
+ */
+const relCodes = (txt: string): { f: "K" | "F"; n: number }[] =>
+  [...txt.replace(/<[^>]+>/g, " ").matchAll(/\b(KH?|F)(\d{1,3})(?:\.\d)?\b/gi)]
+    .map(m => ({ f: m[1].toUpperCase().startsWith("F") ? "F" as const : "K" as const, n: Number(m[2]) }));
+/** Số khoá đang chạy của từng mảng — điền trong GET trước khi xét reMKT. */
+const runN = { K: 0, F: 0 };
+
 const sfCo = (s: string): string => {
   const m = String(s || "").trim().match(/^(KH?\d{2,3}|F\d(?:\.\d)?)\b/i);
   return m ? m[1].toUpperCase() : "";
@@ -305,6 +328,15 @@ export async function GET(req: Request) {
   let sfHot = 0;
   const sfErr = "err" in sf ? sf.err : "";
   if ("rows" in sf) {
+    // KHOÁ ĐANG CHẠY của từng mảng = số khoá lớn nhất thấy trong đợt kéo này
+    // (cả sản phẩm của lead lẫn các mục "Relevant Leads"). Dùng để phân biệt
+    // khách cũ THẬT với người vừa đăng ký cùng lúc hai khoá — xem ghi chú ở
+    // relCodes(). Đặt lại mỗi lượt gọi: biến cấp module sống qua nhiều request.
+    runN.K = 0; runN.F = 0;
+    for (const r of sf.rows) {
+      for (const c of relCodes(`${r.Product__r?.Name ?? ""} ${gs(r.RelevantLeads__c)}`))
+        if (c.n > runN[c.f]) runN[c.f] = c.n;
+    }
     for (const r of sf.rows) {
       const ms = Date.parse(r.CreatedDate);
       if (!Number.isFinite(ms)) continue;
@@ -318,7 +350,18 @@ export async function GET(req: Request) {
       // này (VD chị Thu Hà → "K45 - 2024"). Dashboard hiện nhãn để sales biết
       // đây là re-marketing; riêng "Lead mới" của MKT thì không đếm.
       const prior = gs(r.RelevantLeads__c).trim();
-      if (prior) for (const k of keys) if (!remkt.has(k)) remkt.set(k, prior);
+      const rel = relCodes(prior), own = relCodes(code)[0];
+      // Khoá TRƯỚC (hoặc không đọc được mã) → khách cũ: dán nhãn cho CẢ NGƯỜI.
+      // Cùng mảng thì so với khoá CỦA CHÍNH LEAD NÀY (lead K61 kèm K39 là khách
+      // cũ, kèm K61 là trùng khoá) — so với khoá đang chạy hôm nay thì mọi lead
+      // cũ đều thành "khách cũ". Khác mảng (lead F4 kèm K62) mới so với khoá
+      // đang chạy của mảng kia.
+      const cu = (c: { f: "K" | "F"; n: number }) => own && c.f === own.f ? c.n < own.n : c.n < runN[c.f];
+      const khachCu = !!prior && (!rel.length || rel.some(cu));
+      // Trùng ĐÚNG khoá của chính lead này → lead này là bản đăng ký lại: chỉ
+      // RIÊNG DÒNG NÀY mang nhãn reMKT, lead đầu tiên vẫn tính bình thường.
+      const trungKhoa = !!own && rel.some(c => c.f === own.f && c.n === own.n);
+      if (khachCu) for (const k of keys) if (!remkt.has(k)) remkt.set(k, prior);
       // KHOÁ BÊN SF: SMAX và SF hay ghi khác khoá cho cùng một người (ca
       // "H Xuan": SMAX ghi K60, SF ghi K61). Gom lại để lead SMAX lọc được theo
       // khoá của cả hai hệ. Ở đây gộp KH→K vì bên nhận là tag SMAX.
@@ -331,7 +374,7 @@ export async function GET(req: Request) {
         cd: { H: ha }, up: false, upFrom: "", cls: ["H"],
         bi: /^KH?\d/i.test(code), fa: /^F\d/i.test(code), co: code ? [code] : [],
         ch: ["Salesforce"], ph: phone, cph: false, sf: true,
-        ky: keys, re: "",
+        ky: keys, re: trungKhoa && !khachCu ? prior : "",
         sfR: r.Rating === "Hot" ? "H" : r.Rating === "Cold" ? "C" : r.Rating === "Warm" ? "W" : "",
         sfConv: r.IsConverted === true,
       });
