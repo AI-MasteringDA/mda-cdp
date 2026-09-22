@@ -317,7 +317,7 @@ body[data-loading] #mask{display:flex}
       <div class="card" id="cardTbl" style="height:100%">
         <div class="hd"><h3 id="tblTitle">Chi tiết lead trong kỳ</h3><span class="sub" id="tblSub"></span>
           <div class="mini" id="tblTabs" style="flex-wrap:wrap">
-            <button data-v="all" class="on">Tất cả</button><button data-v="hot">🔥 Hot</button><button data-v="P">Prospect</button><button data-v="C">Cold</button><button data-v="W">Warm</button><button data-v="U">Chưa tag</button><button data-v="cph">Chưa phản hồi</button>
+            <button data-v="all" class="on">Tất cả</button><button data-v="moi">Lead mới</button><button data-v="hot">🔥 Hot</button><button data-v="P">Prospect</button><button data-v="C">Cold</button><button data-v="W">Warm</button><button data-v="U">Chưa tag</button><button data-v="cph">Chưa phản hồi</button>
           </div>
           <div class="exp"><button class="expbtn" id="expXlsx" title="Tải danh sách đang hiện ra Excel">⬇ Excel</button><button class="expbtn" id="expCsv" title="Tải danh sách đang hiện ra CSV">⬇ CSV</button></div>
           </div>
@@ -506,7 +506,7 @@ function vaoOf(l){
 function moiTong(cur,prv){
   const run=runningCodes();
   const z=()=>({moi:0,Hn:0,H:0,P:0,C:0,W:0});
-  const o={cur:z(),prev:z(),hotNew:new Set(),them:{P:[],C:[],W:[]},ly:new Map()};
+  const o={cur:z(),prev:z(),hotNew:new Set(),them:{P:[],C:[],W:[]},ly:new Map(),vao:[]};
   const ky=[[o.cur,cur,true],[o.prev,prv,false]];
   for(const l of DATA.leads){
     if(!leadPass(l))continue;
@@ -514,7 +514,7 @@ function moiTong(cur,prv){
       if(!hotPass(l,run))continue;
       const v=vaoOf(l);
       for(const [w,f,laCur] of ky){
-        if(l.d&&f(l.d,l.dMs))w.moi++;                 // chỉ có bên SF → lần chạm đầu
+        if(l.d&&f(l.d,l.dMs)){w.moi++;if(laCur)o.vao.push(l)}   // chỉ có bên SF → lần chạm đầu
         if(!l.ha||!f(l.ha,l.haMs))continue;
         w.H++;
         if(!l.re&&f(v.d,v.ms)){w.Hn++;if(laCur)o.hotNew.add(l)}
@@ -525,10 +525,18 @@ function moiTong(cur,prv){
     for(const [w,f,laCur] of ky){
       const vao=!!l.d&&f(l.d,l.dMs);
       if(vao){
-        w.moi++;
+        w.moi++;if(laCur)o.vao.push(l);
         if(c==="P"||c==="C"||c==="W"){w[c]++;if(laCur&&l.re)o.them[c].push(l)}
       }
-      for(const [k,at] of Object.entries(l.tg||{})){
+      // CHỈ ĐỔI TỪ TRẠNG THÁI NÀY SANG TRẠNG THÁI KHÁC (Prospect → Warm…).
+      // Gắn tag LẦN ĐẦU muộn vài ngày ("chưa tag → Prospect") KHÔNG tính: người
+      // đó đã được đếm vào ngày vào theo tag hiện tại — tính thêm là đếm hai lần
+      // (user 2026-09-22, ca Anh Nguyen / Bich Tram Le / Nora Huynh bị đưa nhầm
+      // sang 21/09).
+      const moc=Object.entries(l.tg||{}).sort((x,y)=>x[1].localeCompare(y[1]));
+      const dau=["P","W","C"].find(k=>l.cls.includes(k)&&!(l.tg&&l.tg[k]))||"";
+      for(const [i,[k,at]] of moc.entries()){
+        if(!(i?moc[i-1][0]:dau))continue;
         if(!f(at,null)||(vao&&c===k))continue;
         w[k]++;
         if(laCur){o.them[k].push(l);if(!o.ly.has(l))o.ly.set(l,[]);o.ly.get(l).push({k,at})}
@@ -949,7 +957,7 @@ function kpis(a){
   // thẳng sang danh sách ĐÃ lọc sẵn, thấy ngay con số đó gồm những ai.
   // [data-k, nhãn, khoá, màu, tab]. data-k giữ tên cũ cho bot đọc số
   // (etl/screenshot/radar-snapshot.ts), nhãn hiển thị thì ghi rõ "mới / tổng".
-  const items=[["Lead mới","Lead mới / Tổng","moi","--pill","all"],["Hot mới","Hot mới / Tổng","H","--sH","hot"],
+  const items=[["Lead mới","Lead mới / Tổng","moi","--pill","moi"],["Hot mới","Hot mới / Tổng","H","--sH","hot"],
                ["Cold","Cold mới / Tổng","C","--sC","C"],["Prospect","Prospect mới / Tổng","P","--sP","P"],["Warm","Warm mới / Tổng","W","--sW","W"]];
   const kt=a.kt;
   let h="";
@@ -1083,7 +1091,7 @@ function expXlsx(){
 }
 const SFB="<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>";
 function tableCard(a){
-  const T={all:"Tất cả lead",hot:"🔥 Hot (lead tạo trên Salesforce)",P:"Prospect",C:"Cold",W:"Warm",U:"Chưa gắn tag",cph:"Chưa phản hồi"};
+  const T={all:"Tất cả lead",moi:"Lead mới",hot:"🔥 Hot (lead tạo trên Salesforce)",P:"Prospect",C:"Cold",W:"Warm",U:"Chưa gắn tag",cph:"Chưa phản hồi"};
   $("tblTitle").textContent=T[S.tbl]+" trong kỳ";
   const exCls=l=>l.cls.includes("P")?"P":(l.cls.includes("W")?"W":(l.cls.includes("C")?"C":null));
   // Mỗi tab = TỔNG của ô KPI tương ứng: người "mới" + khách cũ + lead vào từ
@@ -1101,6 +1109,9 @@ function tableCard(a){
   }else if(S.tbl==="P"||S.tbl==="C"||S.tbl==="W"){
     const k=S.tbl,co=new Set(a.byCls[k]);rows=[...a.byCls[k]];
     for(const l of kt.them[k])if(!co.has(l)){co.add(l);rows.push(l);const t=doiTxt(l,k);if(t)ghiChu.set(l,t)}
+  }else if(S.tbl==="moi"){
+    // Đúng tập đếm ra ô "Lead mới / Tổng": người VÀO trong kỳ, kể cả khách cũ.
+    rows=[...kt.vao].sort((x,y)=>(y.d||"").localeCompare(x.d||""));
   }else if(S.tbl==="all"){
     const co=new Set(a.newWin);rows=[...a.newWin];
     const add=(l,t)=>{if(co.has(l))return;co.add(l);rows.push(l);if(t)ghiChu.set(l,t)};
