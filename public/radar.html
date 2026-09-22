@@ -302,15 +302,15 @@ body[data-loading] #mask{display:flex}
            nhìn quá… Lead mới theo ngày to quá kìa, làm nhỏ lại cho có space").
            Trước đây "Lên Hot" và "Lead tạo trên Salesforce" bị nhét chung một ô
            nên cả hai đều tí xíu, còn "Lead mới theo ngày" chiếm 2 cột. -->
-<div class="card" id="cardHot">
-        <div class="hd"><h3>Hot lead theo ngày</h3><span class="sub" id="subHot">thẳng từ Salesforce</span>
-          <div class="legend"><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sU)"></i>Chưa đánh giá</span></div></div>
-        <div class="plot"><svg id="cHot"></svg></div>
-      </div>
-      <div class="card">
+<div class="card">
         <div class="hd"><h3>Cơ cấu lead theo ngày</h3><span class="sub" id="subMix">số cam = ngày dưới 5 lead, tỉ lệ % chỉ tham khảo</span>
           <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Đã gắn Hot</span><span><i style="background:var(--sU)"></i>Chưa gắn tag</span></div></div>
         <div class="plot"><svg id="cMix"></svg></div>
+      </div>
+      <div class="card" id="cardHot">
+        <div class="hd"><h3>Hot lead theo ngày</h3><span class="sub" id="subHot">thẳng từ Salesforce</span>
+          <div class="legend"><span><i style="background:var(--sH)"></i>Hot</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sU)"></i>Chưa đánh giá</span></div></div>
+        <div class="plot"><svg id="cHot"></svg></div>
       </div>
       <!-- THAY "Nhịp lead vào" (user 2026-09-22: đường TB trượt không mang lại
            giá trị). Sếp so số Ads ngày 20 với dashboard: khách chat 20 nhưng 21
@@ -320,16 +320,16 @@ body[data-loading] #mask{display:flex}
         <div class="hd"><h3>Cập nhật trạng thái</h3><span class="sub" id="subFeed">đổi trạng thái sau ngày vào</span></div>
         <div class="feed" id="feed"></div>
       </div>
-      <!-- THAY "AAA vs FA"; đặt ngay dưới biểu đồ Hot (user 2026-09-22: "swap cho dễ nhìn") (user 2026-09-22: "không có giá trị"). Đối chiếu từng
+      <div class="card">
+        <div class="hd"><h3>Kênh</h3><span class="sub" id="subChan">lead mới trong kỳ</span></div>
+        <div class="plot"><svg id="cChan"></svg></div>
+      </div>
+      <!-- THAY "AAA vs FA"; cột phải, ngay dưới biểu đồ Hot (user 2026-09-22: "swap 2 cái giữa sang bên phải") (user 2026-09-22: "không có giá trị"). Đối chiếu từng
            người giữa Hot mới / Hot tổng / Hot lead SF của kỳ đang chọn, kèm lý do
            lệch — người đọc thấy ngay vì sao "Hot mới 4 mà SF 3". -->
       <div class="card">
         <div class="hd"><h3>Đối chiếu Hot SMAX ↔ Salesforce</h3><span class="sub" id="subDc"></span></div>
         <div class="feed" id="doiChieu"></div>
-      </div>
-      <div class="card">
-        <div class="hd"><h3>Kênh</h3><span class="sub" id="subChan">lead mới trong kỳ</span></div>
-        <div class="plot"><svg id="cChan"></svg></div>
       </div>
     </div>
     </div><!-- /pgOv -->
