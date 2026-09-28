@@ -370,7 +370,7 @@ body[data-loading] #mask{display:flex}
           <div class="plot"><svg id="cCohort"></svg></div>
         </div>
         <div class="card">
-          <div class="hd"><h3 id="coSameTitle">So cùng kỳ</h3><span class="sub">mỗi khoá tính đúng bằng số ngày mà khoá đang chạy đã đi được</span>
+          <div class="hd"><h3 id="coSameTitle">So cùng kỳ</h3><span class="sub" id="coSameSub">mỗi khoá tính đúng bằng số ngày mà khoá đang chạy đã đi được</span>
             <div class="legend"><span><i style="background:var(--pill)"></i>Lead</span><span><i style="background:var(--sH)"></i>Hot</span></div>
           </div>
           <div class="plot"><svg id="cCoSame"></svg></div>
@@ -1431,11 +1431,27 @@ function coCalc(){
   if(!list.length)return null;
   const newest=list.reduce((a,b)=>b.openDay>a.openDay?b:a);
   const dayN=coDayN(dDiff(newest.openDay,asofDate),newest.openDay);
+  /* ĐỜI THẬT CỦA MỖI KHOÁ = số ngày tới khi khoá KẾ TIẾP mở (bàn giao liền
+     mạch: K61 hết 15/08 đúng ngày K62 mở).
+     Trước 2026-09-28 mọi đường đều kéo dài bằng khoá đang chạy ⇒ nhìn vào
+     tưởng khoá nào cũng chạy ít nhất ngần ấy ngày. Thực tế F1 chỉ sống 51
+     ngày, 16 ngày cuối là đường NẰM NGANG GIẢ (đo trên Cohort_Summary: sau
+     bàn giao F1 +0 Hot / +0 lead, F2 cũng +0). Nay đường dừng tại ngày bàn
+     giao, khoá đang chạy vẫn vẽ hết mốc.
+     ĐỜI < 2 NGÀY ⇒ KHÔNG CẮT: mấy khoá cũ gõ tag chồng nhau trong cùng tuần
+     (K50 ra "đời 0 ngày", K52 "1 ngày") — cắt theo đó là xoá sạch đường. */
+  const byOpen=[...list].sort((a,b)=>a.openDay.localeCompare(b.openDay));
+  byOpen.forEach((o,i)=>{
+    const nx=byOpen[i+1], life=nx?dDiff(o.openDay,nx.openDay):null;
+    o.lifeN=(life!=null&&life>=2)?life:null;
+  });
   for(const o of list){
     o.days=Math.max(0,dDiff(o.openDay,asofDate));
     o.running=o===newest;
+    o.endN=o.lifeN!=null?Math.min(dayN,o.lifeN):dayN;
+    o.ended=o.endN<dayN;
     o.curve=[];o.curveLead=[];
-    for(let i=0;i<=dayN;i++){
+    for(let i=0;i<=o.endN;i++){
       const lim=addDays(o.openDay,i);
       o.curve.push(o.hotD.filter(x=>x<=lim).length);
       o.curveLead.push(o.leadD.filter(x=>x<=lim).length);
@@ -1498,7 +1514,8 @@ function renderCohort(){
     $("coSub").textContent="không có khoá nào khớp bộ lọc hiện tại";return}
   const cs=R.list, cur=R.cur, dayN=R.dayN;
   $("coSub").textContent="so "+cs.length+" khoá tại cùng mốc ngày thứ "+dayN
-    +" · Hot lấy thẳng từ Salesforce, lead lấy từ SMAX";
+    +" · Hot lấy thẳng từ Salesforce, lead lấy từ SMAX"
+    +(cs.some(c=>c.ended)?" · đường khoá đã bàn giao dừng tại ngày bàn giao":"");
   const cutting=dayN<cur.days;
   const hetNgay=cutting?addDays(cur.openDay,dayN):asofDate;
   $("coHead").textContent=cur.code+" · ngày thứ "+(cutting?dayN:cur.days)
@@ -1517,7 +1534,9 @@ function renderCohort(){
 
 }
 function chartCohort(cs,cur){
-  const svg=$("cCohort"),{W,H}=dims(svg,600,260),pad={t:14,b:24,l:34,r:88};
+  // r=104: nhãn khoá đã bàn giao dài hơn ("F1  150 · hết D51" ≈ 90px ở 9.5px
+  // font), r=88 cũ là cắt mất chữ.
+  const svg=$("cCohort"),{W,H}=dims(svg,600,260),pad={t:14,b:24,l:34,r:104};
   const n=(cur.curve||[]).length;
   if(!n){frame(svg,W,H,pad,4,4);return}
   const maxV=Math.max(4,...cs.flatMap(c=>c.curve||[]))*1.1;
@@ -1531,11 +1550,20 @@ function chartCohort(cs,cur){
   for(const c of others){
     const cv=(c.curve||[]).slice(0,n); if(cv.length<2)continue;
     g.appendChild(svgEl("path",{d:cv.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" "),fill:"none",style:"stroke:var(--sU)","stroke-width":"1.3",opacity:".6"}));
-    nhan.push({t:c.code+"  "+cv[cv.length-1],y:Y(cv[cv.length-1]),y0:Y(cv[cv.length-1]),x:X(cv.length-1),col:"var(--ink3)",w:"500"});
+    // Khoá đã bàn giao: chấm rỗng ở cuối đường + mốc ngày ngay trên nhãn, để
+    // đường ngắn được đọc là "khoá này đã kết thúc" chứ không phải "khoá này
+    // đuối hơn".
+    if(c.ended)g.appendChild(svgEl("circle",{cx:X(cv.length-1),cy:Y(cv[cv.length-1]),r:3,style:"fill:var(--card,#fff);stroke:var(--ink3)","stroke-width":"1.6"}));
+    nhan.push({t:c.code+"  "+cv[cv.length-1]+(c.ended?" · hết D"+(cv.length-1):""),y:Y(cv[cv.length-1]),y0:Y(cv[cv.length-1]),x:X(cv.length-1),col:"var(--ink3)",w:"500"});
   }
   // Đường TRUNG BÌNH các khoá cũ — mốc tham chiếu "bình thường thì tới đâu".
   if(others.length){
-    const avg=[]; for(let i=0;i<n;i++){const vs=others.map(c=>(c.curve||[])[i]).filter(v=>v!=null);avg.push(vs.length?vs.reduce((p,c2)=>p+c2,0)/vs.length:0)}
+    // Khoá đã bàn giao thì GIỮ SỐ CUỐI trong phép trung bình (carry-forward),
+    // không rơi khỏi mẫu. Để rơi thì TB nhảy bậc mỗi lần một khoá kết thúc,
+    // mà bậc nhảy đó lại không phải chuyện gì có thật. Số TB vì vậy giữ
+    // nguyên đúng như trước khi cắt đường.
+    const at=(c,i)=>{const cv=c.curve||[];return cv.length?cv[Math.min(i,cv.length-1)]:null};
+    const avg=[]; for(let i=0;i<n;i++){const vs=others.map(c=>at(c,i)).filter(v=>v!=null);avg.push(vs.length?vs.reduce((p,c2)=>p+c2,0)/vs.length:0)}
     g.appendChild(svgEl("path",{d:avg.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" "),fill:"none",style:"stroke:var(--sW)","stroke-width":"1.8","stroke-dasharray":"5 4"}));
     nhan.push({t:"TB  "+Math.round(avg[n-1]),y:Y(avg[n-1]),y0:Y(avg[n-1]),x:X(n-1),col:"var(--sW)",w:"600"});
   }
@@ -1565,9 +1593,13 @@ function chartCohort(cs,cur){
     const hit=svgEl("rect",{x:X(i)-hw/2,y:pad.t,width:hw,height:plotH,fill:"transparent"});
     hit.addEventListener("mousemove",e=>{
       let h="<div class='t'>Ngày thứ "+i+"</div>";
-      for(const c of [...cs].sort((a2,b2)=>((b2.curve||[])[i]||0)-((a2.curve||[])[i]||0))){
-        const v=(c.curve||[])[i];if(v==null)continue;
-        h+="<div class='row'><span>"+c.code+(c.running?" ●":"")+"</span><b>"+v+"</b></div>"}
+      // Khoá đã kết thúc trước mốc này vẫn hiện số cuối của nó, kèm chữ "đã
+      // kết thúc" — bỏ hẳn khỏi tooltip thì người xem tưởng mất dữ liệu.
+      const at=c=>{const cv=c.curve||[];return cv.length?cv[Math.min(i,cv.length-1)]:null};
+      for(const c of [...cs].sort((a2,b2)=>(at(b2)||0)-(at(a2)||0))){
+        const v=at(c);if(v==null)continue;
+        const het=c.ended&&i>c.endN;
+        h+="<div class='row'><span>"+c.code+(c.running?" ●":"")+(het?" · đã kết thúc D"+c.endN:"")+"</span><b>"+v+"</b></div>"}
       showTip(h,e.clientX,e.clientY)});
     hit.addEventListener("mouseleave",hideTip);g.appendChild(hit);
   }
@@ -1578,8 +1610,15 @@ function chartCohort(cs,cur){
    nào". Mỗi khoá 1 cặp cột: Lead và Hot, đều CẮT tại đúng số ngày khoá đang
    chạy đã đi được. Khoá đang chạy tô đậm, các khoá cũ để mờ. */
 function chartCoSame(cs,cur){
-  const svg=$("cCoSame"),{W,H}=dims(svg,300,190),pad={t:14,b:26,l:34,r:8};
+  const svg=$("cCoSame"),{W,H}=dims(svg,300,190);
   const d=cs.filter(c=>c.leadsAt>0||c.hotAt>0).slice(0,10).reverse();
+  // Chừa thêm một dòng dưới trục cho nhãn "hết D51" của khoá đã bàn giao —
+  // cột của F1 dừng ở ngày 51 chứ không phải ngày 67 như tiêu đề, không ghi ra
+  // thì người đọc tưởng khoá nào cũng chạy tới D67.
+  const coEnded=d.some(c=>c.ended);
+  const pad={t:14,b:coEnded?34:26,l:34,r:8};
+  $("coSameSub").textContent="mỗi khoá tính đúng bằng số ngày mà khoá đang chạy đã đi được"
+    +(coEnded?" · khoá đã bàn giao lấy số tại ngày bàn giao":"");
   // mốc so lấy từ độ dài đường đã cắt, KHÔNG dùng cur.days (đó là tổng số ngày
   // khoá đã chạy, khác với mốc người dùng chọn ở thanh lọc).
   $("coSameTitle").textContent="So cùng kỳ — ngày thứ "+Math.max(0,(cur.curve||[]).length-1);
@@ -1596,10 +1635,15 @@ function chartCoSame(cs,cur){
     });
     const lb=svgEl("text",{x:pad.l+band*i+band/2,y:pad.t+plotH+14,class:"axis","text-anchor":"middle",style:c.running?"font-weight:700":""});
     lb.textContent=c.code;g.appendChild(lb);
+    if(c.ended){
+      const lb2=svgEl("text",{x:pad.l+band*i+band/2,y:pad.t+plotH+24,class:"axis","text-anchor":"middle",style:"font-size:8px;opacity:.8"});
+      lb2.textContent="hết D"+c.endN;g.appendChild(lb2);
+    }
     const hit=svgEl("rect",{x:pad.l+band*i,y:pad.t,width:band,height:plotH,fill:"transparent"});
     hit.addEventListener("mousemove",e=>{
       const dl=cur.leadsAt-c.leadsAt, dh=cur.hotAt-c.hotAt;
-      let h="<div class='t'>"+c.code+(c.running?" ● đang chạy":"")+" · ngày thứ "+cur.days+"</div>"
+      let h="<div class='t'>"+c.code+(c.running?" ● đang chạy":"")+" · ngày thứ "+cur.days
+        +(c.ended?" (khoá này đã bàn giao ở D"+c.endN+")":"")+"</div>"
         +"<div class='row'><span>Lead</span><b>"+c.leadsAt+"</b></div>"
         +"<div class='row'><span>Hot</span><b>"+c.hotAt+"</b></div>";
       if(!c.running)h+="<div class='row'><span>"+cur.code+" hơn/kém</span><b>"+(dl>=0?"+":"")+dl+" lead · "+(dh>=0?"+":"")+dh+" Hot</b></div>";
