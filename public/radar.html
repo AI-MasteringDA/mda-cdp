@@ -17,6 +17,7 @@
   --pill:#1565c0; --pill-ink:#FFFFFF; --brandY:#fec636;
   --good:#2E9E5B; --bad:#C4553F;
   --sP:#64b5f6; --sC:#1565c0; --sW:#D69A0A; --sH:#2E9E5B; --sU:#C7D4E0;
+  --sCu:#6D4AAE; /* Customer — tách hẳn khỏi xanh của Hot để không đọc nhầm hai ô */
   --r:14px;
   --shadow:0 20px 52px rgba(20,22,26,.14),0 3px 10px rgba(20,22,26,.06);
   --cshadow:0 1px 2px rgba(20,22,26,.03),0 3px 10px rgba(20,22,26,.04);
@@ -1411,7 +1412,7 @@ function coCalc(){
       // Giữ NGÀY của từng lead theo nhóm, không chỉ giữ số đếm — có vậy mới cắt
       // được phễu tại một mốc bất kỳ. Trước 2026-09-07 chỉ đếm tổng nên chọn
       // ngày xong biểu đồ đổi mà hàng KPI vẫn trơ ra số cả khoá.
-      if(!o){o={code,openDay:open[code],hotD:[],leadD:[],pD:[],cD:[],wD:[],hsD:[]};byC.set(code,o)}
+      if(!o){o={code,openDay:open[code],hotD:[],leadD:[],pD:[],cD:[],wD:[],hsD:[],cuD:[]};byC.set(code,o)}
       // reMKT: MKT không tính vào "lead mới". Riêng dòng Salesforce VẪN tính,
       // vì bên SF khách quay lại cũng được tạo lead và đếm như mọi người khác.
       if(l.re&&!l.sf)continue;
@@ -1425,6 +1426,10 @@ function coCalc(){
         else if(h("H"))o.hsD.push(l.d);
       }
       if(l.ha)o.hotD.push(l.ha);
+      // KHÁCH = ô "Lead --> Opp --> Customer" của Salesforce (user 2026-09-29).
+      // Chỉ dòng SF mới có `cu` (ngày convert), và giống Hot: không lọc reMKT,
+      // không gộp — mirror 1:1 con số bên SF (K62 = 14, đo 29/09).
+      if(l.cu)o.cuD.push(l.cu);
     }
   }
   const list=[...byC.values()].filter(o=>o.leadD.length>=5);
@@ -1460,7 +1465,7 @@ function coCalc(){
     // về một thời điểm. Chọn 17/08 với khoá mở 15/08 ⇒ mọi con số là luỹ kế
     // 15→17/08.
     const lim=addDays(o.openDay,dayN), upto=arr=>arr.filter(x=>x<=lim).length;
-    o.leads=upto(o.leadD); o.H=upto(o.hotD);
+    o.leads=upto(o.leadD); o.H=upto(o.hotD); o.CU=upto(o.cuD);
     o.P=upto(o.pD); o.C=upto(o.cD); o.W=upto(o.wD);
     o.hS=upto(o.hsD);
     // "Khác": phần còn lại của phễu SMAX. Trừ o.hS (người CHỈ có tag Hot bên
@@ -1526,7 +1531,9 @@ function renderCohort(){
            ["Warm",cur.W,"--sW",pc(cur.W)],
            ["Cold",cur.C,"--sC",pc(cur.C)],
            ["Prospect",cur.P,"--sP",pc(cur.P)],
-           ["Khác / chưa tag",cur.Un,"--sU",pc(cur.Un)]];
+           ["Khác / chưa tag",cur.Un,"--sU",pc(cur.Un)],
+           // Ô thứ 7 của lưới — trước 2026-09-29 bỏ trống.
+           ["✅ Customer",cur.CU,"--sCu","nguồn Salesforce"]];
   $("coKpis").innerHTML=K.map(([k,v,col,sub])=>
     "<div class='kpi'><div class='k'>"+k+"</div><div class='v'"+(col?" style='color:var("+col+")'":"")+">"+(v||0)+"</div>"
     +"<div class='delta'>"+(sub||(cutting?"luỹ kế tới mốc trên":"tính tới hiện tại"))+"</div></div>").join("");

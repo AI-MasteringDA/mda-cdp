@@ -96,6 +96,10 @@ type SfLead = {
   Id: string; Name: string | null; Phone: string | null; MobilePhone: string | null;
   Email: string | null; Rating: string | null; IsConverted: boolean; RelevantLeads__c: string | null;
   CreatedDate: string; Product__r: { Name: string | null } | null;
+  /** Ngày lead convert thành Opportunity (kiểu Date, đã là ngày giờ VN của org). */
+  ConvertedDate: string | null;
+  /** `CustomerExist__c` = đúng điều kiện của ô "Lead --> Opp --> Customer" bên SF. */
+  ConvertedOpportunity: { CustomerExist__c: boolean | null } | null;
 };
 
 /**
@@ -132,7 +136,8 @@ async function pullSf(sinceMs: number): Promise<{ rows: SfLead[] } | { err: stri
   // NHẤT, không phải lead mới. Lần đầu viết để ASC nên trần 20.000 cắt mất toàn
   // bộ lead gần đây — dashboard ra Hot = 0 cho K62 (bắt được 2026-09-11).
   const soql = `SELECT Id, Name, Phone, MobilePhone, Email, Rating, IsConverted, RelevantLeads__c, `
-    + `CreatedDate, Product__r.Name FROM Lead WHERE CreatedDate >= ${from} ORDER BY CreatedDate DESC`;
+    + `CreatedDate, Product__r.Name, ConvertedDate, ConvertedOpportunity.CustomerExist__c `
+    + `FROM Lead WHERE CreatedDate >= ${from} ORDER BY CreatedDate DESC`;
   const rows: SfLead[] = [];
   let url: string | null = `${INST}/services/data/${V}/query?q=${encodeURIComponent(soql)}`;
   // SOQL trả tối đa 2000 bản ghi/lượt; nextRecordsUrl để lấy trang tiếp.
@@ -218,7 +223,10 @@ function toLead(f: Record<string, Cell>, cutoff: string) {
   };
 }
 
-type Lead = { n: string; n2?: string; d: string | null; ha: string | null; hs?: string | null; sfR?: string; sfConv?: boolean; dMs: number | null; haMs: number | null; cd: Record<string, string>; up: boolean; upFrom: string; cls: string[]; bi: boolean; fa: boolean; co: string[]; ch: string[]; ph: string; cph: boolean; ky: string[]; re: string; sf?: boolean;
+type Lead = { n: string; n2?: string; d: string | null; ha: string | null; hs?: string | null; sfR?: string; sfConv?: boolean;
+  /** SF: ngày thành KHÁCH (convert sang Opp có CustomerExist__c) — xem chỗ push dòng SF. */
+  cu?: string;
+  dMs: number | null; haMs: number | null; cd: Record<string, string>; up: boolean; upFrom: string; cls: string[]; bi: boolean; fa: boolean; co: string[]; ch: string[]; ph: string; cph: boolean; ky: string[]; re: string; sf?: boolean;
   /** SMAX: tag Prospect/Cold/Warm gắn SAU ngày chat đầu → ngày gắn. */
   tg?: Record<string, string>;
   /** SMAX: tag gắn sớm nhất. SF: tag đầu tiên của người này bên SMAX. */
@@ -378,6 +386,13 @@ export async function GET(req: Request) {
         ky: keys, re: trungKhoa && !khachCu ? prior : "",
         sfR: r.Rating === "Hot" ? "H" : r.Rating === "Cold" ? "C" : r.Rating === "Warm" ? "W" : "",
         sfConv: r.IsConverted === true,
+        // KHÁCH (user 2026-09-29: đưa ô "Lead --> Opp --> Customer" của SF vào
+        // dashboard). Report đó lọc ĐÚNG MỘT điều kiện: Opportunity.CustomerExist__c
+        // = True — đo 29/09: SOQL cùng điều kiện ra 14 cho K62, khớp ô trên SF.
+        // Mốc ngày = ConvertedDate: cả 14 người đều convert, tạo Opp và Closed Won
+        // trong CÙNG MỘT NGÀY, nên đây chính là ngày thành khách.
+        ...(r.ConvertedOpportunity?.CustomerExist__c === true && r.ConvertedDate
+          ? { cu: r.ConvertedDate } : {}),
       });
       sfHot++;
     }
