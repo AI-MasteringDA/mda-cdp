@@ -20,8 +20,15 @@ không phải theo tài liệu.
 `device_id`), không phải API key. Nó hết hạn sau 30 ngày và khi đó **mọi**
 endpoint trả `401` — bridge nhận 0 khách và ngừng đẩy dữ liệu.
 
-Lần gần nhất: token cấp 04/08/2026, chết 03/09/2026 12:37 (giờ VN). Mất 4 ngày
-dữ liệu mới phát hiện vì job vẫn báo xanh.
+Lần chết gần nhất: token cấp 04/08/2026, chết 03/09/2026 12:37 (giờ VN). Mất 4
+ngày dữ liệu mới phát hiện vì job vẫn báo xanh.
+
+Lần xoay gần nhất: 29/09/2026, token của tài khoản **Marketing MDA**
+(`mda@mastering-da.com`), hết hạn 17/10/2026 10:05 giờ VN.
+
+> **30 ngày tính từ lúc ĐĂNG NHẬP, không phải lúc copy.** Token 29/09 lấy từ một
+> phiên trình duyệt đăng nhập hôm 17/09 nên chỉ còn 18 ngày. Muốn được đủ 30
+> ngày thì đăng xuất rồi đăng nhập lại SMAX ngay trước khi copy.
 
 **Các bước:**
 
@@ -29,10 +36,17 @@ dữ liệu mới phát hiện vì job vẫn báo xanh.
 2. `F12` → tab **Network** → bấm qua vài màn hình cho nó gọi API.
 3. Chọn một request tới `api.smax.ai` → **Request Headers**.
 4. Copy phần sau `Authorization: Bearer ` (chuỗi bắt đầu bằng `eyJ...`).
-5. Dán vào **GitHub → Settings → Secrets and variables → Actions →
-   `SMAX_USER_TOKEN`**, và vào `.env.local` trên máy.
-6. Kiểm tra: `npx tsx etl/debug/check-smax-token.ts`
-7. Kéo bù phần thiếu: `BRIDGE_FULL=1 npm run etl:smax:lark:bridge`
+5. Thay ở **CẢ BA chỗ** (thiếu một chỗ là chỗ đó chết âm thầm):
+   - **GitHub** → Settings → Secrets and variables → Actions → `SMAX_USER_TOKEN`
+     — đây là chỗ bridge chính (`smax-lark-bridge-cron.yml`) đọc.
+     Dòng lệnh: `gh secret set SMAX_USER_TOKEN -R AI-MasteringDA/mda-cdp`
+   - **Vercel** project `mda-cdp`, cả Production lẫn Preview — `vercel env rm`
+     rồi `vercel env add`, sau đó **deploy lại** (env chỉ ăn vào bản deploy mới).
+   - `.env.local` trên máy, cho các script chạy tay.
+6. Kiểm tra: `npx tsx etl/debug/check-smax-token.ts`, rồi xem log lượt bridge kế
+   tiếp trên GitHub Actions phải có dòng `token SMAX còn N ngày`.
+7. Kéo bù phần thiếu (chỉ khi token đã chết một thời gian):
+   `BRIDGE_FULL=1 npm run etl:smax:lark:bridge`
 
 **Cảnh báo tự động** (`etl/sources/smax-lark-bridge.ts`):
 
