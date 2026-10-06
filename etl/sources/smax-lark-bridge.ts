@@ -488,14 +488,21 @@ Dữ liệu cũ trên Lark vẫn an toàn — bridge tự dừng, không ghi đ�
     let keptCourse = 0;
     for (const { rid, f } of rows) {
       // Tag hiện tại theo SMAX nếu khớp được; không thì tin cột trên Lark.
-      const tags = tagsNow.has(rid) ? [...tagsNow.get(rid)!] : list(f["Tag SMAX"]);
+      // HỢP tag SMAX hiện tại VỚI cột "Tag SMAX" trên Lark. Dashboard đếm theo
+      // cột trên Lark, mà cột đó chỉ CỘNG DỒN tag khoá (không gỡ khi SMAX gỡ).
+      // Lần dọn đầu 06/10 chỉ nhìn tag SMAX ⇒ xoá nhầm 5 người dashboard vẫn
+      // đếm ở trang Theo khoá (F1×3, K59, K61) — đã khôi phục từ bản sao.
+      const tags = [...new Set([...(tagsNow.get(rid) ?? []), ...list(f["Tag SMAX"])])];
       if (tags.some(isJunkTag) || (!tags.length && list(f["Communication Channels"]).includes("Comment (chưa inbox)"))) {
         del.push({ rid, why: "rác", f }); continue;
       }
       const lark = typeof f["Time"] === "number" ? f["Time"] as number : (typeof f[BC] === "number" ? f[BC] as number : 0);
       const act = Math.max(actByRid.get(rid) ?? 0, lark);
       if (!act || act >= cutoff) continue;
-      if (tags.some(isCourseTag)) { keptCourse++; continue; }
+      // Giữ cả khi từng mang khoá (cột "<khoá> lúc" có mốc) dù tag nay đã gỡ —
+      // job so khoá (cohort-build) đếm theo chính các cột mốc này.
+      const courseLuc = Object.keys(f).some(k => { const m = /^(KH?\d{2,3}|F\d(?:\.\d)?) lúc$/i.exec(k); return !!m && isCourseTag(m[1]) && typeof f[k] === "number"; });
+      if (tags.some(isCourseTag) || courseLuc) { keptCourse++; continue; }
       del.push({ rid, why: "cũ", f });
     }
     const nJunk = del.filter(d => d.why === "rác").length;
