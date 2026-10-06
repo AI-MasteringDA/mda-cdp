@@ -56,3 +56,14 @@ jobs:
           SMAX_API_KEY: ${{ secrets.SMAX_API_KEY }}
           SMAX_BASE_URL: https://api.smax.ai
         run: npm run etl:smax:lark:bridge
+      # Bước dọn bảng (giữ 6 tháng, chốt 2026-10-06) ghi bản sao các dòng bị xoá
+      # khỏi Lark vào cleanup-backup/. Giữ 30 ngày — đủ để khôi phục nếu xoá
+      # nhầm, mà không lưu thông tin khách quá lâu.
+      - name: Lưu bản sao các dòng đã dọn khỏi Lark
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smax-db-cleanup-${{ github.run_id }}
+          path: cleanup-backup/
+          if-no-files-found: ignore
+          retention-days: 30

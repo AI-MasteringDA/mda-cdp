@@ -26,6 +26,7 @@
 import { config } from "dotenv"; import { resolve } from "path";
 config({ path: resolve(process.cwd(), ".env.local") });
 import { isCompanyPhone, isCompanyEmail } from "../lib/company-contacts";
+import { mkdirSync, writeFileSync } from "fs"; import { join } from "path";
 
 const T = process.env.SMAX_USER_TOKEN || process.env.SMAX_API_KEY;
 const BASE = process.env.SMAX_BASE_URL || "https://api.smax.ai";
@@ -59,6 +60,29 @@ const DRYRUN = process.env.BRIDGE_DRYRUN === "1";
 // ~40 ngày nên tạo cũ hơn là vô ích, mà bảng Lark có TRẦN 20.000 dòng
 // (đang 19.284 — thả hết 1.679 ca tồn đọng vào là vỡ).
 const CREATE_MAX_AGE_DAYS = Number(process.env.BRIDGE_CREATE_MAX_AGE_DAYS || 45);
+
+// ── DỌN BẢNG: chỉ giữ 6 tháng gần nhất (user chốt 2026-10-06) — xem bước 3a.
+const KEEP_DAYS = Number(process.env.BRIDGE_KEEP_DAYS || 183);
+// Bằng hoặc ngắn hơn cửa sổ tạo dòng là sinh vòng lặp: bước 3a xoá, bước 3b tạo
+// lại, lượt sau xoá tiếp — mỗi giờ một lần, mãi mãi.
+if (KEEP_DAYS <= CREATE_MAX_AGE_DAYS * 2) throw new Error(`BRIDGE_KEEP_DAYS (${KEEP_DAYS}) phải dài hơn hẳn BRIDGE_CREATE_MAX_AGE_DAYS (${CREATE_MAX_AGE_DAYS})`);
+// Khoá nhỏ nhất mà trang "Theo khoá" của radar còn so — phải khớp CO_MIN_K
+// trong public/radar.html. Lead mang tag các khoá này KHÔNG bị dọn dù cũ.
+const CO_MIN_K = 58;
+const CLEANUP_DRY = process.env.BRIDGE_CLEANUP_DRY === "1";
+const BACKUP_DIR = process.env.BRIDGE_BACKUP_DIR || "cleanup-backup";
+// Chốt an toàn: một lượt xoá quá tỉ lệ này thì DỪNG, coi như dữ liệu đầu vào
+// có vấn đề (SMAX trả thiếu khách ⇒ mọi dòng trông như "im lặng lâu").
+// Lần dọn đầu tiên đo được ~74% (14.840/20.000) nên để 80%.
+const CLEANUP_MAX_RATIO = Number(process.env.BRIDGE_CLEANUP_MAX_RATIO || 0.8);
+
+/**
+ * Lỗi KHÔNG làm dừng ngay lượt chạy (bước sau vẫn chạy được) nhưng phải làm
+ * job báo ĐỎ. Sự cố 29/09 → 06/10/2026: batch_create bị Lark từ chối suốt 7
+ * ngày mà chỉ được console.log, rồi dòng kế tiếp vẫn in "✅ ĐÃ TẠO" ⇒ job xanh,
+ * không ai biết dashboard đã ngừng có lead mới.
+ */
+const failures: string[] = [];
 
 const normPh = (p: unknown) => (p ? String(p).replace(/\D/g, "").replace(/^84/, "").replace(/^0/, "") : "");
 const phoneFromName = (name: unknown) => { const m = String(name || "").match(/0\d{8,10}/); return m ? normPh(m[0]) : ""; };
@@ -283,16 +307,20 @@ Dữ liệu cũ trên Lark vẫn an toàn — bridge tự dừng, không ghi đ�
   type Row = { rid: string; f: Record<string, unknown> };
   const rows: Row[] = [];
   const byPid = new Map<string, string>(), byPhone = new Map<string, string>(), byEmail = new Map<string, string>();
-  const readCols = [...idCols, ...valCols, ...lucCols];
+  // "Communication Channels" chỉ để bước 3a nhận ra dòng comment-chưa-inbox.
+  const readCols = [...idCols, ...valCols, ...lucCols, ...["Communication Channels"].filter(n => existing.has(n))];
+  const indexRow = (rid: string, f: Record<string, unknown>) => {
+    const pidKey = txt(f["ID"]).trim();
+    if (pidKey && !byPid.has(pidKey)) byPid.set(pidKey, rid);
+    const ph = normPh(txt(f["Phone"])); if (ph && !byPhone.has(ph)) byPhone.set(ph, rid);
+    const nph = phoneFromName(txt(f["Lead Name"])); if (nph && !byPhone.has(nph)) byPhone.set(nph, rid);
+    const em = txt(f["Email"]).toLowerCase().trim(); if (em && !byEmail.has(em)) byEmail.set(em, rid);
+  };
   const collect = (items: any[]) => {
     for (const r of items) {
       const f = r.fields || {};
       rows.push({ rid: r.record_id, f });
-      const pidKey = txt(f["ID"]).trim();
-      if (pidKey && !byPid.has(pidKey)) byPid.set(pidKey, r.record_id);
-      const ph = normPh(txt(f["Phone"])); if (ph && !byPhone.has(ph)) byPhone.set(ph, r.record_id);
-      const nph = phoneFromName(txt(f["Lead Name"])); if (nph && !byPhone.has(nph)) byPhone.set(nph, r.record_id);
-      const em = txt(f["Email"]).toLowerCase().trim(); if (em && !byEmail.has(em)) byEmail.set(em, r.record_id);
+      indexRow(r.record_id, f);
     }
   };
 
@@ -385,6 +413,10 @@ Dữ liệu cũ trên Lark vẫn an toàn — bridge tự dừng, không ghi đ�
   // BỎ QUA số/mail của công ty (xem company-contacts.ts — SMAX hay nhặt nhầm
   // hotline trong đoạn chat thành thông tin khách, từng gây ca "Sơn Huyền").
   const fillPhone = new Map<string, string>(), fillEmail = new Map<string, string>();
+  // rid → hoạt động mới nhất theo SMAX, đo ĐÚNG công thức bước 3b dùng để quyết
+  // định có tạo dòng hay không: max(last_message_at, interaction.first). Đo hai
+  // kiểu khác nhau là sinh ra người bị 3a xoá rồi 3b tạo lại mỗi giờ.
+  const actByRid = new Map<string, number>();
   let matched = 0;
   for (const c of targets) {
     const namePh = phoneFromName(c.name);
@@ -394,6 +426,8 @@ Dữ liệu cũ trên Lark vẫn an toàn — bridge tự dừng, không ghi đ�
     if (!rid) continue;
     matched++;
     const first = c.interaction?.first ?? c.created_at;
+    const am = Math.max(c.last_message_at ? new Date(c.last_message_at).getTime() : 0, first ? new Date(first).getTime() : 0);
+    if (am > (actByRid.get(rid) ?? 0)) actByRid.set(rid, am);
     if (first) {
       const ms = vnMidnightMs(first); const prev = firstMs.get(rid); if (prev == null || ms < prev) firstMs.set(rid, ms);
       const exact = new Date(first).getTime();
@@ -424,6 +458,83 @@ Dữ liệu cũ trên Lark vẫn an toàn — bridge tự dừng, không ghi đ�
   const missingLuc = [...lucSeen].filter(n => !existing.has(n));
   if (missingLuc.length) console.log(`[bridge] ⚠ SMAX có tag-time chưa có cột trên Lark, BỎ QUA: ${missingLuc.join(", ")}`);
   console.log(`[bridge] khớp: ${matched}/${targets.length} khách → dòng Lark | chưa khớp: ${targets.length - matched}`);
+
+  // ── 3a) DỌN BẢNG — chỉ giữ 6 tháng gần nhất (user chốt 2026-10-06).
+  // SỰ CỐ 29/09 → 06/10/2026: SMAX_Database chạm trần 20.000 dòng/bảng của Lark,
+  // batch_create trả 1254103 RecordExceedLimit ⇒ 7 ngày không có lead SMAX mới
+  // nào lên dashboard. Đo lúc đó: 3.076 dòng rác + ~11.800 dòng im lặng quá 6
+  // tháng. Người dùng chốt: lead cũ không còn giá trị, giữ 6 tháng là đủ.
+  //
+  // XOÁ:
+  //  · RÁC, bất kể ngày: tag Spam/Block, hoặc comment chưa inbox mà chưa gắn tag
+  //    — dashboard vốn đã bỏ qua, và 3b cũng không bao giờ tạo loại dòng này;
+  //  · CŨ: hoạt động mới nhất quá KEEP_DAYS ngày.
+  // GIỮ dù cũ: dòng mang tag khoá mà trang "Theo khoá" còn so (K58+, mọi khoá F)
+  // — xoá đi là biểu đồ so khoá tụt số. Dòng không đọc được mốc nào: giữ.
+  //
+  // Chỉ chạy ở ĐỐI SOÁT: phải có ĐỦ bảng và ĐỦ khách SMAX mới phán được ai im
+  // lặng. Xoá trên Lark KHÔNG mất dữ liệu — SMAX vẫn giữ đủ, và trước khi xoá
+  // còn ghi bản sao ra BACKUP_DIR (CI đính kèm vào lượt chạy).
+  if (FULL && matched > 0) {
+    const list = (v: unknown): string[] => Array.isArray(v)
+      ? v.map(x => (typeof x === "object" && x ? ((x as any).text ?? (x as any).name ?? "") : String(x))).filter(Boolean) : [];
+    const isJunkTag = (t: string) => { const s = t.toLowerCase().replace(/[\s_-]+/g, ""); return s === "spam" || s.includes("block"); };
+    const isCourseTag = (t: string) => {
+      const s = t.trim().toUpperCase(), k = /^KH?(\d{2,3})$/.exec(s);
+      return k ? Number(k[1]) >= CO_MIN_K : /^F\d(\.\d)?$/.test(s);
+    };
+    const cutoff = Date.now() - KEEP_DAYS * 86400_000;
+    const del: { rid: string; why: "rác" | "cũ"; f: Record<string, unknown> }[] = [];
+    let keptCourse = 0;
+    for (const { rid, f } of rows) {
+      // Tag hiện tại theo SMAX nếu khớp được; không thì tin cột trên Lark.
+      const tags = tagsNow.has(rid) ? [...tagsNow.get(rid)!] : list(f["Tag SMAX"]);
+      if (tags.some(isJunkTag) || (!tags.length && list(f["Communication Channels"]).includes("Comment (chưa inbox)"))) {
+        del.push({ rid, why: "rác", f }); continue;
+      }
+      const lark = typeof f["Time"] === "number" ? f["Time"] as number : (typeof f[BC] === "number" ? f[BC] as number : 0);
+      const act = Math.max(actByRid.get(rid) ?? 0, lark);
+      if (!act || act >= cutoff) continue;
+      if (tags.some(isCourseTag)) { keptCourse++; continue; }
+      del.push({ rid, why: "cũ", f });
+    }
+    const nJunk = del.filter(d => d.why === "rác").length;
+    console.log(`[bridge] [DỌN] giữ ${KEEP_DAYS} ngày: xoá ${del.length}/${rows.length} dòng (rác ${nJunk} · im lặng lâu ${del.length - nJunk}) · giữ lại vì tag khoá K${CO_MIN_K}+/F: ${keptCourse}`);
+    if (del.length > rows.length * CLEANUP_MAX_RATIO) {
+      failures.push(`dọn bảng: định xoá ${del.length}/${rows.length} dòng, vượt chốt ${CLEANUP_MAX_RATIO * 100}% — KHÔNG xoá`);
+      console.log(`[bridge] [DỌN] ❌ vượt chốt an toàn ${CLEANUP_MAX_RATIO * 100}% — KHÔNG xoá dòng nào, cần người xem lại`);
+    } else if (del.length && (CLEANUP_DRY || DRYRUN)) {
+      console.log(`[bridge] [DỌN] [CHẠY THỬ] KHÔNG xoá. Mẫu:`);
+      for (const d of [...del.filter(x => x.why === "rác").slice(0, 3), ...del.filter(x => x.why === "cũ").slice(0, 5)])
+        console.log(`   ${d.why.padEnd(14)} ${txt(d.f["Lead Name"]).slice(0, 30).padEnd(30)} | hoạt động cuối ${new Date(Math.max(actByRid.get(d.rid) ?? 0, typeof d.f["Time"] === "number" ? d.f["Time"] as number : 0)).toISOString().slice(0, 10)} | tag: ${list(d.f["Tag SMAX"]).join(", ") || "-"}`);
+    } else if (del.length) {
+      mkdirSync(BACKUP_DIR, { recursive: true });
+      const file = join(BACKUP_DIR, `smax-db-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
+      writeFileSync(file, JSON.stringify(del.map(d => ({ record_id: d.rid, ly_do: d.why, fields: d.f }))));
+      console.log(`[bridge] [DỌN] đã sao lưu ${del.length} dòng → ${file}`);
+      const gone = new Set<string>();
+      for (let i = 0; i < del.length; i += 500) {
+        const ids = del.slice(i, i + 500).map(d => d.rid);
+        const rr = await fetch(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/records/batch_delete`, {
+          method: "POST", headers: { Authorization: `Bearer ${tk}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ records: ids }),
+        }).then(r => r.json());
+        if (rr.code !== 0) {
+          failures.push(`batch_delete lỗi: ${rr.code} ${rr.msg}`);
+          console.log(`[bridge] [DỌN] ❌ batch_delete lỗi: ${rr.code} ${rr.msg} — dừng xoá`);
+          break;
+        }
+        for (const id of ids) gone.add(id);
+      }
+      console.log(`[bridge] [DỌN] ✅ ĐÃ XOÁ ${gone.size}/${del.length} dòng`);
+      // Gỡ dòng đã xoá khỏi bộ nhớ rồi dựng lại chỉ mục, để 3b/4 phía sau không
+      // ghi vào record đã mất, và không tưởng một SĐT vẫn "đã có dòng".
+      const left = rows.filter(r => !gone.has(r.rid));
+      rows.length = 0; rows.push(...left);
+      byPid.clear(); byPhone.clear(); byEmail.clear();
+      for (const r of rows) indexRow(r.rid, r.f);
+    }
+  }
 
   // ── 3b) TẠO DÒNG MỚI cho khách chưa từng có trên Lark.
   // Chạy ở CẢ HAI chế độ. Ban đầu chỉ cho chạy ở ĐỐI SOÁT, nhưng thực tế
@@ -508,14 +619,23 @@ Dữ liệu cũ trên Lark vẫn an toàn — bridge tự dừng, không ghi đ�
       for (const c of created.slice(0, 10)) console.log(`   ${JSON.stringify({ ten: c.fields["Lead Name"], id: c.fields["ID"], sdt: c.fields["Phone"], mail: c.fields["Email"], tag: c.fields["Tag SMAX"] })}`);
       return;
     }
+    let createdOk = 0;
     for (let i = 0; i < created.length; i += 400) {
+      const batch = created.slice(i, i + 400);
       const rr = await fetch(`${U}/bitable/v1/apps/${APP}/tables/${dbId}/records/batch_create`, {
         method: "POST", headers: { Authorization: `Bearer ${tk}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ records: created.slice(i, i + 400) }),
+        body: JSON.stringify({ records: batch }),
       }).then(r => r.json());
-      if (rr.code !== 0) console.log(`[bridge] batch_create lỗi: ${rr.code} ${rr.msg}`);
+      // Đi tiếp sang bước 4 (cập nhật dòng cũ vẫn có ích) nhưng ghi vào
+      // `failures` để job kết thúc ĐỎ — xem ghi chú ở khai báo `failures`.
+      if (rr.code !== 0) {
+        failures.push(`batch_create lỗi: ${rr.code} ${rr.msg} (${batch.length} dòng không tạo được)`);
+        console.log(`[bridge] ❌ batch_create lỗi: ${rr.code} ${rr.msg} — ${batch.length} dòng KHÔNG được tạo`);
+      } else createdOk += batch.length;
     }
-    if (created.length) console.log(`[bridge] ✅ ĐÃ TẠO ${created.length} dòng mới`);
+    if (created.length) console.log(createdOk === created.length
+      ? `[bridge] ✅ ĐÃ TẠO ${createdOk} dòng mới`
+      : `[bridge] ⚠ chỉ tạo được ${createdOk}/${created.length} dòng mới`);
   }
 
   if (!matched && !created.length) { console.log("[bridge] không có gì để ghi — xong."); return; }
@@ -595,4 +715,10 @@ Dữ liệu cũ trên Lark vẫn an toàn — bridge tự dừng, không ghi đ�
   console.log(`[bridge] ✅ ĐÃ ĐẨY: ${uw}/${upd.length} dòng lên Lark SMAX_Database`);
 }
 
-runSmaxLarkBridge().then(() => process.exit(0)).catch((e) => { console.error("[bridge] LỖI:", e.message); process.exit(1); });
+runSmaxLarkBridge().then(() => {
+  if (failures.length) {
+    console.error(`[bridge] ❌ KẾT THÚC CÓ LỖI (${failures.length}):\n  - ${failures.join("\n  - ")}`);
+    process.exit(1);
+  }
+  process.exit(0);
+}).catch((e) => { console.error("[bridge] LỖI:", e.message); process.exit(1); });
