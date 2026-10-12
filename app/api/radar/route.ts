@@ -120,7 +120,39 @@ type SfLead = {
  */
 const SF_MAX_DAYS = 420;
 
-async function pullSf(sinceMs: number): Promise<{ rows: SfLead[] } | { err: string }> {
+/**
+ * KHOÁ ĐANG TUYỂN SINH — đọc thẳng lịch khoá trên Salesforce (user chốt
+ * 2026-10-12). Mỗi Product có "Recruitment Start Date" và "Actual Opening Date"
+ * (ngày khai giảng thực tế); khoá trước khai giảng thì hôm sau khoá kế mở
+ * tuyển sinh (K62 KG 08/10 → K63 mở 09/10).
+ *
+ * TRƯỚC ĐÂY dashboard tự đoán = khoá mới nhất có ≥5 lead. Ca 12/10: K62 đã
+ * khai giảng 08/10 nhưng K63 mới có 3 lead SF ⇒ dashboard vẫn báo K62, và ô
+ * Hot (chỉ đếm khoá đang tuyển sinh) bỏ sót cả 3 lead K63.
+ *
+ * Quy tắc: mỗi hệ (BI = K##, FA = F#) lấy khoá có ngày mở tuyển sinh MUỘN NHẤT
+ * mà ≤ hôm nay. Nếu khoá mới chưa được tạo trên SF thì giữ khoá trước, còn hơn
+ * để trống. Mã "KH63" quy về "K63" (cùng khoá, xem coCode).
+ */
+type SfRunning = Partial<Record<"bi" | "fa", { code: string; from: string; to: string | null }>>;
+async function pullSfRunning(INST: string, V: string, token: string): Promise<SfRunning> {
+  const soql = "SELECT Name, RecruitmentStartDate__c, Actual_Opening_Date__c, OpeningDate__c FROM Product2 "
+    + "WHERE RecruitmentStartDate__c != null";
+  const q = await fetch(`${INST}/services/data/${V}/query?q=${encodeURIComponent(soql)}`,
+    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }).then(r => r.json()).catch(() => null);
+  const today = vnDate(Date.now()) as string;
+  const out: SfRunning = {};
+  for (const p of (q?.records ?? []) as { Name: string; RecruitmentStartDate__c: string; Actual_Opening_Date__c: string | null; OpeningDate__c: string | null }[]) {
+    const raw = sfCo(p.Name); if (!raw || p.RecruitmentStartDate__c > today) continue;
+    const g = /^F/i.test(raw) ? "fa" : "bi";
+    const cur = out[g];
+    if (!cur || p.RecruitmentStartDate__c > cur.from)
+      out[g] = { code: coCode(raw), from: p.RecruitmentStartDate__c, to: p.Actual_Opening_Date__c ?? p.OpeningDate__c };
+  }
+  return out;
+}
+
+async function pullSf(sinceMs: number): Promise<{ rows: SfLead[]; running: SfRunning } | { err: string }> {
   const INST = process.env.SALESFORCE_INSTANCE_URL, CID = process.env.SALESFORCE_CLIENT_ID,
         CSEC = process.env.SALESFORCE_CLIENT_SECRET, V = process.env.SALESFORCE_API_VERSION || "v59.0";
   if (!INST || !CID || !CSEC) return { err: "thiếu biến môi trường Salesforce" };
@@ -153,7 +185,10 @@ async function pullSf(sinceMs: number): Promise<{ rows: SfLead[] } | { err: stri
     rows.push(...(ok.records ?? []));
     url = ok.nextRecordsUrl ? `${INST}${ok.nextRecordsUrl}` : null;
   }
-  return { rows };
+  // Lỗi đọc lịch khoá KHÔNG được làm hỏng lượt kéo lead — trang tự lùi về
+  // cách đoán cũ khi `running` rỗng.
+  const running = await pullSfRunning(INST, V, tr.access_token).catch(() => ({}));
+  return { rows, running };
 }
 
 function toLead(f: Record<string, Cell>, cutoff: string) {
@@ -493,7 +528,8 @@ export async function GET(req: Request) {
   });
 
   const asOf = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 16).replace("T", " ");
-  return NextResponse.json({ asOf, days, leads: out, reCount, sfHot, sfDays: Math.min(days, SF_MAX_DAYS), sfErr }, { headers: {
+  const sfRunning = "running" in sf ? sf.running : {};
+  return NextResponse.json({ asOf, days, leads: out, reCount, sfHot, sfDays: Math.min(days, SF_MAX_DAYS), sfErr, sfRunning }, { headers: {
     // CHO EDGE CỦA VERCEL CACHE LẠI.
     // Kỳ "Tất cả" mất ~27s vì bảng SMAX đã hơn 19.000 dòng và Lark chỉ trả
     // 500 dòng/lượt (38 lượt nối tiếp, không song song được vì phải có

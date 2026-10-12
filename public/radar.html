@@ -1250,6 +1250,13 @@ function coRunningCode(){
    Bảng khoá chưa tải xong thì tạm lấy mã số lớn nhất đang có trong dòng SF —
    khoá mới luôn mang số lớn hơn khoá cũ. */
 function runningCodes(){
+  // NGUỒN CHÍNH: lịch khoá trên Salesforce (/api/radar → sfRunning, user chốt
+  // 2026-10-12). Cách đoán cũ bên dưới (khoá mở muộn nhất trong Cohort_Summary)
+  // chỉ còn là đường lùi khi SF lỗi — nó đòi khoá mới có ≥5 lead mới nhận ra,
+  // nên ca 12/10 vẫn báo K62 dù K62 đã khai giảng 08/10.
+  const sr=DATA&&DATA.sfRunning;
+  if(sr&&(sr.bi||sr.fa))
+    return new Set(Object.entries(sr).filter(([g,v])=>v&&(S.grp==="all"||S.grp===g)).map(([,v])=>coKey(v.code)));
   const best={};
   const add=(g,code,open)=>{if(!best[g]||open>best[g].open)best[g]={code:coKey(code),open}};
   if(CO&&CO.courses){
@@ -1398,6 +1405,12 @@ function coShown(code){
 function coCalc(){
   const open={};
   for(const c of (CO&&CO.courses)||[]) if(c.openDay) open[coKey(c.code)]=c.openDay;
+  // Khoá đang tuyển sinh theo Salesforce: khoá vừa mở thường CHƯA có trong
+  // Cohort_Summary (job tính chạy 1 lần/ngày, lại bỏ khoá <5 lead) ⇒ lấy ngày
+  // mở tuyển sinh của SF. Không ghi đè ngày của khoá cũ — các đường so sánh
+  // giữ nguyên như trước.
+  const runNow=runningCodes();
+  for(const v of Object.values((DATA&&DATA.sfRunning)||{})) if(v&&!open[coKey(v.code)]) open[coKey(v.code)]=v.from;
   const byC=new Map();
   for(const l of DATA.leads){
     if(S.grp==="bi"&&!l.bi)continue;
@@ -1432,9 +1445,11 @@ function coCalc(){
       if(l.cu)o.cuD.push(l.cu);
     }
   }
-  const list=[...byC.values()].filter(o=>o.leadD.length>=5);
+  // Khoá đang tuyển sinh luôn được giữ, kể cả mới 1–2 lead (K63 ngày thứ 3).
+  const list=[...byC.values()].filter(o=>o.leadD.length>=5||runNow.has(o.code));
   if(!list.length)return null;
-  const newest=list.reduce((a,b)=>b.openDay>a.openDay?b:a);
+  const cand=list.filter(o=>runNow.has(o.code));
+  const newest=(cand.length?cand:list).reduce((a,b)=>b.openDay>a.openDay?b:a);
   const dayN=coDayN(dDiff(newest.openDay,asofDate),newest.openDay);
   /* ĐỜI THẬT CỦA MỖI KHOÁ = số ngày tới khi khoá KẾ TIẾP mở (bàn giao liền
      mạch: K61 hết 15/08 đúng ngày K62 mở).
