@@ -1879,6 +1879,14 @@ document.addEventListener("click",e=>{
 });
 $("segGrp").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
   [...$("segGrp").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");S.grp=b.dataset.v;
+  // CHỌN SẴN KHOÁ ĐANG TUYỂN SINH (user chốt 2026-10-12: "đúng thì phải filter
+  // K63 chứ sao bỏ chọn"). Trước đây vào AAA mà không chọn khoá thì cộng mọi
+  // khoá K## (K62 lẫn K63), trong khi tiêu đề ghi "K63" và ô Hot chỉ đếm K63.
+  // Nay vào AAA → nút khoá hiện sẵn "K63", FA → "F4"; muốn xem mọi khoá thì
+  // bấm bỏ chọn. TẤT CẢ thì không lọc khoá (xem cả người chưa gắn khoá).
+  S.co.clear();
+  if(S.grp!=="all")for(const c of runningCodes())S.co.add(c);
+  buildCourses();syncCoBtn();
   renderAll()});
 $("navPg").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
   [...$("navPg").children].forEach(x=>x.classList.remove("on"));b.classList.add("on");
