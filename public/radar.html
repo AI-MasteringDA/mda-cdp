@@ -17,6 +17,7 @@
   --pill:#1565c0; --pill-ink:#FFFFFF; --brandY:#fec636;
   --good:#2E9E5B; --bad:#C4553F;
   --sP:#64b5f6; --sC:#1565c0; --sW:#D69A0A; --sH:#2E9E5B; --sU:#C7D4E0;
+  --sD:#F4A261; /* Ebook Data Storytelling (tag MDA_DATASTORY) */
   --sCu:#6D4AAE; /* Customer — tách hẳn khỏi xanh của Hot để không đọc nhầm hai ô */
   --r:14px;
   --shadow:0 20px 52px rgba(20,22,26,.14),0 3px 10px rgba(20,22,26,.06);
@@ -295,7 +296,7 @@ body[data-loading] #mask{display:flex}
     <div class="charts">
       <div class="card" id="cardStack">
         <div class="hd"><h3>Lead mới theo ngày</h3><span class="sub" id="subStack">theo ngày chat đầu · đã loại khách quay lại (reMKT) · số trên cột = tổng</span>
-          <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Đã gắn Hot</span><span><i style="background:var(--sU)"></i>Chưa gắn tag</span></div></div>
+          <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Đã gắn Hot</span><span><i style="background:var(--sD)"></i>Ebook DS</span><span><i style="background:var(--sU)"></i>Chưa gắn tag</span></div></div>
         <div class="mix" id="mixStack"></div>
         <div class="plot"><svg id="cStack"></svg></div>
       </div>
@@ -305,7 +306,7 @@ body[data-loading] #mask{display:flex}
            nên cả hai đều tí xíu, còn "Lead mới theo ngày" chiếm 2 cột. -->
 <div class="card">
         <div class="hd"><h3>Cơ cấu lead theo ngày</h3><span class="sub" id="subMix">số cam = ngày dưới 5 lead, tỉ lệ % chỉ tham khảo</span>
-          <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Đã gắn Hot</span><span><i style="background:var(--sU)"></i>Chưa gắn tag</span></div></div>
+          <div class="legend"><span><i style="background:var(--sP)"></i>Prospect</span><span><i style="background:var(--sC)"></i>Cold</span><span><i style="background:var(--sW)"></i>Warm</span><span><i style="background:var(--sH)"></i>Đã gắn Hot</span><span><i style="background:var(--sD)"></i>Ebook DS</span><span><i style="background:var(--sU)"></i>Chưa gắn tag</span></div></div>
         <div class="plot"><svg id="cMix"></svg></div>
       </div>
       <div class="card" id="cardHot">
@@ -339,7 +340,7 @@ body[data-loading] #mask{display:flex}
       <div class="card" id="cardTbl" style="height:100%">
         <div class="hd"><h3 id="tblTitle">Chi tiết lead trong kỳ</h3><span class="sub" id="tblSub"></span>
           <div class="mini" id="tblTabs" style="flex-wrap:wrap">
-            <button data-v="all" class="on">Tất cả</button><button data-v="moi">Lead mới</button><button data-v="hot">🔥 Hot</button><button data-v="sf">Hot lead SF</button><button data-v="P">Prospect</button><button data-v="C">Cold</button><button data-v="W">Warm</button><button data-v="U">Chưa phân loại</button><button data-v="untag">Chưa gắn tag</button>
+            <button data-v="all" class="on">Tất cả</button><button data-v="moi">Lead mới</button><button data-v="hot">🔥 Hot</button><button data-v="sf">Hot lead SF</button><button data-v="P">Prospect</button><button data-v="C">Cold</button><button data-v="W">Warm</button><button data-v="D">Ebook DS</button><button data-v="U">Chưa phân loại</button><button data-v="untag">Chưa gắn tag</button>
           </div>
           <div class="exp"><button class="expbtn" id="expXlsx" title="Tải danh sách đang hiện ra Excel">⬇ Excel</button><button class="expbtn" id="expCsv" title="Tải danh sách đang hiện ra CSV">⬇ CSV</button></div>
           </div>
@@ -542,7 +543,7 @@ function tagChain(l){
 /** @param cur,prv {has(d,ms): trong kỳ?, end(d,ms): không muộn hơn cuối kỳ?} */
 function moiTong(cur,prv){
   const run=runningCodes();
-  const z=()=>({moi:0,tong:0,m:{H:0,P:0,C:0,W:0,U:0},t:{H:0,P:0,C:0,W:0,U:0},chuaTag:0});
+  const z=()=>({moi:0,tong:0,m:{H:0,P:0,C:0,W:0,D:0,U:0},t:{H:0,P:0,C:0,W:0,D:0,U:0},chuaTag:0});
   const o={cur:z(),prev:z(),list:[]};
   // NGƯỜI = dòng SMAX + các lead SF nối về nó (qua `sm`). Lead SF không nối được
   // dòng SMAX nào tự là một người — gộp theo SĐT để lead K62 + F4 của cùng một
@@ -572,7 +573,7 @@ function moiTong(cur,prv){
       const tag=x.ch.filter(e=>k.end(e.at,null)).pop();
       // Đã có lead SF từ trước cuối kỳ → đang là Hot (ca anh Hai: form web lên SF
       // 20/09, 21/09 mới chat → ngày 21/09 là lead mới đã Hot).
-      const st=sfIn||x.sf.some(s=>k.end(s.ha,s.haMs))?"H":(tag?tag.k:"U");
+      const st=sfIn||x.sf.some(s=>k.end(s.ha,s.haMs))?"H":(tag?tag.k:(x.rep.cls.includes("D")?"D":"U"));
       // "Mới" = người CHAT LẦN ĐẦU trên SMAX trong kỳ, như trước giờ. Người chỉ
       // có bên Salesforce không vào Lead mới — chỉ vào tổng (Hot).
       const moi=vaoIn&&!x.re&&!x.rep.sf;
@@ -580,7 +581,7 @@ function moiTong(cur,prv){
       // CHƯA GẮN TAG (user 2026-09-22, thay ô "Chưa phản hồi"): lead mới của kỳ
       // mà GIỜ vẫn chưa mang tag Prospect/Cold/Warm/Hot nào và chưa có lead SF —
       // danh sách để team lên SMAX gắn. Xét tag HIỆN TẠI, không phải tag lúc đó.
-      const chuaTag=moi&&!x.sf.length&&!x.rep.sd&&!x.rep.cls.some(c=>"PCWH".includes(c));
+      const chuaTag=moi&&!x.sf.length&&!x.rep.sd&&!x.rep.cls.some(c=>"PCWHD".includes(c));
       if(moi){w.moi++;w.m[st]++;if(chuaTag)w.chuaTag++}
       if(!laCur)continue;
       let note="";
@@ -595,7 +596,7 @@ function moiTong(cur,prv){
 function aggCustom(cw){
   const days=["·"],lab=[cw.label],gran="custom";
   const z=()=>days.map(()=>0);
-  const r={days,lab,gran,moi:z(),P:z(),C:z(),W:z(),Hc:z(),U:z(),H:z(),Hsplit:{H:z(),C:z(),O:z()},chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],hsOnly:[],newWin:[],byCls:{P:[],C:[],W:[],H:[],U:[],cph:[]},cphWin:0,reWin:0,upWin:0,prev:{moi:0,P:0,C:0,W:0,H:0}};
+  const r={days,lab,gran,moi:z(),P:z(),C:z(),W:z(),Hc:z(),D:z(),U:z(),H:z(),Hsplit:{H:z(),C:z(),O:z()},chCount:{},biCls:{P:0,C:0,W:0,H:0,D:0},faCls:{P:0,C:0,W:0,H:0,D:0},hotLeads:[],hsOnly:[],newWin:[],byCls:{P:[],C:[],W:[],H:[],D:[],U:[],cph:[]},cphWin:0,reWin:0,upWin:0,prev:{moi:0,P:0,C:0,W:0,H:0}};
   CHDEFS.forEach(([k])=>r.chCount[k]=0);
   const bumpH=l=>{r.H[0]++;r.Hsplit[l.sfR==="H"?"H":(l.sfR==="C"?"C":"O")][0]++};
   const run=runningCodes();
@@ -614,7 +615,7 @@ function aggCustom(cw){
     }
     if(inCur(l.dMs)){
       r.moi[0]++;
-      const c=has("P")?"P":(has("W")?"W":(has("C")?"C":(has("H")?"H":"U")));
+      const c=has("P")?"P":(has("W")?"W":(has("C")?"C":(has("H")?"H":(has("D")?"D":"U"))));
       if(c==="H")r.Hc[0]++;else if(c==="U")r.U[0]++;else r[c][0]++;
       r.byCls[c].push(l);
       if(c!=="U"){if(l.bi)r.biCls[c]++;if(l.fa)r.faCls[c]++}
@@ -641,7 +642,7 @@ function agg(spanArg){
   const days=keys,idx=dIdx;
   const prevSet=new Set(span.map(d=>addDays(d,-span.length)));
   const z=()=>days.map(()=>0);
-  const r={days,lab,gran,moi:z(),P:z(),C:z(),W:z(),Hc:z(),U:z(),H:z(),Hsplit:{H:z(),C:z(),O:z()},chCount:{},biCls:{P:0,C:0,W:0,H:0},faCls:{P:0,C:0,W:0,H:0},hotLeads:[],hsOnly:[],newWin:[],byCls:{P:[],C:[],W:[],H:[],U:[],cph:[]},cphWin:0,reWin:0,upWin:0,prev:{moi:0,P:0,C:0,W:0,H:0}};
+  const r={days,lab,gran,moi:z(),P:z(),C:z(),W:z(),Hc:z(),D:z(),U:z(),H:z(),Hsplit:{H:z(),C:z(),O:z()},chCount:{},biCls:{P:0,C:0,W:0,H:0,D:0},faCls:{P:0,C:0,W:0,H:0,D:0},hotLeads:[],hsOnly:[],newWin:[],byCls:{P:[],C:[],W:[],H:[],D:[],U:[],cph:[]},cphWin:0,reWin:0,upWin:0,prev:{moi:0,P:0,C:0,W:0,H:0}};
   CHDEFS.forEach(([k])=>r.chCount[k]=0);
   // Cộng một lead Salesforce vào ô thứ i, đồng thời tách theo Rating bên SF.
   const bumpH=(l,i)=>{r.H[i]++;r.Hsplit[l.sfR==="H"?"H":(l.sfR==="C"?"C":"O")][i]++};
@@ -675,7 +676,7 @@ function agg(spanArg){
     if(l.d&&idx[l.d]!=null){
       const i=idx[l.d];r.moi[i]++;
       // mỗi lead rơi vào ĐÚNG 1 nhóm → tổng các nhóm = "Lead mới"
-      const c=has("P")?"P":(has("W")?"W":(has("C")?"C":(has("H")?"H":"U")));
+      const c=has("P")?"P":(has("W")?"W":(has("C")?"C":(has("H")?"H":(has("D")?"D":"U"))));
       if(c==="H")r.Hc[i]++;else if(c==="U")r.U[i]++;else r[c][i]++;
       r.byCls[c].push(l);
       if(c!=="U"){if(l.bi)r.biCls[c]++;if(l.fa)r.faCls[c]++}
@@ -755,7 +756,7 @@ function mixBar(a){
   if(sv){const w=sv.getBoundingClientRect().width,k=w/Math.max(w,600);
     el.style.paddingLeft=(30*k)+"px";el.style.paddingRight=(8*k)+"px"}
   const SEG=[["P","--sP","Prospect"],["C","--sC","Cold"],["W","--sW","Warm"],
-             ["Hc","--sH","Hot"],["U","--sU","Chưa gắn tag"]];
+             ["Hc","--sH","Hot"],["D","--sD","Ebook DS"],["U","--sU","Chưa gắn tag"]];
   const sum=k=>a[k].reduce((p,c)=>p+c,0);
   const val=SEG.map(([k])=>sum(k)), tot=val.reduce((p,c)=>p+c,0);
   if(!tot){el.innerHTML="";return}
@@ -783,7 +784,7 @@ function chartStack(a){
   const maxV=Math.max(4,...tot)*1.12;
   const {g,plotH,plotW}=frame(svg,W,H,pad,maxV,4);
   const band=plotW/a.days.length,bw=Math.min(band*.6,42);
-  const series=[["P","--sP"],["C","--sC"],["W","--sW"],["Hc","--sH"],["U","--sU"]];
+  const series=[["P","--sP"],["C","--sC"],["W","--sW"],["Hc","--sH"],["D","--sD"],["U","--sU"]];
   a.days.forEach((d,i)=>{
     let y=pad.t+plotH;const x=pad.l+band*i+(band-bw)/2;
     const segs=series.map(([k])=>a[k][i]);
@@ -800,6 +801,7 @@ function chartStack(a){
       +"<div class='row'><span><i style='background:var(--sC)'></i>Cold</span><b>"+a.C[i]+"</b></div>"
       +"<div class='row'><span><i style='background:var(--sW)'></i>Warm</span><b>"+a.W[i]+"</b></div>"
       +"<div class='row'><span><i style='background:var(--sH)'></i>Hot</span><b>"+a.Hc[i]+"</b></div>"
+      +"<div class='row'><span><i style='background:var(--sD)'></i>Ebook DS</span><b>"+a.D[i]+"</b></div>"
       +"<div class='row'><span><i style='background:var(--sU)'></i>Chưa gắn tag</span><b>"+a.U[i]+"</b></div>"
       +"<div class='row' style='border-top:1px solid rgba(255,255,255,.25);margin-top:5px;padding-top:5px'><span>Tổng lead mới</span><b>"+a.moi[i]+"</b></div>",e.clientX,e.clientY));
     hit.addEventListener("mouseleave",hideTip);
@@ -821,7 +823,7 @@ function chartMixDay(a){
   const svg=$("cMix"); if(!svg)return;
   const {W,H}=dims(svg,300,160),pad={t:16,b:22,l:32,r:6};
   const SEG=[["P","--sP","Prospect"],["C","--sC","Cold"],["W","--sW","Warm"],
-             ["Hc","--sH","Đã gắn Hot"],["U","--sU","Chưa gắn tag"]];
+             ["Hc","--sH","Đã gắn Hot"],["D","--sD","Ebook DS"],["U","--sU","Chưa gắn tag"]];
   const {g,plotH,plotW}=frame(svg,W,H,pad,100,4,v=>Math.round(v)+"%");
   const band=plotW/Math.max(1,a.days.length),bw=Math.min(band*.8,26);
   a.days.forEach((d,i)=>{
@@ -915,8 +917,8 @@ function chartHot(days,lab){
    Lên Hot cùng ngày vào thì không phải "cập nhật" — đã nằm trong số của chính
    ngày đó. Chỉ lấy lead có NGÀY VÀO trong khoảng của các biểu đồ (từ ngày mở
    khoá), xếp theo ngày vào mới nhất trên cùng. */
-const CLS_NM={P:"Prospect",C:"Cold",W:"Warm",H:"Hot","":"chưa tag"};
-const CLS_VAR={P:"--sP",C:"--sC",W:"--sW",H:"--sH","":"--sU"};
+const CLS_NM={P:"Prospect",C:"Cold",W:"Warm",H:"Hot",D:"Ebook DS","":"chưa tag"};
+const CLS_VAR={P:"--sP",C:"--sC",W:"--sW",H:"--sH",D:"--sD","":"--sU"};
 const escH=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
 function feedEvents(from,to){
   // Nhóm theo NGÀY VÀO (ngày lead được đếm vào "Lead mới") — user 2026-09-22:
@@ -1024,7 +1026,7 @@ function chartChan(a){
   if(!items.length){const t=svgEl("text",{x:16,y:26,class:"axis"});t.textContent="Không có dữ liệu";svg.appendChild(t)}
 }
 /* ---- kpi & table ---- */
-const CLSN={P:["Prospect","--sP"],C:["Cold","--sC"],W:["Warm","--sW"],H:["Hot","--sH"]};
+const CLSN={P:["Prospect","--sP"],C:["Cold","--sC"],W:["Warm","--sW"],H:["Hot","--sH"],D:["Ebook DS","--sD"]};
 function kpis(a){
   const sum=k=>a[k].reduce((p,c)=>p+c,0);
   // cột thứ 4 = tab tương ứng bên Danh sách lead → bấm "Xem chi tiết" là nhảy
@@ -1059,7 +1061,7 @@ function kpis(a){
       +(k==="moi"&&(C.m.U||C.t.U)?"<div class='delta'>gồm "+C.m.U+" / "+C.t.U+" chưa phân loại</div>":"")
       +"<button class='vd' data-tab='"+tab+"'>Xem chi tiết →</button></div>";
   }
-  h+="<div class='kpi alert' data-k='Chưa gắn tag'><span class='lbl' title='Lead mới của kỳ mà giờ vẫn chưa được gắn tag Prospect / Cold / Warm / Hot trên SMAX (và chưa có lead Salesforce)'>Chưa gắn tag</span><div class='v'>"+C.chuaTag+"</div><span class='tag' style='background:var(--sU)'></span>"
+  h+="<div class='kpi alert' data-k='Chưa gắn tag'><span class='lbl' title='Lead mới của kỳ mà giờ vẫn chưa được gắn tag Prospect / Cold / Warm / Hot / Ebook DS (MDA_DATASTORY) trên SMAX (và chưa có lead Salesforce)'>Chưa gắn tag</span><div class='v'>"+C.chuaTag+"</div><span class='tag' style='background:var(--sU)'></span>"
     +"<div class='delta'>trong "+C.moi+" lead mới · lên SMAX gắn tag</div><button class='vd' data-tab='untag'>Xem chi tiết →</button></div>";
   $("kpis").innerHTML=h;
 }
@@ -1172,9 +1174,9 @@ function expXlsx(){
 }
 const SFB="<span class='badge' style='background:#E3F2FD;color:#0d47a1'>Salesforce</span>";
 function tableCard(a){
-  const T={all:"Tất cả lead",moi:"Lead mới",hot:"🔥 Hot",sf:"Hot lead SF (lead tạo trên Salesforce)",P:"Prospect",C:"Cold",W:"Warm",U:"Chưa phân loại",untag:"Chưa gắn tag"};
+  const T={all:"Tất cả lead",moi:"Lead mới",hot:"🔥 Hot",sf:"Hot lead SF (lead tạo trên Salesforce)",P:"Prospect",C:"Cold",W:"Warm",D:"Ebook DS",U:"Chưa phân loại",untag:"Chưa gắn tag"};
   $("tblTitle").textContent=T[S.tbl]+" trong kỳ";
-  const exCls=l=>l.cls.includes("P")?"P":(l.cls.includes("W")?"W":(l.cls.includes("C")?"C":null));
+  const exCls=l=>l.cls.includes("P")?"P":(l.cls.includes("W")?"W":(l.cls.includes("C")?"C":(l.cls.includes("D")?"D":null)));
   // Mỗi tab = đúng tập người của ô KPI tương ứng (cột TỔNG), lấy thẳng từ
   // moiTong() nên số dòng luôn bằng số trên ô. "Tất cả" = tổng Lead; "Lead
   // mới" = cột mới; "Chưa phản hồi" trong số lead mới. Dòng không phải "mới"

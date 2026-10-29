@@ -245,7 +245,7 @@ function toLead(f: Record<string, Cell>, cutoff: string) {
     // giữ ở `hs` để HIỂN THỊ trong bảng chi tiết và để đo độ trễ nhập liệu
     // ("SMAX đã gắn Hot mà SF chưa có dòng"), tuyệt đối không vào phép đếm.
     n: gs(f["Lead Name"]) || "(?)", d: bc, ha: null as string | null, dMs: bcMs, haMs: null as number | null, hs: ha, cd, up, upFrom: up ? priorCls : "",
-    cls: tags.map(t => ({ hotlead: "H", coldlead: "C", warmlead: "W", prospect: "P" } as Record<string, string>)[norm(t)]).filter(Boolean),
+    cls: tags.map(t => ({ hotlead: "H", coldlead: "C", warmlead: "W", prospect: "P", mdadatastory: "D" } as Record<string, string>)[norm(t)]).filter(Boolean),
     bi: tags.some(t => /^kh?\d{2,3}$/i.test(t.trim())),
     fa: tags.some(t => /^f\d(\.\d)?$/i.test(t.trim())),
     // Tag KHOÁ để lọc trên dashboard (K61, KH61, F3…). Viết hoa cho đồng nhất
