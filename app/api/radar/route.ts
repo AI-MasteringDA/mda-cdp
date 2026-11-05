@@ -363,7 +363,7 @@ export async function GET(req: Request) {
     while (tt) {
       const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${tt}/records`);
       url.searchParams.set("page_size", "500");
-      url.searchParams.set("field_names", JSON.stringify(["Lead Name", "Email", "Phone", "Ngày chat đầu", "Chat đầu lúc", "Khách đã nhắn"]));
+      url.searchParams.set("field_names", JSON.stringify(["Lead Name", "Email", "Phone", "Ngày chat đầu", "Chat đầu lúc", "Khách đã nhắn", "Gắn nhãn", "Info khác"]));
       if (ptT) url.searchParams.set("page_token", ptT);
       const d = await fetch(url.toString(), { headers: H, cache: "no-store" }).then(r => r.json());
       if (d.code !== 0) throw new Error(`tiktok ${d.code} ${d.msg}`);
@@ -372,12 +372,20 @@ export async function GET(req: Request) {
         if (gs(f["Khách đã nhắn"]) !== "Có") continue;
         const day = vnDate(f["Ngày chat đầu"]);
         if (!day || day < cutoff) continue;
-        const phones = gs(f["Phone"]).split(",").map(s => s.trim()).filter(Boolean);
-        const emails = gs(f["Email"]).split(",").map(s => s.trim()).filter(Boolean);
+        // "Gắn nhãn" do team nhập tay trên Lark: Prospect/Cold/Warm/Hot → vào đúng
+        // nhóm như tag SMAX; Spam → không phải lead; nhãn khác (Chủ đề khác, B2B,
+        // Giới thiệu job…) hoặc để trống → nhóm "TikTok".
+        const nhan = gs(f["Gắn nhãn"]).trim();
+        if (norm(nhan) === "spam") continue;
+        const cls = ({ prospect: "P", cold: "C", warm: "W", hot: "H" } as Record<string, string>)[norm(nhan)] ?? "T";
+        // "Info khác": SĐT/gmail khách để lại ở kênh khác → thêm vào khoá gộp trùng với SMAX.
+        const info = gs(f["Info khác"]);
+        const phones = [...gs(f["Phone"]).split(","), ...(info.match(/(?:\+?84|0)[\s.\-]?\d(?:[\s.\-]?\d){8,9}/g) ?? [])].map(s => s.trim()).filter(Boolean);
+        const emails = [...gs(f["Email"]).split(","), ...(info.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) ?? [])].map(s => s.trim()).filter(Boolean);
         leads.push({
           n: gs(f["Lead Name"]) || "(?)", d: day, ha: null,
           dMs: typeof f["Chat đầu lúc"] === "number" ? f["Chat đầu lúc"] as number : null, haMs: null,
-          cd: {}, up: false, upFrom: "", cls: ["T"], bi: false, fa: false, co: [], ch: ["TikTok"],
+          cd: {}, up: false, upFrom: "", cls: [cls], bi: false, fa: false, co: [], ch: ["TikTok"],
           ph: phones[0] ?? "", cph: false, re: "",
           ky: [...new Set([...phones.flatMap(p => keysOf(p, "")), ...emails.flatMap(e => keysOf("", e))])],
         });
