@@ -251,6 +251,10 @@ function toLead(f: Record<string, Cell>, cutoff: string) {
     // Tag KHOÁ để lọc trên dashboard (K61, KH61, F3…). Viết hoa cho đồng nhất
     // vì Sales gõ lẫn lộn "k61"/"K61". 1 lead có thể mang nhiều khoá.
     co: [...new Set(tags.filter(t => /^(kh?\d{2,3}|f\d(\.\d)?)$/i.test(t.trim())).map(t => coCode(t)))],
+    // TAG KHOÁ NGUYÊN BẢN (user 2026-11-05): K63 và KH63 là HAI THỨ KHÁC NHAU dù `co`
+    // (dùng để lọc/đếm khoá) vẫn gộp KH→K. `cr` giữ đúng chữ trên tag để trang
+    // phân loại K## / KH## ở bảng chi tiết và bộ lọc.
+    cr: [...new Set(tags.filter(t => /^(kh?\d{2,3}|f\d(\.\d)?)$/i.test(t.trim())).map(t => t.trim().toUpperCase()))],
     ch: g(f["Communication Channels"]), ph: gs(f["Phone"]),
     cph: f["Chưa phản hồi"] === true,
     ky: keysOf(gs(f["Phone"]), gs(f["Email"])), re: "",
