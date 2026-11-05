@@ -347,6 +347,47 @@ export async function GET(req: Request) {
     }
   }
 
+  // ── TIKTOK (user 2026-11-05: "đưa tiktok vào count lead") ───────────────────
+  // SMAX không đọc được TikTok nên tin nhắn TikTok do tiktok-tool (máy của user,
+  // task "MDA_TikTok_Lead_Sync", mỗi giờ 8h–22h) đọc từ TikTok Business Suite rồi
+  // ghi vào bảng Lark "TikTok_Database". Mỗi KHÁCH CÓ NHẮN = một lead, ngày chat
+  // đầu = ngày tin đầu tiên. Cuộc chat chỉ có tin của mình (bot gửi hàng loạt)
+  // KHÔNG phải lead. TikTok không có tag nên mang nhóm riêng "T" (không rơi vào
+  // "Chưa gắn tag", vì team không có chỗ nào để gắn). Trùng SMAX thì khớp bằng
+  // SĐT/email như mọi tài khoản SMAX khác → khối "GỘP KHI ĐẾM" bên dưới tự lo.
+  // Lỗi đọc TikTok KHÔNG được làm hỏng cả radar → chỉ ghi vào ttErr.
+  let ttN = 0, ttErr = "";
+  try {
+    const tt = tR.data?.items?.find((t: { name: string; table_id: string }) => t.name === "TikTok_Database")?.table_id;
+    let ptT: string | undefined;
+    while (tt) {
+      const url = new URL(`${U}/bitable/v1/apps/${APP}/tables/${tt}/records`);
+      url.searchParams.set("page_size", "500");
+      url.searchParams.set("field_names", JSON.stringify(["Lead Name", "Email", "Phone", "Ngày chat đầu", "Chat đầu lúc", "Khách đã nhắn"]));
+      if (ptT) url.searchParams.set("page_token", ptT);
+      const d = await fetch(url.toString(), { headers: H, cache: "no-store" }).then(r => r.json());
+      if (d.code !== 0) throw new Error(`tiktok ${d.code} ${d.msg}`);
+      for (const r of (d.data?.items ?? []) as LarkRecord[]) {
+        const f = r.fields ?? {};
+        if (gs(f["Khách đã nhắn"]) !== "Có") continue;
+        const day = vnDate(f["Ngày chat đầu"]);
+        if (!day || day < cutoff) continue;
+        const phones = gs(f["Phone"]).split(",").map(s => s.trim()).filter(Boolean);
+        const emails = gs(f["Email"]).split(",").map(s => s.trim()).filter(Boolean);
+        leads.push({
+          n: gs(f["Lead Name"]) || "(?)", d: day, ha: null,
+          dMs: typeof f["Chat đầu lúc"] === "number" ? f["Chat đầu lúc"] as number : null, haMs: null,
+          cd: {}, up: false, upFrom: "", cls: ["T"], bi: false, fa: false, co: [], ch: ["TikTok"],
+          ph: phones[0] ?? "", cph: false, re: "",
+          ky: [...new Set([...phones.flatMap(p => keysOf(p, "")), ...emails.flatMap(e => keysOf("", e))])],
+        });
+        ttN++;
+      }
+      if (!d.data?.has_more) break;
+      ptT = d.data.page_token;
+    }
+  } catch (e) { ttErr = String(e).slice(0, 160); }
+
   // ── HOT từ SALESFORCE (quy tắc Sales 2026-08-10) ────────────────────────────
   // Hot ngày X = Hot của SMAX + lead SF chỉ-có-trên-SF. Dòng SF có "Tag SMAX"
   // CÓ dữ liệu ⇒ SMAX đã đếm rồi ⇒ bỏ qua (chống đếm đôi). Quy ngày theo Time
@@ -529,7 +570,7 @@ export async function GET(req: Request) {
 
   const asOf = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 16).replace("T", " ");
   const sfRunning = "running" in sf ? sf.running : {};
-  return NextResponse.json({ asOf, days, leads: out, reCount, sfHot, sfDays: Math.min(days, SF_MAX_DAYS), sfErr, sfRunning }, { headers: {
+  return NextResponse.json({ asOf, days, leads: out, reCount, sfHot, sfDays: Math.min(days, SF_MAX_DAYS), sfErr, sfRunning, ttN, ttErr }, { headers: {
     // CHO EDGE CỦA VERCEL CACHE LẠI.
     // Kỳ "Tất cả" mất ~27s vì bảng SMAX đã hơn 19.000 dòng và Lark chỉ trả
     // 500 dòng/lượt (38 lượt nối tiếp, không song song được vì phải có
