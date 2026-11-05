@@ -50,7 +50,8 @@ function section(name: string, icon: string, k: Kpi, c: Course): El[] {
   return out;
 }
 
-export function buildCard(bi: Kpi, fa: Kpi, cBI: Course, cFA: Course) {
+// Từ 2026-11-05 CHỈ còn khối AAA (BI): FA hết mở tuyển sinh nên không báo vào group nữa (user chốt).
+export function buildCard(bi: Kpi, cBI: Course) {
   // Tiêu đề ghi NGÀY CỦA SỐ LIỆU (hôm qua), không phải ngày bấm gửi — báo cáo
   // chạy 10h sáng nhưng nói về nguyên ngày hôm trước (user chốt 2026-09-07).
   const vnNow = new Date(Date.now() + 7 * 3600_000);
@@ -62,8 +63,6 @@ export function buildCard(bi: Kpi, fa: Kpi, cBI: Course, cFA: Course) {
     { tag: "note", elements: [{ tag: "lark_md", content: `Cả ngày, từ 00:00 đến 23:59 · gửi lúc ${gui}` }] },
     { tag: "hr" },
     ...section("AAA", "🎓", bi, cBI),   // trung tâm đổi tên BI → AAA (2026-09-08)
-    { tag: "hr" },
-    ...section("FA", "📈", fa, cFA),
     { tag: "hr" },
     { tag: "note", elements: [{ tag: "lark_md", content: "Nguồn: SMAX + Salesforce · Automation Bot — Mastering Data Analytics" }] },
   ];

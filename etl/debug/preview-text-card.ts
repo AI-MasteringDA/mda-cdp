@@ -52,9 +52,9 @@ const WIN = process.argv[2] || "1";   // "1" = Hôm qua, đúng kỳ bot đang b
              H: g("🔥 Hot"), W: g("Warm"), C: g("Cold"), P: g("Prospect"), Un: g("Khác / chưa tag") };
   };
 
-  const bi = await readKpi("bi"), fa = await readKpi("fa");
-  const cBI = await cohort("bi"), cFA = await cohort("fa");
+  const bi = await readKpi("bi");
+  const cBI = await cohort("bi");
   await b.close();
 
-  console.log("\n" + renderPreview(buildCard(bi, fa, cBI, cFA)) + "\n");
+  console.log("\n" + renderPreview(buildCard(bi, cBI)) + "\n");
 })();

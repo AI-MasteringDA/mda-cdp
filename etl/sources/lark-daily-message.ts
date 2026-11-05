@@ -89,7 +89,7 @@ async function main() {
         { tag: "hr" },
         {
           tag: "div",
-          text: { tag: "lark_md", content: `BI: Hot ${g("Hot (BI)")} · Cold ${g("Cold (BI)")} · Warm ${g("Warm (BI)")} · Prospect ${g("Prospect (BI)")}\nFA: Hot ${g("Hot (FA)")} · Cold ${g("Cold (FA)")} · Warm ${g("Warm (FA)")} · Prospect ${g("Prospect (FA)")}` },
+          text: { tag: "lark_md", content: `BI: Hot ${g("Hot (BI)")} · Cold ${g("Cold (BI)")} · Warm ${g("Warm (BI)")} · Prospect ${g("Prospect (BI)")}` },
         },
         {
           tag: "action",

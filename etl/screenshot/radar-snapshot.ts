@@ -41,12 +41,11 @@ const U = "https://open.larksuite.com/open-apis";
 //
 // data-v="1" là nút "Hôm qua" trong #segDays. data-v của #segGrp: all/bi/fa.
 const REPORTS = [
+  // FA hết mở tuyển sinh → KHÔNG báo vào group nữa (user chốt 2026-11-05, chỉ bắn AAA/BI).
   { win: "1", grp: "bi", label: "AAA", color: "blue" },
-  { win: "1", grp: "fa", label: "FA", color: "turquoise" },
   // SO SÁNH KHOÁ (sếp yêu cầu 2026-09-03): khoá đang chạy so với các khoá trước
   // ở CÙNG số ngày kể từ lúc mở tuyển sinh.
   { win: "cohort:BI", grp: "all", label: "Khoá AAA — so với các khoá trước", color: "carmine" },
-  { win: "cohort:FA", grp: "all", label: "Khoá FA — so với các khoá trước", color: "orange" },
 ];
 
 /**
@@ -198,8 +197,8 @@ async function runningCourse(page: import("playwright").Page, grp: string) {
 // không ai phát hiện tới lúc lịch chạy.
 const DRY = process.env.RADAR_DRY_RUN === "1";
 
-async function sendText(bi: Kpi, fa: Kpi, cBI: Course, cFA: Course) {
-  const card = buildCard(bi, fa, cBI, cFA);
+async function sendText(bi: Kpi, cBI: Course) {
+  const card = buildCard(bi, cBI);
   if (DRY) { console.log("[snapshot] [CHẠY THỬ] bỏ qua gửi thẻ chữ"); return; }
   const r = await fetch(WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(card) }).then(r => r.json());
   if (r.code !== 0 && r.StatusCode !== 0) throw new Error(`gửi thẻ chữ lỗi: ${JSON.stringify(r)}`);
@@ -252,12 +251,8 @@ async function main() {
     // chặn phần ảnh — thà thiếu thẻ chữ còn hơn mất cả loạt báo cáo.
     try {
       const bi = await readKpis(page, "1", "bi");
-      const fa = await readKpis(page, "1", "fa");
-      // Tuần tự, KHÔNG Promise.all: cả hai cùng lái một trang trình duyệt,
-      // chạy song song sẽ giẫm chân nhau (đọc nhầm số của hệ kia).
       const cBI = await runningCourse(page, "bi");
-      const cFA = await runningCourse(page, "fa");
-      await sendText(bi, fa, cBI, cFA);
+      await sendText(bi, cBI);
       if (!DRY) console.log("[snapshot] [thẻ chữ] đã gửi vào group ✅");
     } catch (e) {
       console.error(`[snapshot] ⚠ thẻ chữ lỗi (vẫn tiếp tục gửi ảnh): ${(e as Error).message}`);
