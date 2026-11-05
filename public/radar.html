@@ -1044,6 +1044,19 @@ function chartChan(a){
 }
 /* ---- kpi & table ---- */
 const CLSN={P:["Prospect","--sP"],C:["Cold","--sC"],W:["Warm","--sW"],H:["Hot","--sH"],D:["Ebook DS","--sD"],T:["TikTok","--sT"]};
+// TỔNG KẾT K63 (user 2026-11-05): K63 và KH63 là hai loại khác nhau → ô "Lead mới" ghi rõ bao nhiêu
+// người mang tag K63, bao nhiêu mang KH63. CHỈ hiện khi bộ lọc khoá đang chứa một khoá K## (VD K63);
+// xem FA hoặc mọi khoá thì ẩn. Đếm đúng theo SỐ khoá đang chọn (chọn K63 → chỉ tag K63 / KH63).
+function kkSummary(ls){
+  const nums=[...new Set([...S.co].map(c=>/^KH?(\d+)$/i.exec(c)).filter(Boolean).map(m=>m[1]))];
+  if(!nums.length)return "";
+  const has=(cs,re)=>cs.some(c=>{const m=re.exec(c);return m&&nums.includes(m[1])});
+  // Chốt lại 2026-11-05: chỉ tổng kết K63, KH63 không cần đếm ở đây (KH vẫn phân biệt được ở bộ lọc + cột Tag khoá).
+  let k=0;
+  for(const l of ls)if(has(crOf(l).map(c=>String(c).toUpperCase()),/^K(\d+)$/))k++;
+  const t=nums.map(n=>"K"+n).join("+");
+  return "<div class='delta' title='Số lead MỚI của kỳ mang tag "+t+" (đúng chữ K, không tính KH)'>"+t+": <b>"+k+"</b></div>";
+}
 function kpis(a){
   const sum=k=>a[k].reduce((p,c)=>p+c,0);
   // cột thứ 4 = tab tương ứng bên Danh sách lead → bấm "Xem chi tiết" là nhảy
@@ -1076,6 +1089,7 @@ function kpis(a){
       +"<div class='delta'><span class='"+cls+"'>"+arrow+" "+Math.abs(diff)+"</span> so kỳ trước ("+base+(laSF?"":" / "+tongTruoc)+")</div>"+srcSub
       // Phần còn lại của phép chia — không có thì các ô cộng không ra số Lead.
       +(k==="moi"&&(C.m.U||C.t.U)?"<div class='delta'>gồm "+C.m.U+" / "+C.t.U+" chưa phân loại</div>":"")
+      +(k==="moi"?kkSummary(kt.list.filter(e=>e.moi).map(e=>e.l)):"")
       +"<button class='vd' data-tab='"+tab+"'>Xem chi tiết →</button></div>";
   }
   h+="<div class='kpi alert' data-k='Chưa gắn tag'><span class='lbl' title='Lead mới của kỳ mà giờ vẫn chưa được gắn tag Prospect / Cold / Warm / Hot / Ebook DS (MDA_DATASTORY) trên SMAX (và chưa có lead Salesforce)'>Chưa gắn tag</span><div class='v'>"+C.chuaTag+"</div><span class='tag' style='background:var(--sU)'></span>"
